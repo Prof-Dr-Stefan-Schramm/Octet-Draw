@@ -1,0 +1,8 @@
+# Octet's checks read Octet's own source and match it against patterns written with "\n":
+# 59 of the 99 check files do. A clone on Windows with git's default core.autocrlf=true
+# gets CRLF in the working tree, and five of them fail before a line has been changed
+# (cursor, filesafety, pagefit, projects and purpose).
+#
+# Normalising to LF in the working tree on every platform keeps the checks meaningful and
+# costs Windows nothing: Node, PowerShell and every editor in use read LF.
+* text=auto eol=lf
