@@ -1,7 +1,8 @@
 // Run: node src/bondchain.check.ts. Fails loudly if the bond and chain tools stop acting as ChemDraw's do.
 import assert from "node:assert/strict";
-import { EMPTY, addChain, chainPoints, chainTo, clickBond, dragBond, jumpHot, merge, nextSide, pos, snake, sprout, type BondSpec, type P } from "./edit.ts";
+import { EMPTY, addChain, chainPoints, chainTo, clickBond, dragBond, jumpHot, keyBond, merge, nextSide, pos, setBondSpec, snake, sprout, type BondSpec, type P } from "./edit.ts";
 import { QUADRUPLE, type Mol } from "./render.ts";
+import { BONDS } from "./kinds.ts";
 
 const SOLID: BondSpec = { type: 1 }, BOLD: BondSpec = { type: 1, display: "bold" }, DASHED: BondSpec = { type: 1, display: "dashed" };
 const WAVY: BondSpec = { type: 1, display: "wavy" }, WEDGE: BondSpec = { type: 1, stereo: 1 }, DOUBLE: BondSpec = { type: 2 };
@@ -61,6 +62,52 @@ assert.deepEqual(clickBond(m, 0, WEDGE, near(m, 0, 0.5)).bonds[0].atoms, [0, 1])
 const propane = sprout(ethane, 1);
 assert.deepEqual(clickBond(propane, 0, WEDGE, near(propane, 0, 0.9)).bonds[0].atoms, [1, 0], "narrow end on the atom with more bonds");
 console.log("bondchain.check: wedge ok");
+
+// Issue #10: the w and h keys over a bond act as a click with the Wedge or Hashed Wedge tool. On a bond already that
+// wedge they turn it round; on another bond the wedge points as a click would. Other bond keys only set the style.
+const HASHWEDGE: BondSpec = { type: 1, stereo: 6 };
+assert.equal(kind(keyBond(ethane, 0, WEDGE)), "1s1");
+assert.deepEqual(keyBond(ethane, 0, WEDGE, near(ethane, 0, 0.62)).bonds[0].atoms, [0, 1], "wide end nearer the pointer");
+m = keyBond(ethane, 0, WEDGE, near(ethane, 0, 0.38));
+assert.deepEqual(m.bonds[0].atoms, [1, 0]);
+assert.deepEqual(keyBond(m, 0, WEDGE).bonds[0].atoms, [0, 1], "w over a wedge turns it round");
+assert.deepEqual(keyBond(keyBond(m, 0, WEDGE), 0, WEDGE).bonds[0].atoms, [1, 0]);
+m = keyBond(ethane, 0, HASHWEDGE, near(ethane, 0, 0.38));
+assert.equal(kind(m), "1s6");
+assert.deepEqual(keyBond(m, 0, HASHWEDGE).bonds[0].atoms, [0, 1], "h over a hashed wedge turns it round");
+m = keyBond(ethane, 0, WEDGE, near(ethane, 0, 0.38));
+const hashed = keyBond(m, 0, HASHWEDGE, near(ethane, 0, 0.62));
+assert.equal(kind(hashed), "1s6");
+assert.deepEqual(hashed.bonds[0].atoms, [0, 1], "a new style is pointed, not turned round");
+assert.deepEqual(keyBond(propane, 0, WEDGE).bonds[0].atoms, [1, 0], "narrow end on the atom with more bonds");
+// With no pointer (the keyboard hotspot, a selection) a tie keeps the drawn order, wherever the bond lies.
+const offGrid: Mol = { ...ethane, atoms: [{ ...ethane.atoms[0], location: [0.1, 0.2, 0] }, { ...ethane.atoms[1], location: [0.7, 0.3, 0] }] };
+assert.deepEqual(keyBond(offGrid, 0, WEDGE).bonds[0].atoms, [0, 1], "no pointer keeps the order");
+assert.deepEqual(keyBond(offGrid, 0, HASHWEDGE).bonds[0].atoms, [0, 1]);
+const bold = setBondSpec(ethane, 0, BOLD);
+assert.deepEqual(keyBond(bold, 0, BOLD), setBondSpec(bold, 0, BOLD), "b over a bold bond keeps it bold");
+assert.deepEqual(keyBond(ethane, 0, SOLID), setBondSpec(ethane, 0, SOLID));
+// A wedge click or key keeps the bond's colour.
+const coloured: Mol = { ...ethane, bonds: [{ ...ethane.bonds[0], colour: "#c00000" }] };
+assert.equal(clickBond(coloured, 0, WEDGE, mid(coloured)).bonds[0].colour, "#c00000");
+assert.equal(keyBond(coloured, 0, WEDGE).bonds[0].colour, "#c00000");
+// Every bond kind with a narrow end: a key and a click with its tool do the same to a single bond, a bond of another
+// kind and a bond already of that kind (turned round), wherever the pointer is.
+for (const k of ["wedge", "hashwedge", "hollow", "dative"] as const) {
+  const spec = BONDS[k].spec;
+  for (const start of [ethane, propane, setBondSpec(ethane, 0, BOLD), setBondSpec(ethane, 0, HASHWEDGE), setBondSpec(ethane, 0, { type: 3 })])
+    for (const t of [0.2, 0.5, 0.8]) {
+      let byKey = start, byClick = start;
+      for (let n = 0; n < 3; n++) {
+        byKey = keyBond(byKey, 0, spec, near(start, 0, t)); byClick = clickBond(byClick, 0, spec, near(start, 0, t));
+        assert.deepEqual(byKey, byClick, `${k} key and click, press ${n + 1}`);
+      }
+    }
+  const once = keyBond(ethane, 0, spec, near(ethane, 0, 0.38));
+  assert.deepEqual(once.bonds[0].atoms, [1, 0], `${k} key near atom 0`);
+  assert.deepEqual(keyBond(once, 0, spec).bonds[0].atoms, [...once.bonds[0].atoms].reverse(), `${k} key over its own kind turns it round`);
+}
+console.log("bondchain.check: wedge keys ok");
 
 // CORE-15: a bond from an atom whose label runs to the right (CO2Me) is not hidden under that label.
 for (const text of [1, -1]) {

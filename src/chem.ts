@@ -3,7 +3,7 @@ import Indigo from "indigo-ketcher/binaryWasmNoRender";
 import { HBOND, hydrogens, NONMETAL, orderOf, QUADRUPLE, type Face, type Ink, type Mol } from "./render.ts";
 import { fontStack } from "./docstyle.ts";
 import { labelSmiles, writtenOxidation } from "./labels.ts";
-import { fragments, insertMol, labelPlacer, levelTurn, pickAtoms, renumberCentre, subset } from "./edit.ts";
+import { bondedTo, fragments, insertMol, labelPlacer, levelTurn, pickAtoms, renumberCentre, subset } from "./edit.ts";
 import { graphOf, type Graph } from "./naming.ts";
 import { clean2d } from "./clean2d.ts";
 import { counts } from "./mass.ts";
@@ -32,32 +32,42 @@ export const STYLE = {
   size: pt("--atom-label-size"),
 };
 
+// Text measured once and kept by its key. When a store holds `most`, the one used longest ago goes, so a long session
+// with many different labels and captions does not fill the memory (issue 2).
+function lastUsed<T>(store: Map<string, T>, most: number, key: string, make: () => T): T {
+  const hit = store.get(key);
+  if (hit !== undefined) { store.delete(key); store.set(key, hit); return hit; }
+  const value = make();
+  store.set(key, value);
+  if (store.size > most) store.delete(store.keys().next().value!);
+  return value;
+}
+
 // Glyph metrics and outlines. The outline is the edge pixels of the text drawn 8x larger, scaled back.
 const FONT = token("--atom-label-font");
 const SCALE = 8;
 const inks = new Map<string, Ink>();
 // Label metrics for a font and size (px), plain or bold or italic. Each text is measured once per font, size and face.
 export const measurer = (font: string, size: number, bold = false, italic = false) => (text: string): Ink => {
-  const key = `${font}|${size}|${bold}|${italic}|${text}`, cached = inks.get(key), face = `${italic ? "italic " : ""}${bold ? "bold " : ""}`;
-  if (cached) return cached;
-  const canvas = document.createElement("canvas");
-  const g = canvas.getContext("2d", { willReadFrequently: true })!;
-  g.font = `${face}${size}px ${font}`;
-  const m = g.measureText(text);
-  const pad = 2, baseline = size * 1.2;
-  const w = (canvas.width = Math.ceil((m.width + 2 * pad) * SCALE)), h = (canvas.height = Math.ceil(size * 1.6 * SCALE));
-  g.font = `${face}${size * SCALE}px ${font}`;
-  g.fillText(text, pad * SCALE, baseline * SCALE);
-  const alpha = g.getImageData(0, 0, w, h).data;
-  const on = (x: number, y: number) => x >= 0 && y >= 0 && x < w && y < h && alpha[(y * w + x) * 4 + 3] > 127;
-  const outline: [number, number][] = [];
-  for (let y = 0; y < h; y++)
-    for (let x = 0; x < w; x++)
-      if (on(x, y) && !(on(x - 1, y) && on(x + 1, y) && on(x, y - 1) && on(x, y + 1)))
-        outline.push([(x + 0.5) / SCALE - pad, (y + 0.5) / SCALE - baseline]);
-  const ink = { width: m.width, ascent: m.actualBoundingBoxAscent, outline };
-  inks.set(key, ink);
-  return ink;
+  const face = `${italic ? "italic " : ""}${bold ? "bold " : ""}`;
+  return lastUsed(inks, 2000, `${font}|${size}|${bold}|${italic}|${text}`, () => {
+    const canvas = document.createElement("canvas");
+    const g = canvas.getContext("2d", { willReadFrequently: true })!;
+    g.font = `${face}${size}px ${font}`;
+    const m = g.measureText(text);
+    const pad = 2, baseline = size * 1.2;
+    const w = (canvas.width = Math.ceil((m.width + 2 * pad) * SCALE)), h = (canvas.height = Math.ceil(size * 1.6 * SCALE));
+    g.font = `${face}${size * SCALE}px ${font}`;
+    g.fillText(text, pad * SCALE, baseline * SCALE);
+    const alpha = g.getImageData(0, 0, w, h).data;
+    const on = (x: number, y: number) => x >= 0 && y >= 0 && x < w && y < h && alpha[(y * w + x) * 4 + 3] > 127;
+    const outline: [number, number][] = [];
+    for (let y = 0; y < h; y++)
+      for (let x = 0; x < w; x++)
+        if (on(x, y) && !(on(x - 1, y) && on(x + 1, y) && on(x, y - 1) && on(x, y + 1)))
+          outline.push([(x + 0.5) / SCALE - pad, (y + 0.5) / SCALE - baseline]);
+    return { width: m.width, ascent: m.actualBoundingBoxAscent, outline };
+  });
 };
 const plain = measurer(FONT, STYLE.size);
 // A label's metrics in its own face (an atom's label can have its own font, bold and italic).
@@ -71,18 +81,14 @@ const widths = new Map<string, number>();
 const meter = document.createElement("canvas").getContext("2d")!;
 export function textWidth(text: string, size: number, bold?: boolean, italic?: boolean, family = CAPTION_FONT): number {
   const face = `${italic ? "italic " : ""}${bold ? "bold " : ""}`, key = `${face}${family}|${text}`;
-  let w = widths.get(key);
-  if (w === undefined) { meter.font = `${face}100px ${family}`; w = meter.measureText(text).width / 100; widths.set(key, w); }
-  return w * size;
+  return lastUsed(widths, 10_000, key, () => { meter.font = `${face}100px ${family}`; return meter.measureText(text).width / 100; }) * size;
 }
 // How far a piece of caption text reaches above and below its baseline in px: its tallest character and its lowest
 // descender, as drawn (Variable line spacing).
 const extents = new Map<string, [number, number]>();
 export function textExtent(text: string, size: number, bold?: boolean, italic?: boolean, family = CAPTION_FONT): [number, number] {
   const font = `${italic ? "italic " : ""}${bold ? "bold " : ""}${size}px ${family}`, key = `${font}|${text}`;
-  let e = extents.get(key);
-  if (e === undefined) { meter.font = font; const m = meter.measureText(text); e = [m.actualBoundingBoxAscent, m.actualBoundingBoxDescent]; extents.set(key, e); }
-  return e;
+  return lastUsed(extents, 10_000, key, (): [number, number] => { meter.font = font; const m = meter.measureText(text); return [m.actualBoundingBoxAscent, m.actualBoundingBoxDescent]; });
 }
 export { CAPTION_FONT };
 
@@ -213,8 +219,9 @@ function readRdf(text: string): Mol {
 }
 
 // SMILES (or a MOL file) to a laid-out molecule with Kekulé bonds and stereo wedges. All fragments are kept.
-// Throws a RangeError, with the reason to show, for text over Octet's limits.
-export function parseStructure(text: string): Mol {
+// Throws a RangeError, with the reason to show, for text over Octet's limits. tidy false: Indigo's layout only, for
+// a structure that is read and not drawn (its InChI).
+export function parseStructure(text: string, tidy = true): Mol {
   // SMILES is one line, counted as written (Indigo reads a long SMILES slowly); a MOL file or other file, through Indigo.
   const file = /^[{<]|[\r\n]/.test(text.trim()), most = file ? MOST_CHARACTERS : MOST_SMILES;
   if (text.length > most) throw over(most, "characters");
@@ -222,17 +229,187 @@ export function parseStructure(text: string): Mol {
   if (/^\s*\$RDFILE/.test(text)) return readRdf(text);
   const atoms = smilesAtoms(file ? convert(text, "smiles") : text);
   if (atoms > MOST_ATOMS) throw over(MOST_ATOMS, "atoms");
+  // SMILES sets each stereocentre absolutely, and Indigo flags each one abs. Like a structure drawn by hand, it then
+  // shows no flags, as in ChemDraw. Flags stay where the SMILES also sets and or or groups (CXSMILES).
+  const lay = (smart: boolean) => {
+    const m = indigoLayout(text, atoms, smart);
+    return file || m.atoms.some((a) => /^(&|or)/.test(a.enhanced ?? "")) ? m : { ...m, atoms: m.atoms.map((a) => (a.enhanced ? (({ enhanced: _, ...rest }) => rest)(a) : a)) };
+  };
+  let out = lay(false);
+  if (tidy && !out.arrows && out.atoms.length <= MOST_TIDIED) out = tidied(out, () => lay(true), text);
+  return out.captions ? { ...out, captions: out.captions.map((c) => ({ ...c, y: c.y - 0.25 })) } : out;
+}
+// Indigo's own layout of a SMILES or file of so many atoms, its rounds of tidying capped for the size (MOST_ATOMS
+// above). smart: with Indigo's ring templates. A reaction (reactants>agents>products) keeps its arrow and plus signs.
+export function indigoLayout(text: string, atoms = smilesAtoms(text), smart = false): Mol {
   const ind = engine(), opts = new ind.MapStringString();
   try {
     opts.set("output-content-type", "application/json");
     opts.set("dearomatize-on-load", "true");
     opts.set("layout-max-iterations", String(Math.min(50, Math.max(10, Math.round(4000 / atoms)))));
-    // A reaction (reactants>agents>products) keeps its arrow and plus signs.
-    const out = fromKet(JSON.parse(JSON.parse(ind.layout(text, "ket", opts)).struct));
-    return out.captions ? { ...out, captions: out.captions.map((c) => ({ ...c, y: c.y - 0.25 })) } : out;
+    if (smart) opts.set("smart-layout", "true");
+    return fromKet(JSON.parse(JSON.parse(ind.layout(text, "ket", opts)).struct));
   } finally {
     opts.delete();
   }
+}
+
+// Indigo's layout of a cage or bridged ring system (taxol, morphine, adamantane) can put an atom on a bond or two atoms
+// on top of each other. Such a layout is laid out again with Indigo's ring templates, and each is cleaned up. The
+// drawings are tried from the fewest atoms on bonds or on each other, then the fewest crossing bonds: the wedges go
+// where ChemDraw puts them (placeWedges), and the first drawing that still reads as the same stereoisomer as the text
+// (same standard InChI) is kept. If none does, Indigo's own is.
+const MOST_TIDIED = 100;
+function tidied(first: Mol, smart: () => Mol, text: string): Mol {
+  const wedged = first.bonds.some((b) => b.stereo === 1 || b.stereo === 6), crowd = crowded(first, 0.15, 0.35);
+  if (!crowd && !wedged) return first;
+  // A metal complex drawn by Octet can read differently from its SMILES (Indigo reads Pd(PPh3)4's SMILES with
+  // charges on the metal), so a drawing that reads as Indigo's own drawing does is kept too.
+  const refs = new Set([toInchi(text), toInchi(first)]);
+  refs.delete(undefined);
+  if (!refs.size) return first;
+  const tries = [{ m: first, from: first, rank: [crowded(first, 0.3, 0.5), crossings(first)] }];
+  if (crowd) {
+    let other: Mol | undefined;
+    const clean = (m: Mol) => cleanUp(m, undefined, 500), at = bondedTo(first);
+    // Indigo's templates are for ring systems: only a structure with an atom in three rings tries them.
+    const fused = at.some((n, i) => n.filter((j) => inRing(at, i, j)).length >= 3);
+    for (const make of [() => [clean(first), first], ...(fused ? [() => [other = smart(), other], () => [clean(other!), other!]] : [])]) {
+      let m: Mol, from: Mol;
+      // Indigo's templates fail on some structures ("refinement: too small edge").
+      try { [m, from] = make(); } catch { continue; }
+      tries.push({ m, from, rank: [crowded(m, 0.3, 0.5), crossings(m)] });
+      if (!tries[tries.length - 1].rank.some(Boolean)) break;
+    }
+    tries.sort((p, q) => p.rank[0] - q.rank[0] || p.rank[1] - q.rank[1]);
+  }
+  for (const { m, from } of tries) {
+    const out = wedged ? placeWedges(m, wedgeHands(from)) : m;
+    if (refs.has(toInchi(out))) return out;
+  }
+  return first;
+}
+// How many atoms lie within near of a bond they are not part of, or within close of another atom, plus the atoms
+// between two single bonds in a straight line (the structure check's warnings: an atom drawn so it cannot be seen).
+function crowded(m: Mol, near: number, close: number): number {
+  const xy = m.atoms.map((a) => a.location), bonded = bondedTo(m);
+  let n = 0;
+  xy.forEach((p, i) => {
+    if (m.bonds.some((b) => {
+      if (b.atoms.includes(i)) return false;
+      const [s, t] = [xy[b.atoms[0]], xy[b.atoms[1]]], dx = t[0] - s[0], dy = t[1] - s[1];
+      const f = Math.max(0, Math.min(1, ((p[0] - s[0]) * dx + (p[1] - s[1]) * dy) / (dx * dx + dy * dy || 1)));
+      return Math.hypot(s[0] + f * dx - p[0], s[1] + f * dy - p[1]) < near;
+    })) n++;
+    for (let j = i + 1; j < xy.length; j++) if (Math.hypot(xy[j][0] - p[0], xy[j][1] - p[1]) < close) n++;
+    const [q, r] = bonded[i];
+    if (bonded[i].length === 2 && m.bonds.every((b) => !b.atoms.includes(i) || b.type === 1)) {
+      const u = [xy[q][0] - p[0], xy[q][1] - p[1]], v = [xy[r][0] - p[0], xy[r][1] - p[1]];
+      if ((u[0] * v[0] + u[1] * v[1]) / (Math.hypot(u[0], u[1]) * Math.hypot(v[0], v[1]) || 1) < Math.cos((175 * Math.PI) / 180)) n++;
+    }
+  });
+  return n;
+}
+// Pairs of bonds that cross (and share no atom).
+function crossings(m: Mol): number {
+  const xy = m.atoms.map((a) => a.location), side = (p: number[], q: number[], r: number[]) => (q[0] - p[0]) * (r[1] - p[1]) - (q[1] - p[1]) * (r[0] - p[0]);
+  let n = 0;
+  m.bonds.forEach((b, k) => {
+    const [p, q] = [xy[b.atoms[0]], xy[b.atoms[1]]];
+    for (const c of m.bonds.slice(k + 1)) {
+      if (c.atoms.some((i) => b.atoms.includes(i))) continue;
+      const [r, s] = [xy[c.atoms[0]], xy[c.atoms[1]]];
+      if (side(p, q, r) * side(p, q, s) < 0 && side(r, s, p) * side(r, s, q) < 0) n++;
+    }
+  });
+  return n;
+}
+
+// Is the bond from i to j in a ring (its ends joined without it)? at: each atom's neighbours.
+function inRing(at: number[][], i: number, j: number): boolean {
+  const next = at[i].filter((k) => k !== j), seen = new Set([i, ...next]);
+  while (next.length) {
+    const k = next.pop()!;
+    if (k === j) return true;
+    for (const l of at[k]) if (!seen.has(l)) { seen.add(l); next.push(l); }
+  }
+  return false;
+}
+// The handedness a drawing gives a tetrahedral centre: the signed volume its neighbours make, in atom order (with the
+// centre itself in place of an implicit H, which lies on the same side of the other three), each raised by z: a
+// bond length towards the viewer at a wedge's wide end, away at a hash's. Near 0 when the drawing does not set it.
+function handed(m: Mol, c: number, around: number[], z: (j: number) => number): number {
+  const [a, b, d, e] = (around.length === 3 ? [...around, c] : around).map((j) => [m.atoms[j].location[0], m.atoms[j].location[1], j === c ? 0 : z(j)]);
+  const [u, v, w] = [b, d, e].map((p) => [p[0] - a[0], p[1] - a[1], p[2] - a[2]]);
+  return u[0] * (v[1] * w[2] - v[2] * w[1]) - u[1] * (v[0] * w[2] - v[2] * w[0]) + u[2] * (v[0] * w[1] - v[1] * w[0]);
+}
+// A centre whose wedges placeWedges may move: single bonds to three or four atoms, and a wedge or hash that starts at it.
+const tetrahedral = (c: number, bonds: Mol["bonds"]) => bonds.length >= 3 && bonds.length <= 4 && bonds.every((b) => b.type === 1) && bonds.some((b) => b.atoms[0] === c && (b.stereo === 1 || b.stereo === 6));
+// Each such centre's handedness as its wedges and hashes draw it (1 or -1), by atom.
+function wedgeHands(m: Mol): Map<number, number> {
+  const out = new Map<number, number>(), at = bondedTo(m);
+  m.atoms.forEach((_, c) => {
+    const bonds = m.bonds.filter((b) => b.atoms.includes(c));
+    if (!tetrahedral(c, bonds)) return;
+    const z = (j: number) => { const b = bonds.find((x) => x.atoms[0] === c && x.atoms[1] === j); return b?.stereo === 1 ? 1 : b?.stereo === 6 ? -1 : 0; };
+    const h = handed(m, c, [...at[c]].sort((p, q) => p - q), z);
+    if (Math.abs(h) > 1e-6) out.set(c, Math.sign(h));
+  });
+  return out;
+}
+// Room for a new atom at q bonded to c: no atom within half a bond of it (a labelled atom, 0.7 of a bond), no bond
+// within 0.4 of a bond of it (its H label would sit on the bond), and its bond near no other atom and across no bond.
+function roomy(atoms: Mol["atoms"], bonds: Mol["bonds"], c: number, q: number[]): boolean {
+  const p = atoms[c].location, side = (a: number[], b: number[], r: number[]) => (b[0] - a[0]) * (r[1] - a[1]) - (b[1] - a[1]) * (r[0] - a[0]);
+  // The distance from r to the segment from a to b.
+  const gap = (r: number[], a = p, b = q) => { const dx = b[0] - a[0], dy = b[1] - a[1], f = Math.max(0, Math.min(1, ((r[0] - a[0]) * dx + (r[1] - a[1]) * dy) / (dx * dx + dy * dy || 1))); return Math.hypot(a[0] + f * dx - r[0], a[1] + f * dy - r[1]); };
+  return atoms.every((a, i) => i === c || (Math.hypot(a.location[0] - q[0], a.location[1] - q[1]) >= (a.label === "C" && !a.text ? 0.5 : 0.7) && gap(a.location) >= 0.3))
+    && bonds.every((b) => { const [r, s] = b.atoms.map((i) => atoms[i].location); return b.atoms.includes(c) || (gap(q, r, s) >= 0.4 && !(side(p, q, r) * side(p, q, s) < 0 && side(r, s, p) * side(r, s, q) < 0)); });
+}
+// One wedge or hash for each centre, where ChemDraw puts it: on a bond out of the rings to an atom that is not a
+// stereocentre, else on an H drawn on the centre (the centre's own), else on a ring bond to an atom that is not a
+// stereocentre. Only where there is no other choice does it join two stereocentres, which does not show which one it
+// sets. Its narrow end is always at the centre, and it draws the hand the centre had (hands, by atom).
+function placeWedges(m: Mol, hands: Map<number, number>): Mol {
+  if (!hands.size) return m;
+  const atoms = [...m.atoms], at = bondedTo(m), stereo = new Set([...hands.keys(), ...stereoFacts(m).centres]);
+  const own = (b: Mol["bonds"][number]) => hands.has(b.atoms[0]) && (b.stereo === 1 || b.stereo === 6);
+  const bonds = m.bonds.map((b) => (own(b) ? { ...b, stereo: undefined } : b));
+  const taken = new Set(bonds.filter((b) => b.stereo).flatMap((b) => [b.atoms.join(), [...b.atoms].reverse().join()]));
+  const ring = (i: number, j: number) => inRing(at, i, j);
+  const xy = (i: number) => atoms[i].location;
+  // The centres bonded only to other centres choose first, as they have the fewest choices.
+  const free = (c: number) => at[c].filter((j) => !stereo.has(j)).length;
+  for (const [c, hand] of [...hands].sort((p, q) => free(p[0]) - free(q[0]) || p[0] - q[0])) {
+    const around = [...at[c]].sort((p, q) => p - q), kept = m.bonds.filter((b) => b.atoms[0] === c && own(b));
+    // Indigo's own wedge stays where it is one ChemDraw would draw.
+    if (kept.length === 1 && !stereo.has(kept[0].atoms[1]) && !ring(c, kept[0].atoms[1])) { bonds[m.bonds.indexOf(kept[0])] = kept[0]; continue; }
+    const options = around.filter((j) => !taken.has(`${c},${j}`)).map((j) => ({ j, rank: stereo.has(j) ? 3 : ring(c, j) ? 2 : 0, ends: at[j].length }));
+    // The H goes out into the widest gap between the centre's bonds that has room for it (no atom near it, and its bond
+    // near no atom and across no bond), shorter where it needs to be. With no room, there is no H.
+    let h: [number, number, number] | undefined;
+    if (around.length === 3) {
+      const turns = around.map((j) => Math.atan2(xy(j)[1] - xy(c)[1], xy(j)[0] - xy(c)[0])).sort((p, q) => p - q);
+      const ways = turns.map((t, k) => [(k < 2 ? turns[k + 1] : turns[0] + 2 * Math.PI) - t, t]).sort((p, q) => q[0] - p[0]);
+      h = ways.flatMap(([gap, t]) => [0.8, 0.6].map((r): [number, number, number] => [xy(c)[0] + r * Math.cos(t + gap / 2), xy(c)[1] + r * Math.sin(t + gap / 2), 0])).find((q) => roomy(atoms, bonds, c, q));
+      if (h) options.push({ j: atoms.length, rank: 1, ends: 1 });
+    }
+    options.sort((p, q) => p.rank - q.rank || p.ends - q.ends);
+    const set = options.some(({ j }) => {
+      const added = j === atoms.length;
+      if (added) atoms.push({ label: "H", location: h! });
+      const v = handed({ ...m, atoms }, c, added ? [...around, j] : around, (k) => (k === j ? 1 : 0));
+      if (Math.abs(v) < 0.1) { if (added) atoms.pop(); return false; }
+      if (added) bonds.push({ type: 1, atoms: [c, j] });
+      const k = added ? bonds.length - 1 : bonds.findIndex((b) => b.atoms.includes(c) && b.atoms.includes(j));
+      bonds[k] = { ...bonds[k], atoms: [c, j], stereo: Math.sign(v) === hand ? 1 : 6 };
+      taken.add(`${c},${j}`).add(`${j},${c}`);
+      return true;
+    });
+    // No bond sets the centre clearly: Indigo's wedges stay.
+    if (!set) for (const b of kept) bonds[m.bonds.indexOf(b)] = b;
+  }
+  return { ...m, atoms, bonds };
 }
 
 // Each label's group as Indigo reads it, kept by the label's text, so each label is read once. Not kept while Indigo
@@ -565,6 +742,25 @@ function readFacts(mol: Mol, chiral: boolean): Facts {
   };
   let centres: number[] = [];
   try { centres = unsetOf({ ...mol, bonds: mol.bonds.map((b) => ({ ...b, stereo: undefined })) }); } catch { /* no centres read */ }
+  // Indigo also lists a planar N (an amide's, an aniline's, a nucleoside base's: N with a multiple bond, or next to an
+  // atom with one), which is no stereocentre, so a wedge from a carbon to it gave a false "between" warning (issue #9).
+  const multiple = (i: number) => mol.bonds.some((b) => b.atoms.includes(i) && orderOf(b.type) > 1);
+  const planar = (i: number) => mol.atoms[i].label === "N" && mol.bonds.some((b) => b.atoms.includes(i) && (orderOf(b.type) > 1 || multiple(b.atoms[0] === i ? b.atoms[1] : b.atoms[0])));
+  // A neutral amine N with three bonds inverts quickly, so it is no stereocentre either (LSD's N6, a tropane's N-methyl,
+  // a ring fusion such as an indolizidine's), unless it is the bridgehead of a bridged ring system and cannot invert
+  // (strychnine's N4, quinine's N1, Tröger's base). At a bridgehead, each two of its neighbours stay joined with the
+  // third removed; at a ring fusion, the shared neighbour is the only way between the other two.
+  const near = (i: number) => mol.bonds.flatMap((b) => (b.atoms.includes(i) ? [b.atoms[0] === i ? b.atoms[1] : b.atoms[0]] : []));
+  const joined = (a: number, c: number, not: number[]) => {
+    const seen = new Set([a, ...not]), next = [a];
+    for (let x = next.pop(); x !== undefined; x = next.pop()) for (const y of near(x)) if (!seen.has(y)) { if (y === c) return true; seen.add(y); next.push(y); }
+    return false;
+  };
+  const amine = (i: number) => mol.atoms[i].label === "N" && !mol.atoms[i].charge && near(i).length === 3;
+  const bridgehead = (i: number) => near(i).every((b, _, nb) => { const [a, c] = nb.filter((x) => x !== b); return joined(a, c, [i, b]); });
+  // A bridgehead N next to an aryl ring (Tröger's base) is still pyramidal; next to C=O (strychnine's lactam N1) it is not.
+  const amide = (i: number) => multiple(i) || near(i).some((j) => mol.bonds.some((b) => b.atoms.includes(j) && orderOf(b.type) > 1 && mol.atoms[b.atoms[0] === j ? b.atoms[1] : b.atoms[0]].label !== "C"));
+  centres = centres.filter((i) => (amine(i) ? bridgehead(i) && !amide(i) : !planar(i)));
   const can = new Set(centres), conflict: number[] = [];
   let kept: Mol = { ...mol, bonds: mol.bonds.map((b) => ((b.stereo === 1 || b.stereo === 6) && !can.has(b.atoms[0]) ? { ...b, stereo: undefined } : b)) }, unset: number[] = [];
   for (let k = 0; k < 8; k++) {

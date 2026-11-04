@@ -1,8 +1,8 @@
 // Run: node src/check.check.ts. Fails loudly if structure checks break.
 import assert from "node:assert/strict";
-import { EMPTY, LARGE, addCharge, bondTo, moveAtoms, setElement, setLabel, sprout } from "./edit.ts";
+import { EMPTY, LARGE, addCharge, atomAt, bondTo, moveAtoms, setElement, setLabel, sprout } from "./edit.ts";
 import type { Mol } from "./render.ts";
-import { messy, problems, valences, type StereoFacts } from "./check.ts";
+import { hiddenWarnings, hideProblems, messy, problemAt, problems, showWarnings, valences, type StereoFacts } from "./check.ts";
 
 // A nitrogen with four bonds is flagged, with a positive charge as the fix; once charged it is fine.
 let m = setElement(sprout(EMPTY, [0, 0]), 0, "N");
@@ -64,6 +64,7 @@ assert.deepEqual(said(star("C", 5)), ["valence: C1 has 5 bonds. Carbon has a max
   assert.deepEqual(said(lone), ["isolated: Octet reads this lone bond as ethane. To draw a line, use the Line tool."]);
   assert.equal(problems(lone)[0].bond, 0);
   assert.deepEqual(said(setLabel(lone, 1, "OH")), []);
+  assert.deepEqual(said({ ...lone, atoms: lone.atoms.map((a, i) => (i ? { ...a, radical: 3 } : a)) }), [], "a carbene's bond is not ethane");
   const path = (...ps: [number, number][]): Mol => ({ atoms: ps.map(([x, y]) => ({ label: "C", location: [x, y, 0] as [number, number, number] })), bonds: ps.slice(1).map((_, k) => ({ type: 1, atoms: [k, k + 1] as [number, number] })) });
   assert.deepEqual(said(path([-1, 0], [0, 0], [1, 0], [1.5, 0.87])), ["linear: C2 has two bonds in a straight line, so it does not show. Add a label or bend a bond."]);
   assert.deepEqual(said(path([-1, 0], [0, 0], [0.87, 0.5], [1.73, 0])), [], "a zig-zag chain");
@@ -89,6 +90,28 @@ assert.deepEqual(said(star("C", 5)), ["valence: C1 has 5 bonds. Carbon has a max
   const hidBrackets: Mol = { ...path, shapes: [{ id: 1, kind: "brackets", from: [-0.5, -1], to: [1.5, 1], ignoreWarnings: true }] };
   assert.deepEqual(problems(hidBrackets), []);
   assert.deepEqual(problems(hidBrackets, undefined, true).map((p) => [p.shape, p.hidden]), [[1, true]]);
+  // Hide this warning (the card's X, or the right-click menu on its mark): that object's warning goes, the rest stay.
+  const bad = { ...setElement(path, 1, "N"), shapes: [{ id: 1, kind: "brackets" as const, from: [-0.5, -1] as [number, number], to: [1.5, 1] as [number, number] }] };
+  const n5 = bondTo(bondTo(bad, 1, [-1, 1.5]), 1, [-1, -0.5]);
+  assert.deepEqual(problems(n5).map((p) => p.type).sort(), ["parens", "valence"]);
+  // A right-click on the red ring (past the atom's own hit radius) or in the brackets' red box finds that warning.
+  assert.equal(atomAt(n5, [-1.3, 0.8]), undefined);
+  assert.equal(problemAt(n5, problems(n5), [-1.3, 0.8])?.atom, 1);
+  assert.equal(problemAt(n5, problems(n5), [1.6, 0])?.shape, 1);
+  assert.equal(problemAt(n5, problems(n5), [3, 3]), undefined);
+  const quiet = hideProblems(n5, problems(n5).filter((p) => p.atom === 1));
+  assert.deepEqual(problems(quiet).map((p) => p.type), ["parens"]);
+  assert.equal(quiet.atoms[1].ignoreWarnings, true);
+  assert.ok(hiddenWarnings(quiet) && hiddenWarnings(quiet, new Set([1])) && !hiddenWarnings(quiet, new Set([0])));
+  // Show warnings: on the selection only, or on the whole drawing with nothing selected.
+  const all = hideProblems(quiet, [{ shape: 1 }]);
+  assert.deepEqual(problems(all), []);
+  assert.deepEqual(problems(showWarnings(all, new Set([0]), new Set([1]))).map((p) => p.type), ["parens"]);
+  assert.deepEqual(problems(showWarnings(all)).map((p) => p.type).sort(), ["parens", "valence"]);
+  assert.ok(!hiddenWarnings(showWarnings(all)));
+  // A caption's warning: Interpret Chemically goes off.
+  const cap: Mol = { ...EMPTY, captions: [{ id: 4, text: "CH5", x: 0, y: 0 }] };
+  assert.equal(hideProblems(cap, [{ caption: 4 }]).captions![0].chemical, false);
 }
 // The stereochemistry warnings from Indigo's facts: a wedge between two stereocentres; a wedge drawn the wrong way
 // round (its fix swaps the ends); unset and conflicting centres only where Show Stereochemistry is on; enhanced flags.

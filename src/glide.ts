@@ -20,7 +20,8 @@ const mix = (p: P, q: P, t: number): P => [p[0] + (q[0] - p[0]) * t, p[1] + (q[1
 const num = (p: number | undefined, q: number | undefined, t: number) => (p === undefined || q === undefined ? q : p + (q - p) * t);
 const length = (p: readonly number[], q: readonly number[]) => Math.hypot(q[0] - p[0], q[1] - p[1]);
 
-// b with each atom, arrow, shape, caption and cycle t (0 to 1) of the way along a straight line from where a has it.
+// b with each atom, arrow, shape, caption and cycle t (0 to 1) of the way along a straight line from where a has it
+// (a cycle's radius and breaks too).
 // Anything that did not change, or that a does not have, is b's own, so its drawing is kept. Undefined when a bond or
 // an arrow is squeezed to under a quarter of its length (the middle of Rotate 180°), as that does not draw well.
 export function between(a: Mol, b: Mol, t: number): Mol | undefined {
@@ -45,7 +46,13 @@ export function between(a: Mol, b: Mol, t: number): Mol | undefined {
     }),
     shapes: b.shapes?.map((y) => { const x = shapes.get(y.id); return !x || x === y ? y : { ...y, from: mix(x.from, y.from, t), to: mix(x.to, y.to, t), angle: num(x.angle, y.angle, t) }; }),
     captions: b.captions?.map((y) => { const x = captions.get(y.id); return !x || x === y ? y : { ...y, x: x.x + (y.x - x.x) * t, y: x.y + (y.y - x.y) * t }; }),
-    cycles: b.cycles?.map((y) => { const x = cycles.get(y.id); return !x || x === y ? y : { ...y, centre: mix(x.centre, y.centre, t) }; }),
+    cycles: b.cycles?.map((y) => {
+      const x = cycles.get(y.id);
+      if (!x || x === y) return y;
+      // A break's angle turns the short way round.
+      const turn = (p: number, q: number) => p + Math.atan2(Math.sin(q - p), Math.cos(q - p)) * t;
+      return { ...y, centre: mix(x.centre, y.centre, t), radius: x.radius + (y.radius - x.radius) * t, ...(x.at.length === y.at.length ? { at: y.at.map((q, k) => turn(x.at[k], q)) } : {}) };
+    }),
   };
   if (out.arrows?.some((y, k) => length(y.from, y.to) < 0.25 * length(b.arrows![k].from, b.arrows![k].to))) return undefined;
   return out;

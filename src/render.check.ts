@@ -38,6 +38,25 @@ for (const [x, y] of d.polygons.flat()) {
 assert.equal(d.labels.length, 1);
 console.log("render.check: pyridine ok");
 
+// A hashed wedge has round(length / (Hash Spacing + line width)) marks. Where another bond meets its wide end the last mark is left
+// out, as ChemDraw draws it, so that bond's line takes its place in the count (issue 7).
+{
+  const C = (x: number, y: number): Atom => ({ label: "C", location: [x, y, 0] });
+  const alone = render({ atoms: [C(0, 0), C(0, -1)], bonds: [{ type: 1, atoms: [0, 1], stereo: 6 }] }, S, ink).polygons.length;
+  const joined = render({ atoms: [C(0, 0), C(0, -1), C(0.87, -1.5)], bonds: [{ type: 1, atoms: [0, 1], stereo: 6 }, { type: 1, atoms: [1, 2] }] }, S, ink).polygons.length;
+  assert.ok(alone > 2, "a hashed wedge has marks");
+  assert.equal(joined, alone, "the last mark is left out where a bond meets the wide end");
+  // Hash Spacing is the gap between marks: ChemDraw draws 4 marks, 6 pt apart, on a 30 pt hashed wedge joined at its
+  // wide end at 5 pt spacing and 1 pt lines (issue 7).
+  const nd = { ...S, bond: 30 * pt, line: pt, bold: 4 * pt, hash: 5 * pt, spacing: 0.12 * 30 * pt };
+  const ndAlone = render({ atoms: [C(0, 0), C(0, -1)], bonds: [{ type: 1, atoms: [0, 1], stereo: 6 }] }, nd, ink).polygons;
+  const ndJoined = render({ atoms: [C(0, 0), C(0, -1), C(0.87, -1.5)], bonds: [{ type: 1, atoms: [0, 1], stereo: 6 }, { type: 1, atoms: [1, 2] }] }, nd, ink).polygons;
+  assert.equal(ndAlone.length, 5, "5 marks on a 30 pt hashed wedge at 5 pt spacing");
+  assert.equal(ndJoined.length, 4 + 1, "4 marks where a bond meets the wide end, and that bond");
+  const ys = ndAlone.map((poly) => centroid(poly)[1]).sort((a, b) => b - a);
+  assert.ok(Math.abs(ys[0] - ys[1] - 6 * pt) < 1e-6, "marks 6 pt apart");
+}
+
 // An allene laid out with rounding (Indigo's 0.49999991 for 0.5): its two double bonds meet end to end at the middle
 // atom, with nothing drawn far away.
 {
@@ -221,6 +240,26 @@ console.log("render.check: written labels ok");
   const charged = lined("NMe3\nsalt", [-1, 0], { label: "N", charge: 1 });
   assert.ok(charged.d.labels.some((l) => l.text === "+" && l.y < charged.rows[0][0].y && l.x > charged.rows[0][0].x), "the sign by the first line");
   console.log("render.check: labels of more than one line ok");
+
+  // A stacked H sits 8.35 pt from the N, baseline to baseline, in Arial 10 pt: ChemDraw 22.2's stacked NH, above and
+  // below, in Sam's CDXML files (8.35, 8.36 and 8.35 pt). Indole's NH stacks under the N, NH2 stacked by hand puts H2
+  // under it, NH stacked above puts the H over it, and a written label stacked (OMe) puts Me under the O.
+  {
+    const gap = (atom: Partial<Atom> & { label: string }, nbrs: P[], first: string, next: string) => {
+      const m: Mol = { atoms: [{ ...atom, location: [0, 0, 0] }, ...nbrs.map(([x, y]): Atom => ({ label: "C", location: [x, y, 0] }))], bonds: nbrs.map((_, k) => ({ type: 1, atoms: [0, k + 1] as [number, number] })) };
+      const runs = render(m, S, arial).labels;
+      return (runs.find((l) => l.text === next)!.y - runs.find((l) => l.text === first)!.y) / pt;
+    };
+    const ring: P[] = [[-0.866, 0.5], [0.866, 0.5]];
+    for (const [name, g] of [
+      ["indole NH", gap({ label: "N" }, ring, "N", "H")],
+      ["NH2 stacked below", gap({ label: "N", align: "below" }, [[0, 1]], "N", "H")],
+      ["NH stacked above", -gap({ label: "N", align: "above" }, ring, "N", "H")],
+      ["OMe stacked below", gap({ label: "O", text: "OMe", align: "below" }, [[0, 1]], "O", "Me")],
+    ] as const) assert.ok(Math.abs(g - 8.35) < 0.01, `${name}: stacked 8.35 pt apart (${g.toFixed(3)} pt)`);
+    assert.ok(Math.abs(gap({ label: "N", align: "below" }, [[0, 1]], "H", "2") - 0.212 * 10) < 1e-9, "the 2 of a stacked NH2 is a subscript on the H");
+  }
+  console.log("render.check: stacked H ok");
 
   // A written label with some characters bold (its runs, styled as it is typed): each piece is drawn in its own style
   // and measured in it (bold here is 10% wider), so what follows a bold piece moves along by its bold width. Read right

@@ -8,9 +8,9 @@ import { DAMAGED, NOT_CDXML, TOO_BIG, arialGlyph, fmt, fmtAngle, fmtColour, fmtS
 import { cdxToXml, xmlToCdx } from "./cdx.ts";
 import { DEFAULT_STYLE, PRESETS, readStyle, withScale, type DocStyle } from "./docstyle.ts";
 import { parse, serialize } from "./file.ts";
-import { contractLabel, expandLabel, fitSizes, insertMol, setLabel } from "./edit.ts";
-import { HIGHLIGHT, bendPoint, ellipseArrow, fitArrows, headOfLength, headsOf, placeCaptions, placedAt, render, takesHeads, tlcLayout, type Arrow, type Atom, type Bond, type Caption, type Ink, type Mol, type Shape } from "./render.ts";
-import { layoutCycles } from "./cycle.ts";
+import { addCaption, contractLabel, deleteAtoms, deleteChosen, deleteGraphics, duplicateSelection, expandLabel, extractSelection, fitSizes, insertMol, setLabel } from "./edit.ts";
+import { HIGHLIGHT, bendPoint, ellipseArrow, fitArrows, headOfLength, headsOf, placeCaptions, placedAt, render, takesHeads, tlcLayout, type Arrow, type Atom, type Bond, type Caption, type Ink, type Mol, type Placed, type Shape } from "./render.ts";
+import { layoutCycles, migrateCycles } from "./cycle.ts";
 import { analyse, fromJcamp, measuredText, type Measured } from "./measured.ts";
 
 // Numbers as ChemDraw writes them (spec 1.2).
@@ -126,6 +126,7 @@ const drawing: Mol = {
 // What a drawing means, written the same way whatever form it was set in: corners as low and high, heads and
 // spot sizes that equal the defaults left unset, explicit black as the default ink, centred as unset, groups by id.
 function canon(m: Mol): Mol {
+  m = migrateCycles(m);
   const ink = (c?: string) => (c && c.toUpperCase() !== "#000000" ? c.toUpperCase() : undefined);
   const strip = <T extends object>(o: T): T => JSON.parse(JSON.stringify(o));
   return strip({
@@ -164,6 +165,15 @@ const style: DocStyle = readStyle({ ...DEFAULT_STYLE, ...PRESETS.RSC, page: "Let
 const text = toCdxml(drawing, style, { name: "check.cdxml" });
 const back = fromCdxml(text);
 same(drawing, back.mol, "round trip");
+// A cycle's steps, side arrows (a structure's by its atoms), scale and order.
+{
+  const rich: Mol = { ...drawing, cycles: [{ ...drawing.cycles![0], at: [1, 3, 5], scale: 1.5, order: 2, steps: [{ kind: "equilibrium", ratio: 3 }, null, { lead: 4, hidden: true }],
+    branches: [{ id: 4, step: 1, meet: 0.3, in: { atoms: [9, 10] }, out: { along: 2, reach: -1 }, heads: ["left", "full"], colour: "#B42323" }] }] };
+  const y = fromCdxml(toCdxml(rich, DEFAULT_STYLE)).mol.cycles![0];
+  assert.deepEqual([y.scale, y.order, y.steps, y.branches?.find((b) => b.id === 4)], [1.5, 2, rich.cycles![0].steps, rich.cycles![0].branches![0]]);
+}
+// The reagent's text saved with no branch (as Octet 1.0.29 did) reads back as a side arrow of its own, coming in.
+assert.deepEqual([back.mol.cycles![0].branches, back.mol.captions!.find((c) => c.text === "ArB(OH)2")!.cycle], [[{ id: 1, step: 0, in: {} }], { cycle: 300, step: 0, side: "in", branch: 1 }]);
 assert.deepEqual(back.style, style);
 assert.deepEqual(back.lost, {});
 parse(serialize(back.mol));
@@ -222,6 +232,23 @@ console.log("cdxml.check: every object kind round trips");
   const fromCentre = (q: [number, number]) => Math.hypot(q[0] - 20, q[1]);
   const onCircle = arcs.filter((a) => Math.abs(fromCentre(a.from) - 3) < 1e-6 && Math.abs(fromCentre(a.to) - 3) < 1e-6);
   assert.ok(onCircle.length === 3 && onCircle.every((a) => Math.abs(fromCentre(bendPoint(a)) - 3) < 1e-6));
+  // A reversible step goes out as ChemDraw's curved equilibrium (HalfLeft at both ends, the shaft spacing, an arc), and
+  // ChemDraw reads that back as one. A hidden step writes no arrow. A side arrow's half writes no head where it has
+  // none, and Full on a product's outer end.
+  {
+    const cyc = { ...drawing.cycles![0], at: [1, 3, 5], steps: [{ kind: "equilibrium" as const, ratio: 3 }, { hidden: true as const }, null], branches: [{ id: 1, step: 2, in: {}, out: {} }] };
+    const m: Mol = { ...drawing, cycles: [cyc] }, xml = toCdxml(m, DEFAULT_STYLE, { derived: layoutCycles(m, 30, 1, () => undefined).arrows }), all: Xml[] = [];
+    const walk = (x: Xml) => { all.push(x); x.kids.forEach(walk); };
+    walk(parseXml(xml));
+    const ours = all.filter((x) => x.name === "arrow" && x.attrs.Octet?.includes('"cycle":300')), sides = ours.filter((x) => x.attrs.Octet.includes('"branch"')), steps = ours.filter((x) => !sides.includes(x));
+    assert.equal(steps.length, 2, "a hidden step writes no arrow");
+    const eq = steps.find((x) => x.attrs.ArrowheadTail === "HalfLeft")!;
+    assert.ok(eq && eq.attrs.ArrowheadHead === "HalfLeft" && Number(eq.attrs.ArrowShaftSpacing) > 0 && Number(eq.attrs.AngularSize) !== 0 && eq.attrs.ArrowEquilibriumRatio === "300" && eq.attrs.Center3D);
+    assert.deepEqual(sides.map((x) => x.attrs.ArrowheadHead), [undefined, "Full"]);
+    assert.ok(sides.every((x) => x.attrs.ArrowheadTail === undefined));
+    const chemdraw = fromCdxml(xml.replace(/ Octet="\{&quot;d&quot;:1[^"]*"/g, "")).mol.arrows!.find((a) => a.kind === "equilibrium" && a.point);
+    assert.ok(chemdraw && chemdraw.point && chemdraw.bend && chemdraw.ratio === 3, JSON.stringify(chemdraw));
+  }
   // A label Octet can expand goes to ChemDraw as an abbreviation with its own atoms; Octet keeps the label.
   const phenyl: Mol = { atoms: [0, 1, 2, 3, 4, 5].map((k) => A("C", Math.cos((k * Math.PI) / 3), Math.sin((k * Math.PI) / 3))), bonds: [0, 1, 2, 3, 4, 5].map((k) => b(k, (k + 1) % 6, { type: k % 2 ? 1 : 2 })) };
   const expanded = toCdxml(drawing, DEFAULT_STYLE, { expand: (t) => (t === "Ph" ? phenyl : undefined) });
@@ -374,6 +401,27 @@ ${head(8, 'ArrowheadHead="Full" AngularSize="-270" HeadSize="800" ArrowheadCente
   console.log("cdxml.check: ChemDraw's turned text read and written");
 }
 
+// Delete takes only what is selected (issue 12). A file that repeats a text's id or leaves it out still gives every
+// object an id of its own, and a step that lists text far from its arrow does not take that text with the arrow.
+{
+  const t = (id: string, p: string, s: string) => `<t${id} p="${p}"><s font="3" size="10">${s}</s></t>`;
+  const body = `<fonttable><font id="3" name="Arial"/></fonttable><page id="1" BoundingBox="0 0 540 720">
+${t(' id="10"', "100 100", "A")}${t(' id="10"', "100 130", "B")}${t("", "100 160", "C")}${t("", "100 190", "D")}${t(' id="11"', "320 90", "far")}
+<arrow id="20" Z="1" ArrowheadHead="Full" ArrowheadType="Solid" HeadSize="1000" Head3D="400 300 0" Tail3D="300 300 0"/>
+<scheme id="30"><step id="31" ReactionStepArrows="20" ReactionStepObjectsAboveArrow="11"/></scheme></page></CDXML>`;
+  for (const root of ['<CDXML BondLength="14.40">', `<CDXML BondLength="14.40" Octet='{"v":1}'>`]) {
+    const m = fromCdxml(`<?xml version="1.0" encoding="UTF-8" ?>${root}${body}`).mol, texts = m.captions!;
+    const ids = [...texts, ...m.arrows!].map((x) => x.id);
+    assert.deepEqual([texts.map((c) => c.text).sort(), new Set(ids).size], [["A", "B", "C", "D", "far"], 6], "every object has an id of its own");
+    for (const c of texts) assert.deepEqual(deleteGraphics(deleteAtoms(m, new Set()), new Set([c.id])).captions!.map((x) => x.text), texts.filter((x) => x !== c).map((x) => x.text));
+    const far = texts.find((c) => c.text === "far")!, at = placedAt(far, m.arrows) ?? [far.x, far.y];
+    assert.ok(far.on, "the step puts the text on the arrow");
+    const left = deleteGraphics(m, new Set([m.arrows![0].id])).captions!, kept = left.find((c) => c.text === "far");
+    assert.deepEqual([left.length, kept?.on, kept?.placed, kept?.x, kept?.y], [5, undefined, undefined, at[0], at[1]], "the arrow's text stays where it is");
+  }
+  console.log("cdxml.check: Delete takes only what is selected (issue 12) ok");
+}
+
 // Turned shapes in ChemDraw's form: a box turned 30° by its axes, with its own line width; one bracket lying down
 // (as in Sam's files) and a pair lying down, facing each other.
 {
@@ -442,6 +490,11 @@ ${head(8, 'ArrowheadHead="Full" AngularSize="-270" HeadSize="800" ArrowheadCente
   assert.deepEqual([forged.mol.captions?.[0].under, forged.mol.captions?.[0].cycle, forged.style.page], [undefined, undefined, "A4"]);
   assert.deepEqual(forged.lost, { table: 1 });
   parse(serialize(forged.mol));
+  // A cycle's steps and side arrows out of bounds are left out; the cycle stays.
+  const bounds = fromCdxml(`<CDXML Octet='{"v":1,"cycles":[{"id":9,"centre":[0,0],"radius":3,"nodes":[[1],[2]],"steps":[{"ratio":0}],"branches":[{"id":1,"step":5,"in":{}},{"id":2,"step":0,"in":{"atoms":[99]}}]}]}'><page>
+<fragment><n id="1" p="0 0"/><n id="2" p="14 0"/></fragment><t id="3" p="0 0" Octet='{"cycle":{"cycle":9,"step":0,"side":"in","branch":"x"}}'><s font="1" size="10">x</s></t></page></CDXML>`).mol;
+  assert.deepEqual([bounds.cycles?.[0].steps, bounds.cycles?.[0].branches, bounds.captions?.[0].cycle?.branch], [undefined, [{ id: 1, step: 0, in: {} }], 1]);
+  parse(serialize(bounds));
   console.log("cdxml.check: hostile files refused or read safely");
 }
 
@@ -464,6 +517,16 @@ ${head(8, 'ArrowheadHead="Full" AngularSize="-270" HeadSize="800" ArrowheadCente
   const cd = `<?xml version="1.0" encoding="UTF-8" ?><CDXML><page id="1"><fragment id="2"><n id="3" p="100 100" Element="6" Isotope="14" NumHydrogens="4"><t p="96 104"><s font="3" size="10" face="96">14CH4</s></t></n></fragment></page></CDXML>`;
   const r = fromCdxml(cd);
   assert.deepEqual([r.mol.atoms[0].label, r.mol.atoms[0].isotope, r.mol.atoms[0].text, r.lost], ["C", 14, undefined, {}], "ChemDraw's ¹⁴CH₄");
+  // A singlet's pair is the renderer's pair0, so a pair moved by hand goes out where the page has it, and as a bar
+  // when the atom's pairs are bars. ChemDraw's bar for a singlet, and where it put each pair, come back.
+  const carbene = (more: Partial<Atom>): Mol => ({ atoms: [A("C", 0, 0), A("C", 0.866, 0.5, { radical: 3, ...more }), A("C", 1.732, 0)], bonds: [b(0, 1), b(1, 2)] });
+  const symbolOf = (x: string) => x.match(/<graphic[^>]*SymbolType="LonePair[^"]*"[^>]*>/)![0];
+  assert.notEqual(symbolOf(toCdxml(carbene({ angles: { pair0: 0 } }), DEFAULT_STYLE)).match(/BoundingBox="[^"]+"/)![0], symbolOf(toCdxml(carbene({}), DEFAULT_STYLE)).match(/BoundingBox="[^"]+"/)![0], "a moved carbene pair");
+  assert.match(symbolOf(toCdxml(carbene({ bars: true }), DEFAULT_STYLE)), /SymbolType="LonePairBar"/);
+  const nitrene = `<?xml version="1.0" encoding="UTF-8" ?><CDXML><page id="1"><fragment id="2"><n id="3" p="100 100"/><n id="4" p="114.4 100" Element="7" Radical="Singlet" NumHydrogens="0"/><b id="5" B="3" E="4"/></fragment>`
+    + `<graphic id="6" BoundingBox="114.4 92 107 92" GraphicType="Symbol" SymbolType="LonePairBar"><represent attribute="Radical" object="4"/></graphic><graphic id="7" BoundingBox="122 100 122 107" GraphicType="Symbol" SymbolType="LonePairBar"/></page></CDXML>`;
+  const nb = fromCdxml(nitrene).mol.atoms[1];
+  assert.deepEqual([nb.radical, nb.pairs, nb.bars, Object.keys(nb.angles ?? {}).sort()], [3, 1, true, ["pair0", "pair1"]], "ChemDraw's singlet nitrene");
   console.log("cdxml.check: isotopes, singlet radicals, ring circles and grids ok");
 }
 
@@ -1144,4 +1207,61 @@ No</s><s font="3" size="10" color="4" face="3"> ISC</s></t></n></fragment><fragm
   const read = fromCdxml(toCdxml(contracted, DEFAULT_STYLE, { name: "contract.cdxml" })).mol, label = read.atoms.find((a) => a.text === "Est");
   assert.deepEqual([label?.inner?.atoms.length, label?.inner?.bonds.length, label?.inner?.atoms[0].label], [6, 5, "C"], "the group goes through CDXML");
   assert.equal(setLabel(contracted, 1, "Br").atoms[1].inner, undefined, "an element label leaves the group");
+}
+
+// Issue #12: in a drawing from ChemDraw, deleting one thing took text that was not selected. A step's text above and
+// below its arrow belongs to the arrow, and went with it. Delete, Clear and the Eraser (deleteChosen) take only what
+// they are given; that text stays where it is drawn. Repeated, missing and shared file ids give every object its own id.
+{
+  const doc = `<CDXML BondLength="14.40" CaptionSize="10"><page>
+<fragment id="1"><n id="2" p="100 200"/><n id="3" p="112.47 207.2"/><b id="4" B="2" E="3"/></fragment>
+<arrow id="10" ArrowheadHead="Full" ArrowheadType="Solid" Head3D="300 200 0" Tail3D="200 200 0"/>
+<arrow id="11" ArrowheadHead="Full" ArrowheadType="Solid" Head3D="500 200 0" Tail3D="400 200 0"/>
+<t id="12" p="210 190"><s size="10">above</s></t><t id="12" p="210 215"><s size="10">below</s></t><t p="410 190"><s size="10">no id</s></t><t p="410 215"><s size="10">no id either</s></t>
+<group id="30"><t id="31" p="100 300"><s size="10">grouped</s></t><t id="10" p="150 300"><s size="10">arrow's id</s></t></group>
+<group id="40" Integral="yes"><t id="41" p="100 400"><s size="10">integral</s></t><t id="42" p="150 400"><s size="10">integral too</s></t></group>
+<t id="50" p="300 500"><s size="10">far away</s></t>
+<scheme id="60"><step id="61" ReactionStepReactants="1" ReactionStepArrows="10" ReactionStepObjectsAboveArrow="12 50" ReactionStepObjectsBelowArrow="12"/><step id="62" ReactionStepArrows="11" ReactionStepObjectsAboveArrow="12 10 31" ReactionStepObjectsBelowArrow="0 -1"/></scheme></page></CDXML>`;
+  const m = fromCdxml(doc).mol, all = (x: Mol) => (x.captions ?? []).map((c) => c.text).sort(), texts = all(m);
+  const ids = (x: Mol) => [...(x.captions ?? []), ...(x.arrows ?? []), ...(x.shapes ?? []), ...(x.cycles ?? []), ...(x.groups ?? [])].map((o) => o.id);
+  const unique = (x: Mol) => assert.equal(new Set(ids(x)).size, ids(x).length, "every object has its own id");
+  assert.equal(texts.length, 9);
+  unique(m);
+  assert.deepEqual(m.captions!.filter((c) => c.on).map((c) => c.text).sort(), ["above", "far away", "grouped"], "the step's texts are its arrow's");
+  const [a10, a11] = m.arrows!.map((a) => a.id), grouped = m.captions!.find((c) => c.text === "grouped")!;
+  // The arrow alone goes (the Delete key, Clear, the panel's Delete, an Eraser click or stroke); its text stays, free,
+  // where it is drawn, and in its group.
+  for (const a of [a10, a11]) {
+    const out = deleteChosen(m, new Set(), new Set([a]), undefined, (c) => [c.x + 1, c.y]);
+    assert.deepEqual([out.arrows!.length, all(out)], [1, texts], "only the arrow goes");
+    assert.ok(out.captions!.every((c) => !c.on || c.on.arrow !== a), "its text is free");
+  }
+  const freed = deleteChosen(m, new Set(), new Set([a11]), undefined, (c) => [c.x + 1, c.y]), g = freed.captions!.find((c) => c.text === "grouped")!;
+  assert.deepEqual([g.x, g.y, g.on, g.placed], [grouped.x + 1, grouped.y, undefined, undefined], "where it is drawn");
+  assert.ok(freed.groups!.some((x) => x.items.includes(g.id)), "still in its group");
+  const cut = new Set([a10, ...extractSelection(m, new Set(), new Set([a10])).captions!.map((c) => c.id)]);
+  assert.equal(deleteGraphics(m, cut).captions!.length, 7, "Cut takes the arrow's text with it, as Copy does");
+  // Each text alone: the others stay.
+  for (const c of m.captions!) assert.deepEqual(all(deleteChosen(m, new Set(), new Set([c.id]))), texts.filter((t, k) => k !== texts.indexOf(c.text)), `only "${c.text}" goes`);
+  // The structure, by its atoms or by its only bond (its bare carbons go with it): no text goes.
+  assert.deepEqual([all(deleteChosen(m, new Set([0, 1]), new Set())), all(deleteChosen(m, new Set(), new Set(), new Set([0])))], [texts, texts]);
+  assert.equal(deleteChosen(m, new Set(), new Set(), new Set([0])).atoms.length, 0);
+  // A compound number under a structure stays when the structure goes.
+  const [numbered] = addCaption(m, { text: "1", x: 0, y: -1, under: [0, 1] }), left = deleteChosen(numbered, new Set([0, 1]), new Set());
+  assert.ok(left.captions!.some((c) => c.text === "1" && !c.under));
+  // Ids stay unique after a paste, a duplicate and a file read back.
+  unique(insertMol(m, m).mol);
+  unique(duplicateSelection(m, new Set(m.atoms.map((_, i) => i)), new Set(ids(m))).mol);
+  unique(fromCdxml(toCdxml(m, DEFAULT_STYLE)).mol);
+  unique(parse(serialize(m)));
+  // Text freed from its arrow keeps its box, lined up as it is drawn: left-aligned conditions are centred on a level
+  // arrow, and a steep arrow's are set beside it.
+  const laid: Mol = { atoms: [], bonds: [], arrows: [{ id: 1, from: [0, 0], to: [5, 0] }, { id: 2, from: [10, 0], to: [10, -5] }], captions: [
+    { id: 3, text: "NaOH", x: 0, y: 0, on: { arrow: 1, side: "above" } }, { id: 4, text: "THF\n0 °C", x: 0, y: 0, align: "left", on: { arrow: 1, side: "below" } },
+    { id: 5, text: "hν", x: 0, y: 0, on: { arrow: 2, side: "above" } }, { id: 6, text: "reflux", x: 0, y: 0, align: "right", on: { arrow: 2, side: "below" } }] };
+  const lay = (x: Mol) => placeCaptions(x, { ink: [], scale: 14.4 }, (t) => t.length * 6, x.arrows), drawn = lay(laid);
+  const q = (c: Caption) => drawn.find((x) => x.id === c.id)!, anchor = (p: Placed) => (p.anchor === "start" ? p.box[0] : p.anchor === "end" ? p.box[2] : (p.box[0] + p.box[2]) / 2);
+  const loose = lay(deleteChosen(laid, new Set(), new Set([1, 2]), undefined, (c) => [anchor(q(c)) / 14.4, -q(c).lines[0].y / 14.4], (c) => ({ start: "left", middle: "centre", end: "right" } as const)[q(c).anchor]));
+  assert.deepEqual(loose.map((q) => q.box), drawn.map((q) => q.box), "freed text stays where it is drawn");
+  console.log("cdxml.check: deleting one thing leaves the text it was not given ok");
 }

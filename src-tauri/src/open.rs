@@ -7,6 +7,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
+use base64::Engine;
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, State, Window};
 
@@ -15,6 +16,8 @@ use crate::{recent, Picked, MAX_BYTES};
 const MOST: usize = 20; // files kept waiting at one time
 const DRAWINGS: [&str; 4] = ["oct", "cdxml", "cdx", "octet"];
 const PICTURES: [&str; 8] = ["png", "jpg", "jpeg", "gif", "bmp", "tif", "tiff", "webp"];
+// Vector pictures Octet opens only for the drawing in them (export::cdxml_from_picture).
+const VECTORS: [&str; 2] = ["pdf", "emf"];
 
 // The files waiting for a page, each with the window it was dropped on and the point there (CSS pixels), if it was.
 #[derive(Default)]
@@ -70,9 +73,10 @@ pub struct OpenedFile {
 
 // The files waiting, read as text. insert: the page puts dropped files into the drawing that is open; otherwise they
 // open. A drawing that opens can be saved over, as one picked in Open can, and goes on Home's list of recent drawings.
-// project: the files were dropped on a project on Home. Each drawing dropped is only checked (it is there, 64 MB at
-// most) and named, so the page can put it in the project (home.rs); it does not open. A picture comes back as a
-// picture, which the page makes the project's thumbnail (src/thumbs.ts). Other files are refused.
+// project: set when the files were dropped on a tile on Home, true for a project. Each drawing dropped on a project
+// is only checked (it is there, 64 MB at most) and named, so the page can put it in the project (home.rs); it does not
+// open. A picture comes back as a picture, which the page makes the tile's thumbnail (src/thumbs.ts). Other files are
+// refused.
 #[tauri::command]
 pub async fn take_opened(app: AppHandle, window: Window, picked: State<'_, Picked>, insert: bool, project: Option<bool>) -> Result<Vec<OpenedFile>, String> {
     // This window's: the files dropped on it, and on Home the files to open.
@@ -112,16 +116,17 @@ pub async fn take_opened(app: AppHandle, window: Window, picked: State<'_, Picke
                 let (text, error) = match read { Ok(t) => (Some(t), None), Err(e) => (None, Some(e)) };
                 return OpenedFile { name, path: None, text, picture: None, error, at };
             }
-            if PICTURES.contains(&ext.as_str()) {
-                let (picture, error) = match picture(&path, &name) {
-                    Ok(b) => (Some(b), None),
-                    Err(e) => (None, Some(e)),
-                };
-                return OpenedFile { name, path: None, text: None, picture, error, at };
+            if PICTURES.contains(&ext.as_str()) || VECTORS.contains(&ext.as_str()) {
+                // Dropped on a tile on Home (project is set), a picture is the tile's thumbnail even with a drawing in it.
+                let (text, picture, error) = opened_picture(&path, &name, &ext, project.is_some() && at.is_some());
+                return OpenedFile { name, path: None, text, picture, error, at };
+            }
+            let opens = DRAWINGS.contains(&ext.as_str()) && (at.is_none() || !insert);
+            if opens {
+                crate::stamp(&app, &path);
             }
             let read = read(&path, &name);
-            let drawing = DRAWINGS.contains(&ext.as_str());
-            let kept = read.is_ok() && drawing && (at.is_none() || !insert);
+            let kept = read.is_ok() && opens;
             if kept {
                 picked.0.lock().unwrap().insert(path.clone());
                 recent::note(&app, &path);
@@ -144,14 +149,28 @@ fn read(path: &Path, name: &str) -> Result<String, String> {
     }
 }
 
-// A picture file's bytes in base64, with Open's limit of 64 MB. The page checks what they are, decodes them and keeps
-// 12 MB of pictures in a drawing at most (src/picture.ts).
-fn picture(path: &Path, name: &str) -> Result<String, String> {
-    use base64::Engine;
+// A picture file as the page takes it: (text, picture in base64, error). A picture with a drawing in it (Octet's or
+// ChemDraw's PDF, Octet's EMF or PNG, or one saved out of a Word document) opens as that drawing's CDXML, as ChemDraw
+// opens a PDF with its CDXML; it is not a file to save over. A PDF or EMF without one is refused. With `thumb`, a
+// PNG (or other raster) comes as a picture.
+fn opened_picture(path: &Path, name: &str, ext: &str, thumb: bool) -> (Option<String>, Option<String>, Option<String>) {
+    match picture(path, name) {
+        Ok(b) => match if thumb && PICTURES.contains(&ext) { None } else { crate::export::cdxml_from_picture(&b) } {
+            Some(x) => (Some(x), None, None),
+            None if VECTORS.contains(&ext) => (None, None, Some(format!("Octet cannot open {name}. It has no Octet or ChemDraw drawing in it."))),
+            None => (None, Some(base64::engine::general_purpose::STANDARD.encode(b)), None),
+        },
+        Err(e) => (None, None, Some(e)),
+    }
+}
+
+// A picture file's bytes, with Open's limit of 64 MB. The page checks what they are, decodes them and keeps 12 MB of
+// pictures in a drawing at most (src/picture.ts).
+fn picture(path: &Path, name: &str) -> Result<Vec<u8>, String> {
     match fs::metadata(path) {
         Err(_) => Err("This file is not where it was. It was moved or deleted.".into()),
         Ok(m) if m.len() > MAX_BYTES => Err(format!("Octet cannot insert {name}. It is larger than 64 MB.")),
-        Ok(_) => fs::read(path).map(|b| base64::engine::general_purpose::STANDARD.encode(b)).map_err(|_| format!("Octet cannot read {name}.")),
+        Ok(_) => fs::read(path).map_err(|_| format!("Octet cannot read {name}.")),
     }
 }
 
@@ -183,8 +202,23 @@ mod tests {
         assert!(read(&big, "c.cdxml").unwrap_err().contains("64 MB"));
         assert!(read(&dir.join("gone.oct"), "gone.oct").unwrap_err().contains("moved or deleted"));
         // A picture comes as its bytes, with the same limit.
-        assert_eq!(picture(&png, "b.png").as_deref(), Ok("iVBOR//+"));
+        assert_eq!(picture(&png, "b.png"), Ok(vec![0x89, b'P', b'N', b'G', 0xff, 0xfe]));
         assert!(picture(&big, "c.png").unwrap_err().contains("64 MB"));
+        // A picture with a drawing in it opens as the drawing; a PDF without one is refused, a PNG without one is a picture.
+        let svg = r#"<svg xmlns="http://www.w3.org/2000/svg" width="20pt" height="10pt" viewBox="0 0 20 10"><path d="M1 1H19V2H1Z"/></svg>"#;
+        let tree = crate::export::tree(svg).unwrap();
+        let x = "<CDXML><page><fragment/></page></CDXML>";
+        for (file, bytes) in [("e.pdf", crate::export::make_pdf(svg, Some(x)).unwrap()), ("f.png", crate::export::make_png(svg, 72.0, true, Some(x)).unwrap()), ("g.emf", crate::vector::make_emf(&tree, Some(x)))] {
+            fs::write(dir.join(file), bytes).unwrap();
+            let (text, picture, error) = opened_picture(&dir.join(file), file, &file[2..], false);
+            assert!(text.is_some_and(|t| t.ends_with(x)) && picture.is_none() && error.is_none(), "{file}");
+        }
+        // Dropped on a tile on Home, Octet's PNG is the thumbnail, a picture.
+        let (text, picture, _) = opened_picture(&dir.join("f.png"), "f.png", "png", true);
+        assert!(text.is_none() && picture.is_some());
+        fs::write(dir.join("h.pdf"), crate::export::make_pdf(svg, None).unwrap()).unwrap();
+        assert!(opened_picture(&dir.join("h.pdf"), "h.pdf", "pdf", false).2.unwrap().contains("no Octet or ChemDraw drawing"));
+        assert!(opened_picture(&png, "b.png", "png", false).1.is_some());
         fs::remove_dir_all(&dir).unwrap();
     }
 }

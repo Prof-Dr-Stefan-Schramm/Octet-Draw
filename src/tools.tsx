@@ -69,8 +69,9 @@ export const withSize = (v: string, size: ArrowSize) => {
   return base === "block" ? (size === "large" ? "block" : "block medium") : size === "small" ? base : `${base} ${size}`;
 };
 
-// The Cycle tool: draw a cycle's circle (and break it into steps), or add a reagent coming in or a product going out.
-export const CYCLES: Record<string, string> = { circle: "Catalytic cycle", in: "Reagent in", out: "Product out", name: "Step name" };
+// The Cycle tool: draw a cycle's circle (break it into steps, pull side arrows out of it), make a step reversible, name
+// a step, or add a side arrow (a reagent or product) to a step.
+export const CYCLES: Record<string, string> = { circle: "Catalytic cycle", reversible: "Reversible step", name: "Step name", side: "Side arrow" };
 
 export const SELECTS = { box: { name: "Box" }, lasso: { name: "Lasso" }, perspective: { name: "Structure perspective" } };
 
@@ -240,9 +241,23 @@ export function ShapeGlyph({ kind }: { kind: ShapeKind }) {
   }
 }
 
-// The Cycle tool's icons: a circle of arrows broken in three places, and that circle with a side arrow coming in or
-// going out at the top, or with a step name inside it.
+// The Cycle tool's icons: a circle of arrows broken in three places, and that circle with a step name inside it. A
+// reversible step: one arc as a pair of half-headed arcs. A side arrow: a reagent in and a product out (SideGlyph).
 export const CycleGlyph = ({ v }: { v: string }) => {
+  if (v === "side") return <SideGlyph ends="both" />;
+  if (v === "reversible") {
+    const d = Math.PI / 180, p = (a: number, r: number) => [128 + r * Math.cos(a), 214 + r * Math.sin(a)], s = (q: number[]) => q.map((x) => x.toFixed(1)).join(",");
+    // Each half's barb on the outside of the pair: the outer one runs right, the inner one back left.
+    const half = (a: number, r: number, back: boolean) => { const t = p(a, r), u = back ? [Math.sin(a), -Math.cos(a)] : [-Math.sin(a), Math.cos(a)], n = back ? -22 : 22; return `${s([t[0] - 30 * u[0] + n * Math.cos(a), t[1] - 30 * u[1] + n * Math.sin(a)])} ${s(t)}`; };
+    return (
+      <Icon>
+        <path d={`M${s(p(-150 * d, 136))} A136,136 0 0 1 ${s(p(-30 * d, 136))}`} />
+        <polyline points={half(-30 * d, 136, false)} />
+        <path d={`M${s(p(-30 * d, 88))} A88,88 0 0 0 ${s(p(-150 * d, 88))}`} />
+        <polyline points={half(-150 * d, 88, true)} />
+      </Icon>
+    );
+  }
   const arc = (a0: number, a1: number, r = 80, cx = 128, cy = 136) => { const p = (a: number) => [cx + r * Math.cos(a), cy + r * Math.sin(a)].map((x) => x.toFixed(1)).join(","); return `M${p(a0)} A${r},${r} 0 0 1 ${p(a1)}`; };
   const head = (a: number, r = 80, cx = 128, cy = 136) => { const t = [cx + r * Math.cos(a), cy + r * Math.sin(a)], u = [-Math.sin(a), Math.cos(a)], n = [Math.cos(a), Math.sin(a)];
     return [[t[0] - 30 * u[0] + 22 * n[0], t[1] - 30 * u[1] + 22 * n[1]], t, [t[0] - 30 * u[0] - 22 * n[0], t[1] - 30 * u[1] - 22 * n[1]]].map((q) => q.map((x) => x.toFixed(1)).join(",")).join(" "); };
@@ -251,12 +266,20 @@ export const CycleGlyph = ({ v }: { v: string }) => {
     <Icon>
       {stops.map((s) => <path key={s} d={arc((s + 16) * d, (s + 104) * d)} />)}
       {stops.map((s) => <polyline key={s} points={head((s + 104) * d)} />)}
-      {v === "in" && <><path d="M44,28 Q84,28 104,52" /><polyline points="76,44 104,52 100,22" /></>}
-      {v === "out" && <><path d="M152,52 Q172,28 212,28" /><polyline points="186,10 212,28 188,48" /></>}
       {v === "name" && <path d="M100,124 H156 M108,152 H148" />}
     </Icon>
   );
 };
+
+// A cycle's side arrow: a piece of arc with a reagent swooping in to it (no head), a product swooping out (a head), or
+// both.
+export const SideGlyph = ({ ends }: { ends: "both" | "in" | "out" }) => (
+  <Icon>
+    <path d="M24,200 Q128,136 232,200" />
+    {ends !== "out" && <path d="M36,48 Q60,168 128,168" />}
+    {ends !== "in" && <><path d="M128,168 Q196,168 220,48" /><polyline points="192,73 220,48 236,81" /></>}
+  </Icon>
+);
 
 // A TLC plate: its outline, origin, dashed front and two spots.
 export const TlcGlyph = () => (

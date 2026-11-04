@@ -11,8 +11,10 @@ g.getComputedStyle = () => ({ getPropertyValue: () => "10" });
 g.window = globalThis;
 g.self = { location: { origin: "file://" } };
 g.fetch = async (u: URL | string) => new Response(readFileSync(new URL(String(u))), { headers: { "content-type": "application/wasm" } });
-const { analyse, chiralFlagOnly, cleanUp, expandWithOrigins, fragmentMasses, importStructure, mapReaction, ready, stereoLabels, structures, toMolfile } = await import("./chem.ts");
-const { render } = await import("./render.ts");
+const { analyse, chiralFlagOnly, cleanUp, expandWithOrigins, fragmentMasses, importStructure, mapReaction, ready, stereoLabels, structures, toMolfile, toSmiles } = await import("./chem.ts");
+const { hydrogens, render } = await import("./render.ts");
+const { addSymbol } = await import("./edit.ts");
+const { problems } = await import("./check.ts");
 type Mol = import("./render.ts").Mol;
 await ready;
 
@@ -207,4 +209,41 @@ console.log("chem.check: attachment points ok");
   assert.ok(!chiralFlagOnly("M  V30 BEGIN COLLECTION\nM  V30 MDLV30/STERAC1 ATOMS=(1 2)\nM  V30 END COLLECTION\n V3000"));
   assert.ok(!chiralFlagOnly("CC(O)CC"));
   console.log("chem.check: settings ok");
+}
+
+// A lone pair on a carbon with two bonds makes a singlet carbene, as ChemDraw reads a lone pair on a carbon: the
+// pair takes the carbon's two hydrogens, in the formula, SMILES and molfile. Two radical dots make a triplet. On an
+// amine's N the first pair is its own and the next makes a nitrene; on an ether's O pairs never take anything.
+{
+  const chain = (label: string, n = 2): Mol => ({ atoms: [{ label: "C", location: [0, 0, 0] }, { label, location: [0.866, 0.5, 0] }, ...(n > 1 ? [{ label: "C", location: [1.732, 0, 0] as [number, number, number] }] : [])],
+    bonds: [{ type: 1, atoms: [0, 1] }, ...(n > 1 ? [{ type: 1, atoms: [1, 2] as [number, number] }] : [])] });
+  const formula = (m: Mol) => analyse(m)![0].formula;
+  const carbene = addSymbol(chain("C"), 1, "pair");
+  assert.deepEqual([carbene.atoms[1].radical, carbene.atoms[1].pairs], [3, undefined], "the pair is the carbene's");
+  assert.equal(formula(carbene), "C3H6");
+  assert.equal(toSmiles(carbene), "C[C]C |^3:1|");
+  assert.match(toMolfile(carbene, true), /M {2}RAD {2}1 {3}2 {3}1/);
+  assert.deepEqual(problems(carbene), []);
+  assert.equal(addSymbol(carbene, 1, "pair").atoms[1].radical, undefined, "the next click clears it");
+  const once = addSymbol(chain("C"), 1, "radical"), triplet = addSymbol(once, 1, "radical");
+  assert.deepEqual([once.atoms[1].radical, triplet.atoms[1].radical, addSymbol(triplet, 1, "radical").atoms[1].radical], [1, 2, undefined]);
+  assert.equal(toSmiles(triplet), "C[C]C |^4:1|");
+  assert.equal(formula(triplet), "C3H6");
+  const amine = addSymbol(chain("N", 1), 1, "pair"), nitrene = addSymbol(amine, 1, "pair");
+  assert.deepEqual([amine.atoms[1].pairs, amine.atoms[1].radical, formula(amine)], [1, undefined, "CH5N"]);
+  assert.deepEqual([nitrene.atoms[1].pairs, nitrene.atoms[1].radical, formula(nitrene)], [1, 3, "CH3N"]);
+  assert.deepEqual(problems(nitrene), [], "a singlet nitrene has its two pairs");
+  const marks = (m: Mol) => [m.atoms[1].pairs, m.atoms[1].radical];
+  assert.deepEqual(marks(addSymbol(nitrene, 1, "pair")), [undefined, undefined]);
+  let ether = chain("O");
+  for (const k of [1, 2]) { ether = addSymbol(ether, 1, "pair"); assert.deepEqual([ether.atoms[1].pairs, ether.atoms[1].radical, formula(ether)], [k, undefined, "C2H6O"]); }
+  assert.deepEqual(marks(addSymbol(ether, 1, "pair")), [undefined, undefined]);
+  // Option-click, and Lone pairs as bars, draw the carbene's pair as a bar; Option-click on a carbene turns it back to dots.
+  const barred = addSymbol(chain("C"), 1, "pair", true);
+  assert.deepEqual([barred.atoms[1].radical, barred.atoms[1].pairs, barred.atoms[1].bars], [3, undefined, true], "Option-click makes a carbene");
+  assert.deepEqual([addSymbol(chain("C"), 1, "pair", false, true).atoms[1].bars, addSymbol(barred, 1, "pair", true).atoms[1].bars], [true, undefined]);
+  assert.deepEqual(problems(addSymbol(barred, 1, "pair", true)), []);
+  // Methylene on its own keeps two hydrogens (a singlet is one pair, not three electrons).
+  assert.equal(hydrogens("C", 0, 0, 3), 2);
+  console.log("chem.check: carbenes and nitrenes ok");
 }

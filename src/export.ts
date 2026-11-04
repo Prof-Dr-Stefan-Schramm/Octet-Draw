@@ -80,12 +80,14 @@ export function standaloneSvg(canvas: SVGSVGElement, bounds: [number, number, nu
   }
 }
 
-// Copy: the picture (standaloneSvg of the selection; on the Mac a PDF with the selection's CDXML hidden in it), then
-// CDX, the CDXML as its own type (cdxmlType), its molfile, SMILES and Octet's JSON, on the clipboard as ChemDraw puts
-// them on each system (src-tauri/src/clipboard.rs). Each left out is not put on. Call it from the copy event after
-// preventDefault(), and set nothing on clipboardData: plain text would make ChemDraw paste a caption. With `text`,
-// only that text goes on (Edit > Copy As).
-export const copyToClipboard = (c: { svg?: string; cdxml?: string; cdxmlType?: boolean; cdx?: string; molfile?: string; smiles?: string; octetJson?: string; text?: string }) =>
+// Copy: the picture (standaloneSvg of the selection, with the selection's CDXML hidden in it: on the Mac a PDF, on
+// Windows an EMF, on Linux a PNG), then CDX, the CDXML as its own type (cdxmlType), its molfile, SMILES and Octet's
+// JSON, on the clipboard as ChemDraw puts them on each system (src-tauri/src/clipboard.rs). Each left out is not put
+// on. Call it from the copy event after preventDefault(), and set nothing on clipboardData: plain text would make
+// ChemDraw paste a caption. With `text`, only that text goes on (Edit > Copy As).
+// dpi: the export resolution, which the PNG and bitmap on Windows and Linux take (as ChemDraw's Copy As PNG takes
+// its Save As PNG resolution), at most 16 million pixels.
+export const copyToClipboard = (c: { dpi?: number; svg?: string; cdxml?: string; cdxmlType?: boolean; cdx?: string; molfile?: string; smiles?: string; octetJson?: string; text?: string }) =>
   invoke<void>("copy_to_clipboard", c);
 
 // What paste can use from the clipboard, each null when absent: Octet's JSON; CDXML (ChemDraw's CDXML type, or
@@ -98,6 +100,9 @@ export type ExportFormat = "oct" | "pdf" | "svg" | "png" | "emf" | "eps" | "tif"
 // The pictures: vector (PDF, SVG, EMF, EPS) and pixels at a resolution (PNG, TIFF, JPEG, GIF; JPEG is always on white).
 export const PICTURES: ExportFormat[] = ["pdf", "png", "svg", "emf", "eps", "tif", "jpg", "gif"];
 export const RASTERS: ExportFormat[] = ["png", "tif", "jpg", "gif"];
+// The pictures that carry the drawing's CDXML (the PDF as ChemDraw's does, the EMF in a comment, the PNG in a chunk), so
+// they open, drop and paste back into Octet as the drawing, from a file or copied back out of Word.
+export const CARRY_CDXML: ExportFormat[] = ["pdf", "png", "emf"];
 // A picture format's short name, as Quick export's menu item says it.
 export const shortName = (f: ExportFormat) => (f === "tif" ? "TIFF" : f === "jpg" ? "JPEG" : f.toUpperCase());
 // The MDL formats, each V3000 (as ChemDraw 26.1 saves them) and V2000, as ChemDraw lists them.
@@ -112,12 +117,35 @@ export function withMargin(svg: string, pt: number): string {
   return svg.replace(/^(<svg[^>]*?)\swidth="([\d.]+)pt"\sheight="([\d.]+)pt"\sviewBox="([-\d.]+) ([-\d.]+) ([\d.]+) ([\d.]+)"/, (_, head, w, h, x, y, vw, vh) =>
     `${head} width="${+w + 2 * m}pt" height="${+h + 2 * m}pt" viewBox="${+x - m} ${+y - m} ${+vw + 2 * m} ${+vh + 2 * m}"`);
 }
+// Raster resolution: any dpi from 36 to 2400 (Rust clamps to the same), with these as quick picks (1440 is ChemDraw's
+// highest). A picture has at most 100 million pixels and 20,000 on a side (draw in src-tauri/src/export.rs).
+export const DPI_MIN = 36, DPI_MAX = 2400, MAX_PIXELS = 100e6, MAX_SIDE = 20000;
+export const DPIS = [72, 150, 300, 350, 600, 1200, 1440];
+// Pixels across `pt` points at `dpi`, as export.rs counts them (a part pixel counts, a rounding error does not).
+export const pixelsAt = (pt: number, dpi: number) => Math.max(1, Math.ceil((pt * dpi) / 72 - 0.01));
+// The dpi that makes `pt` points `px` pixels across, kept in range.
+export const dpiFor = (px: number, pt: number) => Math.max(DPI_MIN, Math.min(DPI_MAX, (px * 72) / pt));
+export const tooLarge = (w: number, h: number) => w > MAX_SIDE || h > MAX_SIDE || w * h > MAX_PIXELS;
+// A picture from withMargin on a background colour (#rrggbb), the whole view box filled behind the drawing.
+export function withBackground(svg: string, hex: string): string {
+  if (!/^#[0-9a-f]{6}$/i.test(hex)) return svg;
+  const box = /^<svg[^>]*?\sviewBox="([-\d.]+) ([-\d.]+) ([\d.]+) ([\d.]+)"[^>]*>/.exec(svg);
+  return box ? `${box[0]}<rect x="${box[1]}" y="${box[2]}" width="${box[3]}" height="${box[4]}" fill="${hex}"/>${svg.slice(box[0].length)}` : svg;
+}
+// A picture as a format saves it: with the margin, and for a raster format its background. Transparent only where the
+// format has it (JPEG has none); "page" is the drawing's own page colour (`page`), and white when it has none.
+export function pictureAs(svg: string, f: { format: ExportFormat; margin: number; background: "white" | "transparent" | "page" }, page?: string): { svg: string; transparent: boolean } {
+  const m = withMargin(svg, f.margin), raster = RASTERS.includes(f.format);
+  if (raster && f.background === "page" && page) return { svg: withBackground(m, page), transparent: false };
+  return { svg: m, transparent: raster && f.format !== "jpg" && f.background === "transparent" };
+}
 // File > Export…: the drawing in every form the page has (svg from standaloneSvg). The app asks where to save,
-// offering those formats (or only `format`), and writes the one the file name's extension asks for. The PDF
-// carries the CDXML, as on the clipboard. PNG at `dpi` of true size (300 if not given), white unless
-// `transparent`. mdl: the text of the MDL format asked for. Resolves to the path written, or null if cancelled.
+// offering those formats (or only `format`), and writes the one the file name's extension asks for. The PDF, PNG
+// and EMF carry the CDXML (CARRY_CDXML), as on the clipboard. PNG at `dpi` of true size (300 if not given), white unless
+// `transparent`; JPEG at `quality` (1 to 100, 95 if not given). mdl: the text of the MDL format asked for; csv: Home's
+// Experiments list. Resolves to the path written, or null if cancelled.
 export type ExportRequest = {
-  name: string; format?: ExportFormat; oct?: string; svg?: string; cdxml?: string; cdx?: string; mdl?: string; smiles?: string; inchi?: string;
-  dpi?: number; transparent?: boolean;
+  name: string; format?: ExportFormat | "csv"; csv?: string; oct?: string; svg?: string; cdxml?: string; cdx?: string; mdl?: string; smiles?: string; inchi?: string;
+  dpi?: number; transparent?: boolean; quality?: number;
 };
 export const exportFile = (request: ExportRequest) => invoke<string | null>("export_file", { export: request });

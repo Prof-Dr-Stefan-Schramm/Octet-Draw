@@ -208,7 +208,7 @@ export function problems(m: Mol, stereo?: StereoFacts, all = false): Problem[] {
     if (seen.has(pair)) bondOf(k, { type: "misc", message: "Two bonds join the same two atoms. Delete one of them." });
     seen.add(pair);
     // A lone single bond between two unlabelled carbons reads as ethane, which is seldom what was meant.
-    if (b.type === 1 && count[i] === 1 && count[j] === 1 && plain(i) && plain(j) && !m.atoms[i].charge && !m.atoms[j].charge)
+    if (b.type === 1 && count[i] === 1 && count[j] === 1 && plain(i) && plain(j) && !m.atoms[i].charge && !m.atoms[j].charge && !m.atoms[i].radical && !m.atoms[j].radical)
       bondOf(k, { type: "isolated", message: "Octet reads this lone bond as ethane. To draw a line, use the Line tool." });
   });
   // A hydrogen bond goes from an explicit H to an acceptor atom, as ChemDraw's Invalid or ambiguous H-Bond warning asks.
@@ -236,6 +236,51 @@ export function problems(m: Mol, stereo?: StereoFacts, all = false): Problem[] {
   return out;
 }
 const ACCEPTORS = new Set(["N", "O", "F", "S", "Se", "P", "Cl", "Br", "I"]);
+
+// Hide warnings: Display Warnings off (IgnoreWarnings, saved with the drawing) on each problem's atom, bond or
+// brackets. A caption's Interpret Chemically goes off instead, as ChemDraw's help says to do.
+export function hideProblems(m: Mol, list: Omit<Problem, "type" | "message">[]): Mol {
+  const on = (k: "atom" | "bond" | "shape" | "caption") => new Set(list.map((p) => p[k]).filter((v) => v !== undefined));
+  const atoms = on("atom"), bonds = on("bond"), shapes = on("shape"), captions = on("caption");
+  return {
+    ...m, atoms: m.atoms.map((a, i) => (atoms.has(i) ? { ...a, ignoreWarnings: true as const } : a)),
+    bonds: m.bonds.map((b, k) => (bonds.has(k) ? { ...b, ignoreWarnings: true as const } : b)),
+    ...(m.shapes ? { shapes: m.shapes.map((x) => (shapes.has(x.id) ? { ...x, ignoreWarnings: true as const } : x)) } : {}),
+    ...(m.captions ? { captions: m.captions.map((c) => (captions.has(c.id) ? { ...c, chemical: false as const } : c)) } : {}),
+  };
+}
+// The red marks (Editor problemMarks): a ring round an atom or a bond's middle, a box round brackets padded by pad.
+export const MARK = { atom: 0.42, bond: 0.5, pad: 0.15 };
+// The problem whose red mark is under p (stroke included), so a right-click on the mark offers its warning.
+export function problemAt(m: Mol, list: Problem[], p: P): Problem | undefined {
+  const near = (q: P, r: number) => Math.hypot(q[0] - p[0], q[1] - p[1]) <= r + 0.08;
+  return list.find((x) => {
+    if (x.atom !== undefined) return !!m.atoms[x.atom] && near(pos(m, x.atom), MARK.atom);
+    const b = x.bond !== undefined ? m.bonds[x.bond] : undefined;
+    if (b) { const [q, r] = b.atoms.map((i) => pos(m, i)); return near([(q[0] + r[0]) / 2, (q[1] + r[1]) / 2], MARK.bond); }
+    const sh = x.shape !== undefined ? m.shapes?.find((s) => s.id === x.shape) : undefined, d = MARK.pad + 0.08;
+    return !!sh && [0, 1].every((k) => p[k] >= Math.min(sh.from[k], sh.to[k]) - d && p[k] <= Math.max(sh.from[k], sh.to[k]) + d);
+  });
+}
+// Show warnings: Display Warnings back on for the atoms given, the bonds between them and the brackets given, or for
+// the whole drawing when neither is given. hiddenWarnings: whether any of them has it off.
+const hiddenIn = (m: Mol, atoms?: Set<number>, shapes?: Set<number>) => ({
+  atom: (i: number) => !!m.atoms[i]?.ignoreWarnings && (!atoms || atoms.has(i)),
+  bond: (b: Bond) => !!b.ignoreWarnings && (!atoms || b.atoms.every((i) => atoms.has(i))),
+  shape: (x: { id: number; ignoreWarnings?: true }) => !!x.ignoreWarnings && (!shapes || shapes.has(x.id)),
+});
+export function hiddenWarnings(m: Mol, atoms?: Set<number>, shapes?: Set<number>): boolean {
+  const h = hiddenIn(m, atoms, shapes);
+  return m.atoms.some((_, i) => h.atom(i)) || m.bonds.some(h.bond) || !!m.shapes?.some(h.shape);
+}
+export function showWarnings(m: Mol, atoms?: Set<number>, shapes?: Set<number>): Mol {
+  const h = hiddenIn(m, atoms, shapes);
+  return {
+    ...m, atoms: m.atoms.map((a, i) => (h.atom(i) ? { ...a, ignoreWarnings: undefined } : a)),
+    bonds: m.bonds.map((b) => (h.bond(b) ? { ...b, ignoreWarnings: undefined } : b)),
+    ...(m.shapes ? { shapes: m.shapes.map((x) => (h.shape(x) ? { ...x, ignoreWarnings: undefined } : x)) } : {}),
+  };
+}
 
 // Hidden H atoms (Toggle Hydrogen Display) on an atom with a warning are shown again, as ChemDraw shows them, so the
 // warning can be read. While the warning stays, they stay shown.

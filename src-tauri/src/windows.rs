@@ -29,6 +29,9 @@ impl Info {
     pub fn label(&self) -> &str {
         &self.label
     }
+    pub fn name(&self) -> &str {
+        &self.name
+    }
 }
 
 // What each new window is to open, until its page takes it, and what each drawing window shows.
@@ -100,6 +103,15 @@ pub async fn open_window(app: AppHandle, windows: State<'_, Windows>, start: ser
     Ok(())
 }
 
+// Close closes the window. On Linux the menu bar comes off first: muda keeps each GTK window's menu bar under the
+// window's address and never lets it go, so a new window made at the same address got no menu bar (issue 4).
+#[tauri::command]
+pub async fn close_window(window: Window) -> Result<(), String> {
+    #[cfg(target_os = "linux")]
+    let _ = window.remove_menu();
+    window.destroy().map_err(|e| e.to_string())
+}
+
 // What this window opens: once, then nothing.
 #[tauri::command]
 pub fn window_start(window: Window, windows: State<'_, Windows>) -> Option<serde_json::Value> {
@@ -107,9 +119,10 @@ pub fn window_start(window: Window, windows: State<'_, Windows>) -> Option<serde
 }
 
 // A drawing window's name, file and unsaved changes, for Home, and its picture when it sends one (else the last).
+// Home's window sends them too while it holds a drawing.
 #[tauri::command]
 pub fn window_info(app: AppHandle, window: Window, windows: State<'_, Windows>, name: String, path: Option<String>, edited: bool, picture: Option<String>) {
-    if !window.label().starts_with("draw-") {
+    if !ours(window.label()) {
         return;
     }
     let picture = picture.filter(|p| p.len() <= 400_000);
@@ -127,24 +140,38 @@ pub fn window_info(app: AppHandle, window: Window, windows: State<'_, Windows>, 
     changed(&app);
 }
 
+// Home's window holds no drawing: it leaves the list.
+#[tauri::command]
+pub fn window_empty(app: AppHandle, window: Window) {
+    if window.label() == "main" {
+        closed(&app, "main");
+    }
+}
+
 #[tauri::command]
 pub fn window_list(windows: State<'_, Windows>) -> Vec<Info> {
     windows.open.lock().unwrap().clone()
 }
 
-// A window from Home's list, in front.
+// A window from Home's list, in front. Home's window shows its drawing.
 #[tauri::command]
 pub async fn window_show(app: AppHandle, label: String) -> Result<(), String> {
     let window = app.get_webview_window(&label).filter(|_| ours(&label)).ok_or("This window is closed.")?;
     let _ = window.unminimize();
     let _ = window.show();
-    window.set_focus().map_err(|e| e.to_string())
+    window.set_focus().map_err(|e| e.to_string())?;
+    if label == "main" {
+        let _ = app.emit_to("main", "show-drawing", ());
+    }
+    Ok(())
 }
 
-// File > Home from a drawing window: Home in front, opened again if it was closed.
+// File > Home from a drawing window: Home in front, opened again if it was closed. When Home's window holds the first
+// drawing, Home shows over it.
 #[tauri::command]
 pub async fn show_home(app: AppHandle) -> Result<(), String> {
-    home(&app).map_err(|e| e.to_string())
+    home(&app).map_err(|e| e.to_string())?;
+    app.emit_to("main", "show-home", ()).map_err(|e| e.to_string())
 }
 
 pub fn home(app: &AppHandle) -> tauri::Result<()> {

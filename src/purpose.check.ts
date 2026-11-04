@@ -3,6 +3,7 @@
 import assert from "node:assert/strict";
 import { DEFAULT_STYLE, PAGES, PRESETS, PURPOSES, QUICK, QUICK_STYLE, forPurpose, outlines, pageSize, pickPage, presetOf, purposeOf, purposeStyle, readPurposes, readStyle, styleFor, withScale } from "./docstyle.ts";
 import { fromCdxml, toCdxml } from "./cdxml.ts";
+import { readFileSync } from "node:fs";
 
 // Each purpose is ACS Document 1996 at its scale, on its page.
 {
@@ -62,6 +63,13 @@ assert.deepEqual(pickPage({ ...DEFAULT_STYLE, landscape: true }, "A3"), { page: 
   assert.deepEqual(names(outlines(DEFAULT_STYLE)), ["A4", "A3", "A2"], "no purpose: the page's series, as before");
   assert.deepEqual(names(outlines({ ...DEFAULT_STYLE, page: "Letter" })), ["Letter", "Legal", "Tabloid"]);
   assert.deepEqual(names(outlines({ ...DEFAULT_STYLE, page: "Custom", custom: [100, 50] })), ["100 × 50 mm"]);
+  // Settings > Page edges > Page only: the page's edge alone, for every purpose.
+  assert.deepEqual(names(outlines(purposeStyle("paper"), "paper", false)), ["A4"], "Page only hides the ACS columns");
+  assert.deepEqual(outlines(purposeStyle("poster"), "poster", false), [["A0", 841, 1189]]);
+  assert.deepEqual(names(outlines(DEFAULT_STYLE, undefined, false)), ["A4"]);
+  // Page only is Octet's, for every drawing: a template being made keeps its own Page edges switch, as with Ruler units.
+  const edges = /d\("document", "Page", "Page edges", "[^"]*", (.*)\n/.exec(readFileSync(new URL("SettingsWindow.tsx", import.meta.url), "utf8"))?.[1];
+  assert.match(edges ?? "", /^p\.template \? <Switch on=\{style\.edges\}/, "a template being made shows its own Page edges switch");
 }
 
 // An open drawing given a purpose takes its sizes and page, and keeps its own background and label choices.

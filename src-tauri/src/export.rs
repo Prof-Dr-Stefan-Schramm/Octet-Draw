@@ -114,11 +114,12 @@ pub fn make_pdf(svg: &str, cdxml: Option<&str>) -> Result<Vec<u8>, String> {
     Ok(pdf.finish())
 }
 
-// The SVG drawn at `dpi` of its true size, white or transparent behind.
+// The SVG drawn at `dpi` of its true size, white or transparent behind. A part pixel at the edge counts; a rounding
+// error does not (pixelsAt in src/export.ts counts the same, so Export… shows the size written).
 fn draw(tree: &usvg::Tree, dpi: f32, transparent: bool) -> Result<resvg::tiny_skia::Pixmap, String> {
     use resvg::tiny_skia::{Color, Pixmap, Transform};
     let scale = dpi / 96.0;
-    let (w, h) = ((tree.size().width() * scale).ceil() as u32, (tree.size().height() * scale).ceil() as u32);
+    let (w, h) = ((tree.size().width() * scale - 0.01).ceil().max(1.0) as u32, (tree.size().height() * scale - 0.01).ceil().max(1.0) as u32);
     let too_big = "This picture is too large at this resolution. Choose a lower resolution.";
     if w > 20_000 || h > 20_000 || u64::from(w) * u64::from(h) > 100_000_000 {
         return Err(too_big.into());
@@ -150,13 +151,17 @@ fn dpi_of(dpi: f32) -> f32 {
 }
 
 // A PNG of the SVG at `dpi` (of its true size), white or transparent behind. It records its resolution, so
-// Word, PowerPoint and Keynote place it at true size.
-pub fn make_png(svg: &str, dpi: f32, transparent: bool) -> Result<Vec<u8>, String> {
+// Word, PowerPoint and Keynote place it at true size. With `cdxml`, the drawing goes in it too (png_of).
+pub fn make_png(svg: &str, dpi: f32, transparent: bool, cdxml: Option<&str>) -> Result<Vec<u8>, String> {
     let dpi = dpi_of(dpi);
-    png_of(&draw(&tree(svg)?, dpi, transparent)?, dpi)
+    png_of(&draw(&tree(svg)?, dpi, transparent)?, dpi, cdxml)
 }
 
-fn png_of(pixmap: &resvg::tiny_skia::Pixmap, dpi: f32) -> Result<Vec<u8>, String> {
+// The PNG's keyword for the drawing's CDXML, in a compressed iTXt chunk before the pixels, so the picture opens,
+// drops and pastes back into Octet as the drawing (cdxml_from_png). Viewers and Office skip the chunk.
+const PNG_KEYWORD: &str = "CDXML";
+
+fn png_of(pixmap: &resvg::tiny_skia::Pixmap, dpi: f32, cdxml: Option<&str>) -> Result<Vec<u8>, String> {
     let (w, h, rgba) = rgba_of(pixmap);
     let mut out = Vec::new();
     let mut enc = png::Encoder::new(&mut out, w, h);
@@ -165,23 +170,28 @@ fn png_of(pixmap: &resvg::tiny_skia::Pixmap, dpi: f32) -> Result<Vec<u8>, String
     let ppm = (dpi / 0.0254).round() as u32;
     enc.set_pixel_dims(Some(png::PixelDimensions { xppu: ppm, yppu: ppm, unit: png::Unit::Meter }));
     let mut writer = enc.write_header().map_err(|e| e.to_string())?;
+    if let Some(x) = cdxml {
+        let mut chunk = png::text_metadata::ITXtChunk::new(PNG_KEYWORD, cdxml_document(x));
+        chunk.compressed = true;
+        writer.write_text_chunk(&chunk).map_err(|e| e.to_string())?;
+    }
     writer.write_image_data(&rgba).map_err(|e| e.to_string())?;
     writer.finish().map_err(|e| e.to_string())?;
     Ok(out)
 }
 
-// The picture on the clipboard on Windows and Linux, where Office pastes no PDF: a transparent PNG at 600 dpi of
-// true size (lower for a large drawing, so it has at most 16 million pixels and 8,192 on a side), and with `bitmap`
-// the same on white as a Windows bitmap (a DIB), for programs that read no PNG.
-pub fn clipboard_pictures(svg: &str, bitmap: bool) -> Result<(Vec<u8>, Option<Vec<u8>>), String> {
-    clipboard_pixels(&tree(svg)?, bitmap)
+// The picture on the clipboard on Windows and Linux, where Office pastes no PDF: a transparent PNG at `dpi` of true
+// size, the export resolution (lower for a large drawing, so it has at most 16 million pixels and 8,192 on a side),
+// with `cdxml` in it, and with `bitmap` the same on white as a Windows bitmap (a DIB), for programs that read no PNG.
+pub fn clipboard_pictures(svg: &str, bitmap: bool, dpi: f32, cdxml: Option<&str>) -> Result<(Vec<u8>, Option<Vec<u8>>), String> {
+    clipboard_pixels(&tree(svg)?, bitmap, dpi, cdxml)
 }
 
-pub fn clipboard_pixels(tree: &usvg::Tree, bitmap: bool) -> Result<(Vec<u8>, Option<Vec<u8>>), String> {
+pub fn clipboard_pixels(tree: &usvg::Tree, bitmap: bool, dpi: f32, cdxml: Option<&str>) -> Result<(Vec<u8>, Option<Vec<u8>>), String> {
     let (w, h) = (tree.size().width().max(1.0), tree.size().height().max(1.0));
-    let dpi = 600f32.min(96.0 * (16e6 / (w * h)).sqrt()).min(96.0 * 8192.0 / w.max(h));
+    let dpi = dpi_of(dpi).min(96.0 * (16e6 / (w * h)).sqrt()).min(96.0 * 8192.0 / w.max(h));
     let pixmap = draw(tree, dpi, true)?;
-    Ok((png_of(&pixmap, dpi)?, bitmap.then(|| dib(&pixmap, dpi))))
+    Ok((png_of(&pixmap, dpi, cdxml)?, bitmap.then(|| dib(&pixmap, dpi))))
 }
 
 // A device-independent bitmap as the Windows clipboard holds it (CF_DIB): a BITMAPINFOHEADER, then rows of blue,
@@ -214,14 +224,14 @@ fn dib(pixmap: &resvg::tiny_skia::Pixmap, dpi: f32) -> Vec<u8> {
     out
 }
 
-// A JPEG of the SVG at `dpi`, on white (JPEG has no transparency), at quality 95, with its resolution.
-pub fn make_jpeg(svg: &str, dpi: f32) -> Result<Vec<u8>, String> {
+// A JPEG of the SVG at `dpi`, on white (JPEG has no transparency), at `quality` (1 to 100), with its resolution.
+pub fn make_jpeg(svg: &str, dpi: f32, quality: u8) -> Result<Vec<u8>, String> {
     use image::codecs::jpeg::{JpegEncoder, PixelDensity};
     let dpi = dpi_of(dpi);
     let (w, h, rgba) = pixels(svg, dpi, false)?;
     let rgb: Vec<u8> = rgba.chunks_exact(4).flat_map(|p| [p[0], p[1], p[2]]).collect();
     let mut out = Vec::new();
-    let mut enc = JpegEncoder::new_with_quality(&mut out, 95);
+    let mut enc = JpegEncoder::new_with_quality(&mut out, quality.clamp(1, 100));
     enc.set_pixel_density(PixelDensity::dpi(dpi.round() as u16));
     enc.encode(&rgb, w, h, image::ExtendedColorType::Rgb8).map_err(|e| e.to_string())?;
     Ok(out)
@@ -333,7 +343,7 @@ fn packbits(line: &[u8], out: &mut Vec<u8>) {
 // are V3000, and V2000 apart, with ChemDraw's names. The pictures are ChemDraw's Save As pictures. A template set saved
 // as a ChemDraw template file (src/ctp.ts) is a template document (CTP) or stationery (CTS), with ChemDraw's names: the
 // same CDX file.
-const FORMATS: [(&str, &str, &[&str]); 23] = [
+const FORMATS: [(&str, &str, &[&str]); 24] = [
     ("oct", "Octet drawing", &["oct"]),
     ("pdf", "PDF", &["pdf"]),
     ("svg", "SVG", &["svg"]),
@@ -357,6 +367,7 @@ const FORMATS: [(&str, &str, &[&str]); 23] = [
     ("inchi", "InChI", &["inchi", "txt"]),
     ("ctp", "ChemDraw Template (CTP)", &["ctp"]),
     ("cts", "ChemDraw Template Style Sheet (CTS)", &["cts"]),
+    ("csv", "CSV", &["csv"]),
 ];
 
 #[derive(serde::Deserialize)]
@@ -371,8 +382,10 @@ pub struct Export {
     mdl: Option<String>, // the text of the MDL format asked for
     smiles: Option<String>,
     inchi: Option<String>,
+    csv: Option<String>, // Home's Experiments list
     dpi: Option<f32>,
     transparent: Option<bool>,
+    quality: Option<u8>, // JPEG
 }
 
 // Files exported this session. The page can ask to show one of them in the file manager (reveal_file), never
@@ -394,6 +407,7 @@ pub async fn export_file(app: AppHandle, exported: State<'_, Exported>, export: 
         "inchi" => e.inchi.is_some(),
         "smi" => e.smiles.is_some(),
         "ctp" | "cts" => e.ctp.is_some(),
+        "csv" => e.csv.is_some(),
         _ => e.mdl.is_some(),
     };
     let offered: Vec<_> = FORMATS.iter().filter(|f| has(f.0) && e.format.as_deref().is_none_or(|x| x == f.0)).collect();
@@ -422,11 +436,11 @@ pub async fn export_file(app: AppHandle, exported: State<'_, Exported>, export: 
     let bytes = match format {
         "pdf" => make_pdf(e.svg.as_deref().unwrap_or_default(), e.cdxml.as_deref())?,
         "svg" => format!("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n{}\n", e.svg.as_deref().unwrap_or_default()).into_bytes(),
-        "png" => make_png(e.svg.as_deref().unwrap_or_default(), e.dpi.unwrap_or(300.0), e.transparent.unwrap_or(false))?,
+        "png" => make_png(e.svg.as_deref().unwrap_or_default(), e.dpi.unwrap_or(300.0), e.transparent.unwrap_or(false), e.cdxml.as_deref())?,
         "tif" => make_tiff(e.svg.as_deref().unwrap_or_default(), e.dpi.unwrap_or(300.0), e.transparent.unwrap_or(false))?,
-        "jpg" => make_jpeg(e.svg.as_deref().unwrap_or_default(), e.dpi.unwrap_or(300.0))?,
+        "jpg" => make_jpeg(e.svg.as_deref().unwrap_or_default(), e.dpi.unwrap_or(300.0), e.quality.unwrap_or(95))?,
         "gif" => make_gif(e.svg.as_deref().unwrap_or_default(), e.dpi.unwrap_or(300.0), e.transparent.unwrap_or(false))?,
-        "emf" => crate::vector::make_emf(&tree(e.svg.as_deref().unwrap_or_default())?, None),
+        "emf" => crate::vector::make_emf(&tree(e.svg.as_deref().unwrap_or_default())?, e.cdxml.as_deref()),
         "eps" => crate::vector::make_eps(&tree(e.svg.as_deref().unwrap_or_default())?),
         "oct" => text(&e.oct),
         "cdxml" => text(&e.cdxml),
@@ -434,9 +448,12 @@ pub async fn export_file(app: AppHandle, exported: State<'_, Exported>, export: 
         "ctp" | "cts" => base64::engine::general_purpose::STANDARD.decode(e.ctp.as_deref().unwrap_or_default()).map_err(|_| "Octet cannot write this template file.".to_string())?,
         "inchi" => format!("{}\n", e.inchi.as_deref().unwrap_or_default().trim()).into_bytes(),
         "smi" => format!("{}\n", e.smiles.as_deref().unwrap_or_default().trim()).into_bytes(),
+        "csv" => text(&e.csv),
         _ => text(&e.mdl),
     };
     crate::write_atomic(&path, &bytes).map_err(|e| e.to_string())?;
+    // Export over the open drawing's own file is Octet's write: Save does not ask about another app (issue 2).
+    crate::stamp(&app, &path);
     exported.0.lock().unwrap().insert(path.clone());
     Ok(Some(path.to_string_lossy().into_owned()))
 }
@@ -529,7 +546,11 @@ fn xml_stream(pdf: &[u8], at: usize, marked: bool, budget: &Cell<usize>) -> Opti
         e -= usize::from(e > i && pdf[e - 1] == b'\r');
         Some(e)
     })?;
-    let data = &pdf[i..end];
+    cdxml_of(&pdf[i..end], flate)
+}
+
+// `data` as CDXML, inflated (zlib) first when `flate`: None if it is not CDXML or comes to more than 32 MB.
+fn cdxml_of(data: &[u8], flate: bool) -> Option<String> {
     if !flate {
         return (data.len() <= MAX_XML && is_cdxml(data)).then(|| String::from_utf8_lossy(data).into_owned());
     }
@@ -544,6 +565,48 @@ fn xml_stream(pdf: &[u8], at: usize, marked: bool, budget: &Cell<usize>) -> Opti
         return None;
     }
     inflate(data, MAX_XML).ok().map(|v| String::from_utf8_lossy(&v).into_owned())
+}
+
+// The CDXML in a PNG's iTXt chunk named CDXML (png_of), if it has one. The chunks are walked with bounds checks.
+pub fn cdxml_from_png(png: &[u8]) -> Option<String> {
+    if png.len() > MAX_PDF || !png.starts_with(b"\x89PNG\r\n\x1a\n") {
+        return None;
+    }
+    let mut at = 8;
+    while let Some(head) = png.get(at..at + 8) {
+        let n = u32::from_be_bytes([head[0], head[1], head[2], head[3]]) as usize;
+        let data = png.get(at + 8..(at + 8).checked_add(n)?)?;
+        match &head[4..] {
+            b"IEND" => return None,
+            // Keyword, NUL, compression flag and method, language tag, NUL, translated keyword, NUL, text.
+            b"iTXt" if data.starts_with(PNG_KEYWORD.as_bytes()) && data.get(PNG_KEYWORD.len()) == Some(&0) => {
+                let rest = &data[PNG_KEYWORD.len() + 1..];
+                let (flag, method) = (*rest.first()?, *rest.get(1)?);
+                let mut text = rest.get(2..)?;
+                for _ in 0..2 {
+                    text = &text[text.iter().position(|&c| c == 0)? + 1..];
+                }
+                return if flag > 1 || method != 0 { None } else { cdxml_of(text, flag == 1) };
+            }
+            _ => {}
+        }
+        at += n + 12; // length, type, data and CRC
+    }
+    None
+}
+
+// The drawing in a picture file or a picture from the clipboard: the CDXML in a PDF (Octet's or ChemDraw's), in an
+// EMF's comment or in a PNG's chunk (Octet's). None for any other picture.
+pub fn cdxml_from_picture(b: &[u8]) -> Option<String> {
+    if b.starts_with(b"%PDF") {
+        cdxml_from_pdf(b)
+    } else if b.starts_with(b"\x89PNG") {
+        cdxml_from_png(b)
+    } else if b.get(40..44) == Some(b" EMF") {
+        crate::vector::cdxml_from_emf(b)
+    } else {
+        None
+    }
 }
 
 fn find(h: &[u8], n: &[u8]) -> Option<usize> {
@@ -827,7 +890,7 @@ mod tests {
     #[test]
     fn rasters_have_their_size_and_resolution() {
         // 86 x 65 pt at 144 dpi: 172 x 130 px.
-        let jpeg = make_jpeg(SVG, 144.0).unwrap();
+        let jpeg = make_jpeg(SVG, 144.0, 95).unwrap();
         let img = image::load_from_memory(&jpeg).unwrap();
         assert_eq!((img.width(), img.height()), (172, 130));
         let gif = make_gif(SVG, 144.0, true).unwrap();
@@ -978,7 +1041,7 @@ mod tests {
             assert!(rgba[k] > 200 && rgba[k + 1] < 60 && rgba[k + 3] > 200, "{mime}: {:?}", &rgba[k..k + 4]);
             assert!(find(&make_pdf(&svg, None).unwrap(), b"/Subtype /Image").is_some(), "{mime}");
             // The clipboard's PNG on Windows and Linux, and EMF and EPS (vector.rs, which checks where they go).
-            let mut reader = png::Decoder::new(std::io::Cursor::new(clipboard_pictures(&svg, false).unwrap().0)).read_info().unwrap();
+            let mut reader = png::Decoder::new(std::io::Cursor::new(clipboard_pictures(&svg, false, 600.0, None).unwrap().0)).read_info().unwrap();
             let mut buf = vec![0; reader.output_buffer_size()];
             let info = reader.next_frame(&mut buf).unwrap();
             let k = ((info.height / 2) * info.width + info.width / 2) as usize * 4;
@@ -990,11 +1053,65 @@ mod tests {
 
     #[test]
     fn png_is_true_size_at_the_resolution() {
-        let png = make_png(SVG, 300.0, true).unwrap();
+        let png = make_png(SVG, 300.0, true, None).unwrap();
         let header = png::Decoder::new(std::io::Cursor::new(png)).read_info().unwrap().info().clone();
         // 86 pt at 300 dpi.
         assert_eq!((header.width, header.height), (359, 271));
         assert_eq!(header.pixel_dims.unwrap().xppu, 11811);
+    }
+
+    // A width typed in pixels sets the dpi behind it (dpiFor in src/export.ts): the PNG comes out that wide, with no
+    // extra pixel from rounding. JPEG takes its quality, the clipboard's PNG the export dpi, and a picture over 100
+    // million pixels is refused with a plain message.
+    #[test]
+    fn typed_size_quality_clipboard_dpi_and_cap() {
+        let size = |png: Vec<u8>| {
+            let i = png::Decoder::new(std::io::Cursor::new(png)).read_info().unwrap().info().clone();
+            (i.width, i.height)
+        };
+        assert_eq!(size(make_png(SVG, 1000.0 * 72.0 / 86.0, true, None).unwrap()).0, 1000);
+        assert_eq!(size(make_png(SVG, 72.0, true, None).unwrap()), (86, 65));
+        assert!(make_jpeg(SVG, 300.0, 20).unwrap().len() < make_jpeg(SVG, 300.0, 100).unwrap().len());
+        assert_eq!(size(clipboard_pictures(SVG, false, 150.0, None).unwrap().0), (180, 136));
+        let big = r#"<svg xmlns="http://www.w3.org/2000/svg" width="400pt" height="400pt" viewBox="0 0 400 400"/>"#;
+        assert!(make_png(big, 2400.0, true, None).unwrap_err().contains("too large"));
+    }
+
+    // A PNG Octet writes carries the drawing in an iTXt chunk before the pixels, and reads back as it went in; the
+    // picture still decodes. A PNG from elsewhere, or a hostile one, gives nothing.
+    #[test]
+    fn png_carries_cdxml_and_reads_back() {
+        let png = make_png(SVG, 72.0, true, Some(CDXML)).unwrap();
+        assert_eq!(cdxml_from_png(&png).as_deref(), Some(CDXML));
+        assert_eq!(cdxml_from_picture(&png).as_deref(), Some(CDXML));
+        assert!(png::Decoder::new(std::io::Cursor::new(&png)).read_info().is_ok());
+        assert_eq!(cdxml_from_png(&make_png(SVG, 72.0, true, None).unwrap()), None);
+        // Cut short anywhere, it gives nothing or the drawing (the chunk comes before the pixels), and never panics.
+        for k in (0..png.len()).step_by(7) {
+            let x = cdxml_from_png(&png[..k]);
+            assert!(x.is_none() || x.as_deref() == Some(CDXML));
+        }
+        let chunk = |kind: &[u8], data: &[u8]| [&(data.len() as u32).to_be_bytes()[..], kind, data, &[0; 4]].concat();
+        let sig = b"\x89PNG\r\n\x1a\n".as_slice();
+        let itxt = |flag: u8, text: &[u8]| chunk(b"iTXt", &[b"CDXML\0".as_slice(), &[flag, 0], b"\0\0", text].concat());
+        // Uncompressed, as another writer might put it: read.
+        assert_eq!(cdxml_from_png(&[sig, &itxt(0, CDXML.as_bytes())].concat()).as_deref(), Some(CDXML));
+        // A zip bomb that starts like CDXML stops at the 32 MB cap.
+        let mut big = CDXML.as_bytes().to_vec();
+        big.resize(40 << 20, b' ');
+        let bomb = miniz_oxide::deflate::compress_to_vec_zlib(&big, 1);
+        assert_eq!(cdxml_from_png(&[sig, &itxt(1, &bomb)].concat()), None);
+        for bad in [
+            [sig, &itxt(1, b"not zlib")].concat(),                           // a broken stream
+            [sig, &itxt(2, CDXML.as_bytes())].concat(),                      // an unknown compression flag
+            [sig, &itxt(0, b"<?xml version=\"1.0\"?><svg/>")].concat(),      // XML that is not CDXML
+            [sig, &chunk(b"tEXt", CDXML.as_bytes())].concat(),               // another chunk
+            [sig, &u32::MAX.to_be_bytes()[..], b"iTXt"].concat(),            // a length past the end
+            [sig, &chunk(b"iTXt", b"CDXML\0\x01")].concat(),                 // cut short in the chunk
+            [sig, &chunk(b"IEND", b""), &itxt(0, CDXML.as_bytes())].concat(), // after the end
+        ] {
+            assert_eq!(cdxml_from_png(&bad), None);
+        }
     }
 
     // Sam's clipboard dumps (ChemDraw's copy, and it copied back out of Word). Set OCTET_CLIPBOARD_DUMPS to the
@@ -1007,6 +1124,10 @@ mod tests {
             let x = cdxml_from_pdf(&pdf).unwrap();
             assert!(x.contains("<CDXML"), "{sub}");
         }
+        // Octet's PDF copied back out of Word for Mac is the same file, so it reads back as it went in.
+        let ours = std::fs::read(format!("{dir}/octet-aspirin/0_com.adobe.pdf")).unwrap();
+        assert_eq!(std::fs::read(format!("{dir}/word-octet-aspirin/0_com.adobe.pdf")).unwrap(), ours);
+        assert!(cdxml_from_pdf(&ours).unwrap().contains("<CDXML"));
         let old = std::fs::read(format!("{dir}/word-octet-pdf/0_com.adobe.pdf")).unwrap();
         assert!(cdxml_from_pdf(&old).unwrap().contains("<CDXML"));
     }

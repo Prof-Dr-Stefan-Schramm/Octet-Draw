@@ -11,7 +11,8 @@
 //   would take it before the EMF and paste pixels. The other formats
 //   have the names ChemDraw's own clipboard code uses there: "ChemDraw Interchange Format" (CDX), "CDXML", "MDLCT" (a
 //   molfile as length-prefixed lines) and "SMILES".
-// - Linux: the picture is a PNG and an SVG, and the chemistry has its MIME types (chemical/x-cdx and so on).
+// - Linux: the picture is a PNG (with the CDXML in a chunk) and an SVG, and the chemistry has its MIME types
+//   (chemical/x-cdx and so on).
 //
 // The webview keeps a page's own clipboard types in a form of its own and shows a page only text, HTML and URLs from
 // other apps, so the page cannot read these types itself: paste calls read_clipboard. Paste also reads a picture (a
@@ -62,7 +63,9 @@ enum Kind {
     Smiles,
     Octet,
     Text,
-    FileUrl, // read only: a copied file, for a spectrum (spectrum.rs)
+    FileUrl, // read only: a copied file, for a spectrum (spectrum.rs) or a picture with a drawing in it
+    Office,  // read only: Office's own copy of a picture, a zip with the picture's file in it (cdxml_from_office)
+    Keynote, // read only: Keynote's copy keeps the picture's file under a numbered type (com.apple.iWork.TSPData.364)
 }
 
 // Each system's names for a kind, in the order copy writes them; paste reads the first one there. Empty: that system's
@@ -82,6 +85,9 @@ fn names(s: System, k: Kind) -> &'static [&'static str] {
             Png => &["public.png"],
             Bitmap => &["public.tiff"],
             FileUrl => &[FILE_URL],
+            Office => &["com.microsoft.Art--GVML-ClipFormat"],
+            // A prefix: mac::read gives the first such type that holds a PDF.
+            Keynote => &["com.apple.iWork.TSPData."],
             Svg | Emf => &[],
         },
         System::Windows => match k {
@@ -94,7 +100,8 @@ fn names(s: System, k: Kind) -> &'static [&'static str] {
             Smiles => &["SMILES"],
             Octet => &["application/x-octet+json"],
             Text => &[UNICODE_TEXT],
-            Pdf | Svg | FileUrl => &[],
+            Office => &["Art::GVML ClipFormat"],
+            Pdf | Svg | FileUrl | Keynote => &[],
         },
         System::Linux => match k {
             Png => &["image/png"],
@@ -106,7 +113,7 @@ fn names(s: System, k: Kind) -> &'static [&'static str] {
             Octet => &["application/x-octet+json"],
             Text => &["text/plain;charset=utf-8", "UTF8_STRING", "text/plain"],
             FileUrl => &["text/uri-list"],
-            Pdf | Bitmap | Emf => &[],
+            Pdf | Bitmap | Emf | Office | Keynote => &[],
         },
     }
 }
@@ -115,7 +122,7 @@ fn names(s: System, k: Kind) -> &'static [&'static str] {
 #[derive(serde::Serialize, Default, Debug, PartialEq)]
 pub struct Clip {
     octet: Option<String>,   // Octet's own JSON
-    cdxml: Option<String>,   // CDXML: ChemDraw's CDXML type, or hidden in a PDF (Octet's, ChemDraw's, or either after Word)
+    cdxml: Option<String>,   // CDXML: ChemDraw's CDXML type, or hidden in a picture (Octet's or ChemDraw's, or either after Word)
     cdx: Option<String>,     // ChemDraw's CDX, base64
     molfile: Option<String>, // a molfile or RXN file, with LF line ends
     smiles: Option<String>,
@@ -190,7 +197,7 @@ fn plain_text(s: System, b: Vec<u8>) -> Option<String> {
 // cdxml: hidden in the PDF (macOS), and also put on as its own type when `cdxml_type` is set. cdx: ChemDraw's binary
 // drawing.
 #[allow(clippy::too_many_arguments)]
-fn types(s: System, svg: Option<&str>, cdxml: Option<&str>, cdxml_type: bool, cdx: Option<Vec<u8>>, molfile: Option<&str>, smiles: Option<&str>, octet_json: Option<String>) -> Result<Vec<(&'static str, Vec<u8>)>, String> {
+fn types(s: System, svg: Option<&str>, dpi: f32, cdxml: Option<&str>, cdxml_type: bool, cdx: Option<Vec<u8>>, molfile: Option<&str>, smiles: Option<&str>, octet_json: Option<String>) -> Result<Vec<(&'static str, Vec<u8>)>, String> {
     let mut out: Vec<(&'static str, Vec<u8>)> = Vec::new();
     let mut put = |k: Kind, b: Vec<u8>| out.extend(names(s, k).iter().map(|n| (*n, b.clone())));
     if let Some(svg) = svg {
@@ -199,11 +206,11 @@ fn types(s: System, svg: Option<&str>, cdxml: Option<&str>, cdxml_type: bool, cd
         } else if s == System::Windows {
             let tree = crate::export::tree(svg)?;
             put(Kind::Emf, crate::vector::make_emf(&tree, cdxml));
-            if let (_, Some(b)) = crate::export::clipboard_pixels(&tree, true)? {
+            if let (_, Some(b)) = crate::export::clipboard_pixels(&tree, true, dpi, None)? {
                 put(Kind::Bitmap, b);
             }
         } else {
-            let (png, bitmap) = crate::export::clipboard_pictures(svg, false)?;
+            let (png, bitmap) = crate::export::clipboard_pictures(svg, false, dpi, cdxml)?;
             put(Kind::Png, png);
             if let Some(b) = bitmap {
                 put(Kind::Bitmap, b);
@@ -265,19 +272,82 @@ fn clip(s: System, read: impl Fn(&str) -> Option<Vec<u8>>) -> Clip {
         spectrum: None,
     };
     c.spectrum = crate::spectrum::from_clipboard(first(s, Kind::FileUrl, &read).and_then(text_of).as_deref(), c.text.as_deref());
-    // The PDF's CDXML when there is no Octet JSON or CDXML type: it holds the whole drawing, arrows, text and shapes
-    // too (REL-4, CH-2). ChemDraw's CDX is the page's next choice, for a copy with no PDF.
+    // The picture's CDXML when there is no Octet JSON or CDXML type: it holds the whole drawing, arrows, text and
+    // shapes too (REL-4, CH-2). A picture copied back out of Word, PowerPoint or Keynote: the PDF Word keeps, the PDF in
+    // Keynote's copy (its own PDF has no CDXML), the EMF, Office's zip, then a PNG; or a picture file copied in Finder or
+    // the file manager. ChemDraw's CDX is the page's next choice, for a copy with no picture.
     if c.octet.is_none() && c.cdxml.is_none() {
-        c.cdxml = first(s, Kind::Pdf, &read).and_then(|b| crate::export::cdxml_from_pdf(&b)).or_else(|| first(s, Kind::Emf, &read).and_then(|b| crate::vector::cdxml_from_emf(&b)));
+        let picture = |k: Kind| first(s, k, &read).and_then(|b| crate::export::cdxml_from_picture(&b));
+        c.cdxml = picture(Kind::Pdf)
+            .or_else(|| picture(Kind::Keynote))
+            .or_else(|| picture(Kind::Emf))
+            .or_else(|| first(s, Kind::Office, &read).and_then(|b| cdxml_from_office(&b)))
+            .or_else(|| picture(Kind::Png))
+            .or_else(|| first(s, Kind::FileUrl, &read).and_then(text_of).and_then(|u| copied_drawing(&u)));
     }
     c
+}
+
+// The drawing in Office's own copy of a picture (Word, PowerPoint and Excel put it on as Art::GVML ClipFormat): a
+// zip whose clipboard/media/ holds the picture's file as it was pasted in, so an EMF Word has redrawn for the
+// clipboard does not matter. The zip is hostile: its central directory is read with bounds checks, at most 64 entries
+// and 4 pictures are looked at, and each is inflated to 64 MB at most.
+fn cdxml_from_office(zip: &[u8]) -> Option<String> {
+    let u16_at = |k: usize| zip.get(k..k + 2).map(|b| usize::from(u16::from_le_bytes([b[0], b[1]])));
+    let u32_at = |k: usize| zip.get(k..k + 4).map(|b| u32::from_le_bytes([b[0], b[1], b[2], b[3]]) as usize);
+    // The end record: the last 22 bytes, or before a comment of at most 64 KB.
+    let last = zip.len().checked_sub(22)?;
+    let end = (last.saturating_sub(0xffff)..=last).rev().find(|&k| zip[k..k + 4] == *b"PK\x05\x06")?;
+    let (count, mut at, mut pictures) = (u16_at(end + 10)?, u32_at(end + 16)?, 0);
+    for _ in 0..count.min(64) {
+        if zip.get(at..at + 4)? != b"PK\x01\x02" {
+            return None;
+        }
+        let (method, size, local) = (u16_at(at + 10)?, u32_at(at + 20)?, u32_at(at + 42)?);
+        let name = zip.get(at + 46..at + 46 + u16_at(at + 28)?)?.to_ascii_lowercase();
+        at += 46 + name.len() + u16_at(at + 30)? + u16_at(at + 32)?;
+        if !name.starts_with(b"clipboard/media/") || ![&b".pdf"[..], b".emf", b".png"].iter().any(|e| name.ends_with(e)) || zip.get(local..local + 4)? != b"PK\x03\x04" {
+            continue;
+        }
+        pictures += 1;
+        if pictures > 4 {
+            return None;
+        }
+        let start = local + 30 + u16_at(local + 26)? + u16_at(local + 28)?;
+        let data = zip.get(start..start.checked_add(size)?)?;
+        let file = match method {
+            0 => data.to_vec(),
+            8 => miniz_oxide::inflate::decompress_to_vec_with_limit(data, MAX_TYPE).ok()?,
+            _ => continue,
+        };
+        if let Some(x) = crate::export::cdxml_from_picture(&file) {
+            return Some(x);
+        }
+    }
+    None
+}
+
+// The drawing in a PDF, EMF or PNG file copied in Finder or the file manager (its path, or a file:// list), read
+// with Open's 64 MB limit.
+fn copied_drawing(url: &str) -> Option<String> {
+    let line = url.lines().map(str::trim).find(|l| !l.is_empty() && !l.starts_with('#'))?;
+    let path = if line.starts_with("file:") { tauri::Url::parse(line).ok()?.to_file_path().ok()? } else { std::path::PathBuf::from(line) };
+    let ext = path.extension()?.to_str()?.to_ascii_lowercase();
+    if !path.is_absolute() || !["pdf", "emf", "png"].contains(&ext.as_str()) {
+        return None;
+    }
+    let meta = std::fs::metadata(&path).ok()?;
+    if !meta.is_file() || meta.len() > crate::MAX_BYTES {
+        return None;
+    }
+    crate::export::cdxml_from_picture(&std::fs::read(&path).ok()?)
 }
 
 // Every name paste may read on system `s`.
 #[cfg_attr(target_os = "macos", allow(dead_code))]
 fn readable(s: System) -> Vec<&'static str> {
     use Kind::*;
-    [Octet, Cdxml, Cdx, Molfile, Smiles, Pdf, Emf, Text, Png, Bitmap, FileUrl].iter().flat_map(|k| names(s, *k).iter().copied()).collect()
+    [Octet, Cdxml, Cdx, Molfile, Smiles, Pdf, Emf, Office, Text, Png, Bitmap, FileUrl].iter().flat_map(|k| names(s, *k).iter().copied()).collect()
 }
 
 // A Windows bitmap (CF_DIB: its header, colours and pixels) as a .bmp file, which the page's decoder reads: the
@@ -327,6 +397,11 @@ mod mac {
         autoreleasepool(|_| {
             let present: Vec<String> = pb.types().map(|a| a.iter().map(|t| t.to_string()).collect()).unwrap_or_default();
             super::clip(super::System::Mac, |t| {
+                // A name that ends in a full stop is a prefix (Keynote's numbered types): the first such type with a PDF.
+                if t.ends_with('.') {
+                    let pdf = |p: &String| pb.dataForType(&NSString::from_str(p)).filter(|d| d.len() <= super::MAX_TYPE).map(|d| d.to_vec()).filter(|b| b.starts_with(b"%PDF"));
+                    return present.iter().filter(|p| p.starts_with(t)).take(16).find_map(pdf);
+                }
                 if !present.iter().any(|p| p == t) {
                     return None;
                 }
@@ -358,7 +433,7 @@ mod linux;
 // `text`, only that text (CH-7): the app puts it there, as the webview allows a page to copy only during a click.
 #[allow(clippy::too_many_arguments)]
 #[tauri::command]
-pub async fn copy_to_clipboard(app: tauri::AppHandle, svg: Option<String>, cdxml: Option<String>, cdxml_type: Option<bool>, cdx: Option<String>, molfile: Option<String>, smiles: Option<String>, octet_json: Option<String>, text: Option<String>) -> Result<(), String> {
+pub async fn copy_to_clipboard(app: tauri::AppHandle, svg: Option<String>, dpi: Option<f32>, cdxml: Option<String>, cdxml_type: Option<bool>, cdx: Option<String>, molfile: Option<String>, smiles: Option<String>, octet_json: Option<String>, text: Option<String>) -> Result<(), String> {
     use base64::Engine;
     let cdx = match cdx {
         Some(c) if c.len() <= MAX_TYPE / 3 * 4 + 4 => Some(base64::engine::general_purpose::STANDARD.decode(c).map_err(|_| "Octet cannot copy this.".to_string())?),
@@ -367,7 +442,7 @@ pub async fn copy_to_clipboard(app: tauri::AppHandle, svg: Option<String>, cdxml
     let types = match text {
         Some(t) if t.len() <= MAX_TYPE => text_types(HERE, &t),
         Some(_) => return Err("This text is too long to copy.".into()),
-        None => types(HERE, svg.as_deref(), cdxml.as_deref(), cdxml_type.unwrap_or(false), cdx, molfile.as_deref(), smiles.as_deref(), octet_json)?,
+        None => types(HERE, svg.as_deref(), dpi.unwrap_or(600.0), cdxml.as_deref(), cdxml_type.unwrap_or(false), cdx, molfile.as_deref(), smiles.as_deref(), octet_json)?,
     };
     let _ = &app;
     #[cfg(target_os = "macos")]
@@ -424,10 +499,10 @@ mod tests {
     #[test]
     fn copy_types_in_chemdraws_order() {
         let svg = r#"<svg xmlns="http://www.w3.org/2000/svg" width="20pt" height="10pt" viewBox="0 0 20 10"><path d="M1 1H19V2H1Z"/></svg>"#;
-        let t = types(System::Mac, Some(svg), Some("<CDXML/>"), true, Some(b"VjCD0100\x04\x03\x02\x01".to_vec()), Some(MOL), Some("CO"), Some("{}".into())).unwrap();
+        let t = types(System::Mac, Some(svg), 600.0, Some("<CDXML/>"), true, Some(b"VjCD0100\x04\x03\x02\x01".to_vec()), Some(MOL), Some("CO"), Some("{}".into())).unwrap();
         assert_eq!(t.iter().map(|(t, _)| *t).collect::<Vec<_>>(), [PDF, CDX[0], CDX[1], CDX[2], CDXML[0], CDXML[1], CDXML[2], MOLFILE, SMILES, OCTET]);
         assert!(t[1].1.starts_with(b"VjCD0100") && t[1].1 == t[2].1 && t[1].1 == t[3].1);
-        let t = types(System::Mac, Some(svg), Some("<CDXML/>"), true, None, Some(MOL), Some("CO"), Some("{}".into())).unwrap();
+        let t = types(System::Mac, Some(svg), 600.0, Some("<CDXML/>"), true, None, Some(MOL), Some("CO"), Some("{}".into())).unwrap();
         assert_eq!(t.iter().map(|(t, _)| *t).collect::<Vec<_>>(), [PDF, CDXML[0], CDXML[1], CDXML[2], MOLFILE, SMILES, OCTET]);
         assert!(t[1].1.starts_with(b"<?xml") && t[1].1.ends_with(b"<CDXML/>") && t[1].1 == t[2].1 && t[1].1 == t[3].1);
         assert_eq!(t[5].1, b"CO\0");
@@ -458,9 +533,9 @@ mod tests {
         let c = clip(System::Mac, |name| (name == PDF).then(|| t[0].1.clone()));
         assert!(c.cdxml.unwrap().contains("<CDXML/>"));
         // The Copy switches in Settings: with all four off, only Octet's JSON goes on; CDXML off keeps it in the PDF.
-        let t = types(System::Mac, None, Some("<CDXML/>"), false, None, None, None, Some("{}".into())).unwrap();
+        let t = types(System::Mac, None, 600.0, Some("<CDXML/>"), false, None, None, None, Some("{}".into())).unwrap();
         assert_eq!(t.iter().map(|(t, _)| *t).collect::<Vec<_>>(), [OCTET]);
-        let t = types(System::Mac, Some(svg), Some("<CDXML/>"), false, None, None, Some("CO"), None).unwrap();
+        let t = types(System::Mac, Some(svg), 600.0, Some("<CDXML/>"), false, None, None, Some("CO"), None).unwrap();
         assert_eq!(t.iter().map(|(t, _)| *t).collect::<Vec<_>>(), [PDF, SMILES]);
         assert!(crate::export::cdxml_from_pdf(&t[0].1).unwrap().contains("<CDXML/>"));
     }
@@ -484,6 +559,16 @@ mod tests {
         let Ok(dir) = std::env::var("OCTET_CLIPBOARD_DUMPS") else { return };
         let c = clip(System::Mac, |name| std::fs::read(format!("{dir}/chemdraw-copy/0_{name}")).ok());
         assert!(c.cdxml.unwrap().contains("<CDXML") && c.cdx.is_some() && c.molfile.is_some() && c.smiles.is_some());
+        // Octet's and ChemDraw's pictures copied back out of Word for Mac, and Octet's out of Keynote, paste as drawings.
+        let file = |sub: &str, name: &str| std::fs::read(format!("{dir}/{sub}/0_{name}")).ok();
+        for sub in ["word-octet-aspirin", "word-cd22-aspirin", "word-copy", "keynote-octet-aspirin"] {
+            let names: Vec<String> = std::fs::read_dir(format!("{dir}/{sub}")).unwrap().map(|e| e.unwrap().file_name().to_string_lossy()[2..].to_string()).collect();
+            let c = clip(System::Mac, |n| match n.strip_suffix('.') {
+                Some(_) => names.iter().filter(|p| p.starts_with(n)).filter_map(|p| file(sub, p)).find(|b| b.starts_with(b"%PDF")),
+                None => file(sub, n),
+            });
+            assert!(c.cdxml.is_some_and(|x| x.contains("<CDXML")), "{sub}");
+        }
     }
 
     // REL-3, CH-1: Windows and Linux copy the same things as the Mac, under their own names: on Windows a vector EMF and
@@ -492,7 +577,7 @@ mod tests {
     fn windows_and_linux_copy_the_same() {
         let svg = r#"<svg xmlns="http://www.w3.org/2000/svg" width="20pt" height="10pt" viewBox="0 0 20 10"><path d="M1 1H19V2H1Z"/></svg>"#;
         let cdx = b"VjCD0100\x04\x03\x02\x01".to_vec();
-        let all = |s| types(s, Some(svg), Some("<CDXML/>"), true, Some(cdx.clone()), Some(MOL), Some("CO"), Some("{}".into())).unwrap();
+        let all = |s| types(s, Some(svg), 600.0, Some("<CDXML/>"), true, Some(cdx.clone()), Some(MOL), Some("CO"), Some("{}".into())).unwrap();
         let t = all(System::Windows);
         assert_eq!(t.iter().map(|(t, _)| *t).collect::<Vec<_>>(), [ENHMETAFILE, DIB, "ChemDraw Interchange Format", "CDXML", "MDLCT", "SMILES", "application/x-octet+json"]);
         assert_eq!(&t[0].1[40..44], b" EMF");
@@ -522,11 +607,113 @@ mod tests {
         assert!(c.cdxml.unwrap().ends_with("<CDXML/>") && c.cdx.is_some());
         // The Copy switches: with all five off, only Octet's JSON goes on.
         for s in [System::Windows, System::Linux] {
-            let t = types(s, None, None, false, None, None, None, Some("{}".into())).unwrap();
+            let t = types(s, None, 600.0, None, false, None, None, None, Some("{}".into())).unwrap();
             assert_eq!(t.len(), 1);
         }
         // Paste reads only names its system has.
         assert!(readable(System::Windows).contains(&"MDLCT") && !readable(System::Linux).contains(&PDF));
+    }
+
+    // A zip as Office writes its own copy of a picture (Art::GVML ClipFormat): `files` deflated, with the central
+    // directory and end record after them.
+    fn office_zip(files: &[(&str, &[u8])]) -> Vec<u8> {
+        let (mut out, mut dir) = (Vec::new(), Vec::new());
+        for (name, data) in files {
+            let packed = miniz_oxide::deflate::compress_to_vec(data, 6);
+            let sizes = [&[0u8; 4][..], &(packed.len() as u32).to_le_bytes(), &(data.len() as u32).to_le_bytes(), &(name.len() as u16).to_le_bytes(), &[0, 0]].concat();
+            dir.extend([b"PK\x01\x02".as_slice(), &[20, 0, 20, 0, 0, 0, 8, 0, 0, 0, 0, 0], &sizes, &[0; 10], &(out.len() as u32).to_le_bytes(), name.as_bytes()].concat());
+            out.extend([b"PK\x03\x04".as_slice(), &[20, 0, 0, 0, 8, 0, 0, 0, 0, 0], &sizes, name.as_bytes(), &packed].concat());
+        }
+        let n = (files.len() as u16).to_le_bytes();
+        let end = [b"PK\x05\x06".as_slice(), &[0; 4], &n, &n, &(dir.len() as u32).to_le_bytes(), &(out.len() as u32).to_le_bytes(), &[0, 0]].concat();
+        [out, dir, end].concat()
+    }
+
+    // A picture pasted into Word (PowerPoint, Keynote) and copied back out pastes back as the drawing. Word hands back
+    // only its own types: on the Mac Octet's PDF unchanged, with Office's zip (an EMF it drew), TIFF, PNG and JPEG; on
+    // Windows an EMF, maybe redrawn, and the zip with the EMF Octet put on. Keynote's own PDF loses the CDXML, but its
+    // copy keeps Octet's PDF under a numbered type. On Linux the PNG carries it. A picture file copied in Finder too.
+    #[test]
+    fn pictures_copied_back_out_paste_as_the_drawing() {
+        let svg = r#"<svg xmlns="http://www.w3.org/2000/svg" width="20pt" height="10pt" viewBox="0 0 20 10"><path d="M1 1H19V2H1Z"/></svg>"#;
+        let x = "<CDXML><page><fragment><n id=\"1\"/></fragment></page></CDXML>";
+        let doc = crate::export::cdxml_document(x);
+        let tree = crate::export::tree(svg).unwrap();
+        let on = |s| types(s, Some(svg), 600.0, Some(x), false, None, Some(MOL), Some("CO"), Some("{}".into())).unwrap();
+        let picture = |s, n: &str| on(s).into_iter().find(|(t, _)| *t == n).unwrap().1;
+        let (pdf, emf, png) = (picture(System::Mac, PDF), picture(System::Windows, ENHMETAFILE), picture(System::Linux, "image/png"));
+        let redrawn = crate::vector::make_emf(&tree, None); // an EMF Word drew, with no comment
+        let mac_word = |n: &str| match n {
+            PDF => Some(pdf.clone()),
+            "com.microsoft.Art--GVML-ClipFormat" => Some(office_zip(&[("clipboard/media/image1.emf", &redrawn)])),
+            "public.tiff" => Some(b"MM\0*".to_vec()),
+            "public.png" => Some(crate::export::clipboard_pictures(svg, false, 600.0, None).unwrap().0),
+            _ => None,
+        };
+        let c = clip(System::Mac, mac_word);
+        assert_eq!((c.cdxml.as_deref(), c.octet.as_deref(), c.molfile.as_deref()), (Some(doc.as_str()), None, None));
+        // Keynote: its own PDF, with no CDXML, then Octet's under a numbered type (mac::read finds it by the prefix).
+        let keynote = |n: &str| match n {
+            PDF => Some(crate::export::make_pdf(svg, None).unwrap()),
+            "com.apple.iWork.TSPData." => Some(pdf.clone()),
+            _ => None,
+        };
+        assert_eq!(clip(System::Mac, keynote).cdxml.as_deref(), Some(doc.as_str()));
+        // Windows: the EMF as it went on, or Word's redrawn EMF with the zip holding Octet's, deflated or not.
+        assert_eq!(clip(System::Windows, |n| (n == ENHMETAFILE).then(|| emf.clone())).cdxml.as_deref(), Some(x));
+        let zip = office_zip(&[("[Content_Types].xml", b"<Types/>"), ("clipboard/drawings/drawing1.xml", b"<a:graphic/>"), ("clipboard/media/image1.emf", &emf)]);
+        let windows_word = |n: &str| match n {
+            ENHMETAFILE => Some(redrawn.clone()),
+            "Art::GVML ClipFormat" => Some(zip.clone()),
+            _ => None,
+        };
+        assert_eq!(clip(System::Windows, windows_word).cdxml.as_deref(), Some(x));
+        assert_eq!(cdxml_from_office(&office_zip(&[("clipboard/media/image1.png", &crate::export::clipboard_pictures(svg, false, 600.0, Some(x)).unwrap().0)])).as_deref(), Some(doc.as_str()));
+        // Linux: Octet's PNG.
+        assert_eq!(clip(System::Linux, |n| (n == "image/png").then(|| png.clone())).cdxml.as_deref(), Some(doc.as_str()));
+        // A PDF or PNG file copied in Finder (its path) or the file manager (a file:// list).
+        let dir = std::env::temp_dir().join(format!("octet-copied-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("aspirin.pdf");
+        std::fs::write(&file, &pdf).unwrap();
+        assert_eq!(clip(System::Mac, |n| (n == FILE_URL).then(|| file.to_string_lossy().as_bytes().to_vec())).cdxml.as_deref(), Some(doc.as_str()));
+        let url = tauri::Url::from_file_path(&file).unwrap();
+        assert_eq!(clip(System::Linux, |n| (n == "text/uri-list").then(|| format!("# copied\r\n{url}\r\n").into_bytes())).cdxml.as_deref(), Some(doc.as_str()));
+        std::fs::write(dir.join("aspirin.txt"), &pdf).unwrap();
+        assert_eq!(copied_drawing(&dir.join("aspirin.txt").to_string_lossy()), None, "only pictures are read");
+        // Only a file: a folder (or a pipe, which would never end) named like a picture is not read.
+        std::fs::create_dir(dir.join("folder.pdf")).unwrap();
+        assert_eq!(copied_drawing(&dir.join("folder.pdf").to_string_lossy()), None);
+        std::fs::remove_dir_all(&dir).unwrap();
+        // Octet's own JSON, when there, wins over the picture.
+        assert_eq!(clip(System::Mac, |n| [PDF, OCTET].contains(&n).then(|| if n == PDF { pdf.clone() } else { b"{}".to_vec() })).cdxml, None);
+    }
+
+    // Office's zip is hostile: a broken or cut-short zip, a bomb, or a zip with no pictures gives nothing, quickly.
+    #[test]
+    fn hostile_office_zips_give_nothing() {
+        let svg = r#"<svg xmlns="http://www.w3.org/2000/svg" width="20pt" height="10pt" viewBox="0 0 20 10"><path d="M1 1H19V2H1Z"/></svg>"#;
+        let pdf = crate::export::make_pdf(svg, Some("<CDXML/>")).unwrap();
+        let good = office_zip(&[("clipboard/media/image1.pdf", &pdf)]);
+        assert!(cdxml_from_office(&good).is_some());
+        for k in 0..good.len() {
+            assert_eq!(cdxml_from_office(&good[..k]), None, "cut at {k}");
+        }
+        let mut wrong = good.clone();
+        let at = good.len() - 6;
+        wrong[at..at + 4].copy_from_slice(&u32::MAX.to_le_bytes()); // the directory's offset past the end
+        assert_eq!(cdxml_from_office(&wrong), None);
+        assert_eq!(cdxml_from_office(&office_zip(&[("clipboard/media/image1.pdf", b"%PDF-1.4 not a pdf"), ("word/media/image2.pdf", &pdf)])), None);
+        // 100 MB of zeros in one picture: inflating stops at 64 MB.
+        let t = std::time::Instant::now();
+        assert_eq!(cdxml_from_office(&office_zip(&[("clipboard/media/image1.emf", &vec![0; 100 << 20])])), None);
+        // Many pictures without a drawing: only the first four are inflated.
+        let many: Vec<(String, Vec<u8>)> = (0..60).map(|k| (format!("clipboard/media/image{k}.png"), vec![0; 1 << 20])).collect();
+        let many: Vec<(&str, &[u8])> = many.iter().map(|(n, b)| (n.as_str(), b.as_slice())).collect();
+        assert_eq!(cdxml_from_office(&office_zip(&many)), None);
+        assert!(t.elapsed() < std::time::Duration::from_secs(10), "{:?}", t.elapsed());
+        assert_eq!(cdxml_from_office(&[0; 21]), None);
+        assert_eq!(cdxml_from_office(b"PK\x05\x06\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\0\0"), None);
     }
 
     // CH-7: Copy As puts the text alone, under each system's names for text (on Windows UTF-16 with a NUL).
@@ -541,7 +728,7 @@ mod tests {
     #[test]
     fn large_pictures_fit() {
         let svg = r#"<svg xmlns="http://www.w3.org/2000/svg" width="3000pt" height="100pt" viewBox="0 0 3000 100"><path d="M1 1H2999V99H1Z"/></svg>"#;
-        let (png, dib) = crate::export::clipboard_pictures(svg, true).unwrap();
+        let (png, dib) = crate::export::clipboard_pictures(svg, true, 600.0, None).unwrap();
         let width = u32::from_be_bytes(png[16..20].try_into().unwrap());
         assert_eq!(width, 8192);
         assert_eq!(i32::from_le_bytes(dib.unwrap()[4..8].try_into().unwrap()), 8192);

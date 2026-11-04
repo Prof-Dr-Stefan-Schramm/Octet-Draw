@@ -18,12 +18,12 @@ import { ELEMENTS, anchorElement, formulaRuns, isElement, units } from "./labels
 import { labelStyle, normalise, plainOf, runsOf, styleOf, styled, type RunStyle, type TextRun } from "./richtext.ts";
 import { findReaction } from "./reaction.ts";
 import { readGrid } from "./stoich.ts";
-import { fragments, groupParents, renumberCentre, tidyGroups } from "./edit.ts";
+import { fragments, groupParents, oldLigands, renumberCentre, tidyGroups } from "./edit.ts";
 import { altGroup, elementList, enclosed, linkNode, polymerLabel, queryLabel, readPolymer, readRgroup, rgroupMembers, rNumber, USAGES, USAGE_KINDS } from "./query.ts";
 import { ligandEllipse } from "./render.ts";
 import { kekulise, rings } from "./rings.ts";
 import { keptHolds, stereoMarks } from "./cip.ts";
-import { keepAngles, mapSides, type Cycle } from "./cycle.ts";
+import { keepAngles, mapBranches, migrateCycles, readBranches, readSteps as readCycleSteps, type Cycle, type CycleText } from "./cycle.ts";
 import { ASSIGN, OWN_TAG, assignGroups, assignRanges, assignValue, fromSpectrumObject, keyOf, nextGroupId, spectrumObject, type Measured } from "./measured.ts";
 import pkg from "../package.json" with { type: "json" };
 
@@ -824,7 +824,7 @@ export function toCdxml(input: Mol, style: DocStyle, opts: CdxmlOptions = {}): s
     const list: [string, string[]][] = [];
     if (charge && (a.circled || !shown)) list.push([a.circled ? (charge > 0 ? "CirclePlus" : "CircleMinus") : charge > 0 ? "Plus" : "Minus", ["Charge"]]);
     // A singlet radical (carbene) is a pair of electrons that stands for the radical.
-    if (a.radical === 3) list.push(["LonePair", ["Radical"]]);
+    if (a.radical === 3) list.push([a.bars ? "LonePairBar" : "LonePair", ["Radical"]]);
     else for (let r = 0; r < Math.min(2, a.radical ?? 0); r++) list.push(["Electron", ["Radical"]]);
     for (let r = 0; r < Math.min(4, a.pairs ?? 0); r++) list.push([a.bars ? "LonePairBar" : "LonePair", []]);
     if (!list.length) return sign;
@@ -832,7 +832,8 @@ export function toCdxml(input: Mol, style: DocStyle, opts: CdxmlOptions = {}): s
     if (shown && (a.text || a.label !== "C")) taken.push(a.text && nbrs[i].length && taken.every((t) => Math.cos(t) > 0) ? Math.PI : 0);
     if (moved) taken.push(Math.atan2(moved[1] - X[1], moved[0] - X[0]));
     // Marks moved by hand (Atom.angles, by the renderer's keys) keep their angle; the page's y is down.
-    const keys = list.map(([type], k) => (type === "Electron" ? `radical${list.slice(0, k).filter(([x]) => x === "Electron").length}` : type.startsWith("LonePair") && list[k][1][0] !== "Radical" ? `pair${list.slice(0, k).filter(([x, r]) => x.startsWith("LonePair") && r[0] !== "Radical").length}` : a.circled ? "charge" : ""));
+    // A singlet's pair is pair0, as the renderer counts it; a charge is charge, circled or a skeletal carbon's sign.
+    const keys = list.map(([type], k) => (type === "Electron" ? `radical${list.slice(0, k).filter(([x]) => x === "Electron").length}` : type.startsWith("LonePair") ? `pair${list.slice(0, k).filter(([x]) => x.startsWith("LonePair")).length}` : "charge"));
     const angles: (number | undefined)[] = keys.map((key) => (key && a.angles?.[key] !== undefined ? (-a.angles[key] * Math.PI) / 180 : undefined));
     for (const t of angles) if (t !== undefined) taken.push(t);
     if (angles[0] === undefined && list[0][1][0] === "Charge" && taken.every((t) => Math.abs(Math.atan2(Math.sin(t + Math.PI / 4), Math.cos(t + Math.PI / 4))) >= Math.PI / 5)) { angles[0] = -Math.PI / 4; taken.push(-Math.PI / 4); }
@@ -879,7 +880,7 @@ export function toCdxml(input: Mol, style: DocStyle, opts: CdxmlOptions = {}): s
     const f = scaleOf(a), lines = ownLines(f, a.width), box = boxOf(path, head || tail ? (sizes[a.kind === "block" ? 1 : 2] * line * f) / 100 : (line * f) / 2), z = Z(), legacy = fresh(), c = colour(a.colour);
     // A catalytic cycle's arrow goes in the cycle's group, and names its cycle so Octet reads the group back.
     const cycle = derived ? (a as Arrow & { cycle?: number }).cycle : undefined, item = derived ? cycle : a.id;
-    const tag = cycle !== undefined && idOf.has(cycle) ? priv({ d: 1, cycle: idOf.get(cycle) }) : DERIVED;
+    const tag = cycle !== undefined && idOf.has(cycle) ? priv({ d: 1, cycle: idOf.get(cycle), branch: (a as Arrow & { branch?: number }).branch }) : DERIVED;
     legacyOf.set(a.id, legacy);
     // The legacy copy: a line from head to tail, or an arc from the head round its centre, with the old arrow type.
     const legacyType = a.kind === "equilibrium" ? "Equilibrium" : a.kind === "retro" ? "RetroSynthetic" : a.kind === "block" ? "Hollow" : head === "Full" && tail === "Full" ? "Resonance"
@@ -1031,8 +1032,11 @@ export function toCdxml(input: Mol, style: DocStyle, opts: CdxmlOptions = {}): s
     outs.push({ xml: el("group", { id: idOf.get(g.id)!, BoundingBox: boxText(box), Z: Z(), Integral: g.integral ? "yes" : undefined }, RANKED(kids).map((o) => o.xml).join("") + notes(g.annotations)), rank: 0, box, group: parent === undefined ? undefined : groups[parent].id });
   }
   const top = outs.filter((o) => o.group !== -1), all = union(top.map((o) => o.box)) ?? [0, 0, 0, 0];
-  const cycles = (mol.cycles ?? []).map((c: Cycle) => ({ id: idOf.get(c.id), centre: c.centre, radius: c.radius, clockwise: c.clockwise, nodes: c.nodes.map((n) => n.map((i) => nodeId.get(i)).filter((v) => v !== undefined)), at: c.at, colour: c.colour, width: c.width, gap: c.gap,
-    sides: c.sides?.map((s) => ({ side: s.side, atoms: s.atoms.map((i) => nodeId.get(i)).filter((v) => v !== undefined) })) }));
+  // A cycle's side arrows name their structures' atoms by node id; those are also saved as sides, for Octet 1.0.29.
+  const ids = (atoms?: number[]) => atoms?.map((i) => nodeId.get(i)).filter((v) => v !== undefined);
+  const cycles = (mol.cycles ?? []).map((c: Cycle) => ({ id: idOf.get(c.id), centre: c.centre, radius: c.radius, clockwise: c.clockwise, nodes: c.nodes.map(ids), at: c.at, colour: c.colour, width: c.width, gap: c.gap, scale: c.scale, order: c.order,
+    steps: c.steps?.some(Boolean) ? c.steps : undefined, branches: c.branches?.map((b) => ({ ...b, ...(b.in ? { in: { ...b.in, atoms: ids(b.in.atoms) } } : {}), ...(b.out ? { out: { ...b.out, atoms: ids(b.out.atoms) } } : {}) })),
+    sides: c.branches?.flatMap((b) => (["in", "out"] as const).flatMap((side) => (b[side]?.atoms?.length ? [{ side, atoms: ids(b[side]!.atoms) }] : []))).slice(0, 32) }));
   const pageXml = el("page", { id: fresh(), BoundingBox: `0 0 ${fmt(W)} ${fmt(H)}`, HeaderPosition: 36, FooterPosition: 36, PrintTrimMarks: "yes", HeightPages: 1, WidthPages: 1 }, RANKED(top).map((o) => o.xml).join("") + schemes.join("") + kept.join("") + notes(mol.annotations));
   const doc = colour(style.colour) ?? 0, bg = style.background.startsWith("#") ? colour(style.background)! : 1;
   // The document's palette goes in its colour table, as ChemDraw keeps a document's colours there.
@@ -1050,7 +1054,7 @@ export function toCdxml(input: Mol, style: DocStyle, opts: CdxmlOptions = {}): s
     ChemPropBoilingPt: "Boiling Point: ", ChemPropMeltingPt: "Melting Point: ", ChemPropCritTemp: "Critical Temp: ", ChemPropCritPres: "Critical Pres: ", ChemPropCritVol: "Critical Vol: ",
     ChemPropGibbs: "Gibbs Energy: ", ChemPropLogP: "Log P: ", ChemPropMR: "MR: ", ChemPropHenry: "Henry's Law: ", ChemPropEForm: "Heat of Form: ", ChemProptPSA: "tPSA: ", ChemPropID: "", ChemPropFragmentLabel: "",
     color: doc, bgcolor: bg, RxnAutonumberStart: 1, RxnAutonumberConditions: "no", RxnAutonumberStyle: "Roman", RxnAutonumberFormat: "(#)",
-    Octet: priv({ v: 1, xyz: 1, page: style.page, custom: style.custom, landscape: style.landscape || undefined, edges: style.edges ? undefined : false, grid: style.grid === "bond" ? undefined : style.grid, scale: style.scale !== 1 ? style.scale : undefined, purpose: style.purpose,
+    Octet: priv({ v: 1, app: pkg.version, xyz: 1, page: style.page, custom: style.custom, landscape: style.landscape || undefined, edges: style.edges ? undefined : false, grid: style.grid === "bond" ? undefined : style.grid, scale: style.scale !== 1 ? style.scale : undefined, purpose: style.purpose,
       background: style.background === "white" ? undefined : style.background, cycles: cycles.length ? cycles : undefined, palette: style.palette, guides: mol.guides }),
   }, tables + pageXml);
   return `<?xml version="1.0" encoding="UTF-8" ?>\n<!DOCTYPE CDXML SYSTEM "http://www.cambridgesoft.com/xml/cdxml.dtd" >\n${root}\n`;
@@ -1062,7 +1066,7 @@ function pick(m: Mol, sel: { atoms: Iterable<number>; items: Iterable<number> })
   const atoms = new Set([...sel.atoms].filter((i) => i >= 0 && i < m.atoms.length)), items = new Set(sel.items), map = new Map<number, number>();
   m.atoms.forEach((_, i) => { if (atoms.has(i)) map.set(i, map.size); });
   const keep = (ids: number[]) => ids.filter((i) => map.has(i)).map((i) => map.get(i)!);
-  const arrows = (m.arrows ?? []).filter((a) => items.has(a.id)), cycles = (m.cycles ?? []).filter((c) => items.has(c.id)).map((c) => mapSides(c, (i) => map.get(i))).map((c) => (c.at ? { ...keepAngles(m, c), nodes: c.nodes.map(keep) } : { ...c, nodes: c.nodes.map(keep).filter((n) => n.length) })).filter((c) => c.at || c.nodes.length >= 2);
+  const arrows = (m.arrows ?? []).filter((a) => items.has(a.id)), cycles = (m.cycles ?? []).filter((c) => items.has(c.id)).map((c) => ({ ...keepAngles(m, mapBranches(c, (i) => map.get(i))), nodes: c.nodes.map(keep) }));
   // Kept data goes with its object only when its atoms all come too.
   const kept = (k?: Kept) => (k && k.atoms.every((i) => map.has(i)) ? { ...k, atoms: keep(k.atoms) } : undefined);
   const captions = (m.captions ?? []).filter((c) => items.has(c.id) && (!c.cycle || cycles.some((y) => y.id === c.cycle!.cycle))).map((c) => {
@@ -1773,9 +1777,13 @@ export function fromCdxml(input: string | Xml): CdxmlRead {
     if (!octet || p?.placed === 1) anchors.set(c.id, toOctet(q[0], q[1]));
     const cyc = p?.cycle as Record<string, unknown> | undefined;
     if (cyc && Number.isInteger(cyc.cycle) && Number.isInteger(cyc.step) && isNum(cyc.step, 0, 63) && ["in", "out", "centre", "node", "name"].includes(cyc.side as string)) c.cycle = { cycle: cyc.cycle as number, step: cyc.step as number, side: cyc.side as "in", ...(isNum(cyc.at, 0, 1) ? { at: cyc.at as number } : {}), ...(isNum(cyc.reach, -1000, 1000) ? { reach: cyc.reach as number } : {}), ...(typeof cyc.through === "boolean" ? { through: cyc.through } : {}),
-      ...(isNum(cyc.meet, 0, 1) ? { meet: cyc.meet as number } : {}), ...(Array.isArray(cyc.tail) && cyc.tail.length === 2 && isNum(cyc.tail[0], 0, 1) && isNum(cyc.tail[1], -1000, 1000) ? { tail: cyc.tail as [number, number] } : {}) };
+      ...(isNum(cyc.meet, 0, 1) ? { meet: cyc.meet as number } : {}), ...(Array.isArray(cyc.tail) && cyc.tail.length === 2 && isNum(cyc.tail[0], 0, 1) && isNum(cyc.tail[1], -1000, 1000) ? { tail: cyc.tail as [number, number] } : {}),
+      ...((cyc.side === "in" || cyc.side === "out") && Number.isInteger(cyc.branch) && isNum(cyc.branch, 0, 1e6) ? { branch: cyc.branch as number } : {}),
+      ...(cyc.side === "centre" && Array.isArray(cyc.off) && cyc.off.length === 2 && cyc.off.every((v) => isNum(v, -50, 50)) ? { off: cyc.off as [number, number] } : {}) } as CycleText;
     captions.push(c);
-    objectOf.set(int(t.attrs.id) ?? -1, c.id);
+    // A repeated or missing file id points at the first text only, so a step's arrow never takes another's.
+    const fid = int(t.attrs.id);
+    if (fid !== undefined && !objectOf.has(fid)) objectOf.set(fid, c.id);
     member(group, c.id);
   }
 
@@ -2154,28 +2162,37 @@ export function fromCdxml(input: string | Xml): CdxmlRead {
       const d = len(sub(mol.atoms[i].location as unknown as P, c));
       return d < 1 && (best === undefined || d < len(sub(mol.atoms[best].location as unknown as P, c))) ? i : best;
     }, undefined);
-    const everyAtom = mol.atoms.map((_, i) => i);
+    const everyAtom = mol.atoms.map((_, i) => i), electrons = new Map<number, number>(); // linked electrons read per atom
     for (const { x, atoms, group } of symbols) {
       const type = x.attrs.SymbolType ?? "LonePair", box = reals(x.attrs.BoundingBox, 2);
       if (!box) { lose("symbol"); continue; }
       const c = toOctet(box[0], box[1]), linked = x.kids.filter((k) => k.name === "represent").map((k) => atomOf.get(int(k.attrs.object) ?? -1)).find((i) => i !== undefined);
       const sign = ({ Plus: 1, CirclePlus: 1, RadicalCation: 1, Minus: -1, CircleMinus: -1, RadicalAnion: -1 } as Record<string, number>)[type], unpaired = type === "Electron" || type.startsWith("Radical");
+      // Where a ChemDraw file puts a mark round its atom is its angle (Atom.angles), by the renderer's key.
+      const place = (a: Atom, key: string) => { if (!octet) a.angles = { ...a.angles, [key]: Math.round((Math.atan2(c[1] - a.location[1], c[0] - a.location[0]) * 1800) / Math.PI) / 10 }; };
       if (linked !== undefined && (sign || unpaired)) {
         const a = mol.atoms[linked];
         if (sign && !a.charge) a.charge = sign;
         if (type.startsWith("Circle")) a.circled = true;
         if (unpaired && !a.radical) a.radical = 1;
+        // A radical ion's symbol is its charge and electron together: it keeps no place of its own.
+        if (type === "Electron") { const n = electrons.get(linked) ?? 0; electrons.set(linked, n + 1); if (n < 2) place(a, `radical${n}`); }
+        else if (sign && !unpaired) place(a, "charge");
         continue;
       }
-      if (linked !== undefined && type === "LonePair" && mol.atoms[linked].radical === 3 && x.kids.some((k) => k.name === "represent" && k.attrs.attribute === "Radical")) continue;
+      if (linked !== undefined && type.startsWith("LonePair") && mol.atoms[linked].radical === 3 && x.kids.some((k) => k.name === "represent" && k.attrs.attribute === "Radical")) {
+        if (type === "LonePairBar") mol.atoms[linked].bars = true;
+        place(mol.atoms[linked], "pair0");
+        continue;
+      }
       if (type === "LonePair" || type === "LonePairBar" || type === "Electron") {
         const i = nearest(c, atoms) ?? nearest(c, everyAtom);
         if (i === undefined) { lose("symbol"); continue; }
-        const a = mol.atoms[i], key = type === "Electron" ? `radical${a.radical ?? 0}` : `pair${a.pairs ?? 0}`;
+        const a = mol.atoms[i], key = type === "Electron" ? `radical${a.radical ?? 0}` : `pair${(a.pairs ?? 0) + (a.radical === 3 ? 1 : 0)}`;
         if (type === "Electron") a.radical = Math.min(2, (a.radical ?? 0) + 1); else a.pairs = Math.min(4, (a.pairs ?? 0) + 1);
         if (type === "LonePairBar") a.bars = true;
         // A ChemDraw file's lone pairs and radicals stay where it put them round the atom.
-        if (!octet && /^(radical[01]|pair[0-3])$/.test(key)) a.angles = { ...a.angles, [key]: Math.round((Math.atan2(c[1] - a.location[1], c[0] - a.location[0]) * 1800) / Math.PI) / 10 };
+        if (/^(radical[01]|pair[0-3])$/.test(key)) place(a, key);
         continue;
       }
       const text = SYMBOL_TEXT[type];
@@ -2242,19 +2259,28 @@ export function fromCdxml(input: string | Xml): CdxmlRead {
     const under = Array.isArray(nodes) ? [...new Set(nodes.map((n) => atomOf.get(Number.isInteger(n) ? (n as number) : -1)).filter((i): i is number => i !== undefined))] : [];
     if (under.length) c.under = under;
   }
+  // A cycle id the file repeats is the first cycle's: the others go, so deleting one never deletes two.
+  const seenCycle = new Set<number>();
   const cycles: Cycle[] = cycleData.flatMap((c) => {
     // A cycle drawn with the Cycle tool has each node's angle, and keeps its breaks (empty nodes).
     const centre = c?.centre, all = Array.isArray(c?.nodes) ? (c.nodes as unknown[]).slice(0, 64).map((n) => (Array.isArray(n) ? n.map((id) => atomOf.get(Number.isInteger(id) ? id : -1)).filter((i): i is number => i !== undefined) : [])) : [];
     const at = Array.isArray(c?.at) && c.at.length === all.length && c.at.every((v) => isNum(v, -10, 10)) ? (c.at as number[]) : undefined, nodes = at ? all : all.filter((n) => n.length);
-    if (!Array.isArray(centre) || centre.length !== 2 || !centre.every((v) => isNum(v, -1e6, 1e6)) || !isNum(c.radius, 1e-6, 1e6) || (!at && nodes.length < 2) || !Number.isInteger(c.id)) return [];
+    if (!Array.isArray(centre) || centre.length !== 2 || !centre.every((v) => isNum(v, -1e6, 1e6)) || !isNum(c.radius, 1e-6, 1e6) || (!at && nodes.length < 2) || !Number.isInteger(c.id) || seenCycle.has(c.id as number)) return [];
+    seenCycle.add(c.id as number);
     // Structures as reagents and products (32 at most), by their atoms' ids.
     const sides = Array.isArray(c.sides) ? (c.sides as Record<string, unknown>[]).slice(0, 32).flatMap((s) => {
       const atoms = Array.isArray(s?.atoms) ? (s.atoms as unknown[]).slice(0, 4096).map((id) => atomOf.get(Number.isInteger(id) ? (id as number) : -1)).filter((i): i is number => i !== undefined) : [];
       return atoms.length && (s.side === "in" || s.side === "out") ? [{ side: s.side as "in" | "out", atoms }] : [];
     }) : [];
-    return [{ id: c.id as number, centre: centre as P, radius: c.radius as number, clockwise: c.clockwise !== false, nodes, ...(at ? { at } : {}), ...(isColour(c.colour) ? { colour: c.colour } : {}), ...(isNum(c.width, 0.05, 20) ? { width: c.width as number } : {}), ...(isNum(c.gap, 0, 100) ? { gap: c.gap as number } : {}), ...(sides.length ? { sides } : {}) }];
+    // Each step's settings and the side arrows, checked as in .oct: left out when anything is wrong.
+    const steps = c.steps === undefined ? undefined : readCycleSteps(c.steps), branches = c.branches === undefined ? undefined : readBranches(c.branches, nodes.length, (id) => atomOf.get(Number.isInteger(id) ? (id as number) : -1));
+    return [{ id: c.id as number, centre: centre as P, radius: c.radius as number, clockwise: c.clockwise !== false, nodes, ...(at ? { at } : {}), ...(isColour(c.colour) ? { colour: c.colour } : {}), ...(isNum(c.width, 0.05, 20) ? { width: c.width as number } : {}), ...(isNum(c.gap, 0, 100) ? { gap: c.gap as number } : {}),
+      ...(isNum(c.scale, 0.01, 100) && c.scale !== 1 ? { scale: c.scale as number } : {}), ...(Number.isInteger(c.order) && c.order !== 0 && isNum(c.order, -1e6, 1e6) ? { order: c.order as number } : {}),
+      ...(steps?.some(Boolean) ? { steps } : {}), ...(branches?.length ? { branches } : {}), ...(sides.length ? { sides } : {}) } as Cycle];
   });
   for (const c of captions) if (c.cycle && !cycles.some((y) => y.id === c.cycle!.cycle)) delete c.cycle;
+  // A side arrow's text names a branch of its cycle on its step; any other is read as an old one (migrateCycles).
+  for (const c of captions) if (c.cycle?.branch !== undefined && !cycles.find((y) => y.id === c.cycle!.cycle)!.branches?.some((b) => b.id === c.cycle!.branch && b.step === c.cycle!.step)) delete c.cycle.branch;
   // ChemDraw's kept configurations: the neighbours along each bond of the order (0 is the hydrogen or lone pair), with
   // the stereo bonds as they are now. Show Stereochemistry labels from these first, as ChemDraw does (cip.ts).
   if (tetra.length) {
@@ -2289,7 +2315,7 @@ export function fromCdxml(input: string | Xml): CdxmlRead {
     mol.bonds = mol.bonds.map((b, k) => [b, bondIds[k]] as const).sort((p, q) => p[1] - q[1]).map(([b]) => ({ ...b, atoms: [ix(b.atoms[0]), ix(b.atoms[1])] }));
     mol.atoms = order.map((i) => renumberCentre(mol.atoms[i], ix));
     for (const c of captions) if (c.under) c.under = c.under.map(ix);
-    for (const c of cycles) { c.nodes = c.nodes.map((n) => n.map(ix)); if (c.sides) c.sides = c.sides.map((s) => ({ ...s, atoms: s.atoms.map(ix) })); }
+    for (const c of cycles) { c.nodes = c.nodes.map((n) => n.map(ix)); if (c.sides) c.sides = c.sides.map((s) => ({ ...s, atoms: s.atoms.map(ix) })); Object.assign(c, mapBranches(c, ix)); }
     for (const c of captions) if (c.property) c.property.atoms = c.property.atoms.map(ix);
   }
   const byZ = <T extends { z: number }>(list: T[]) => list.map((x, k) => [x, k] as const).sort((p, q) => p[0].z - q[0].z || p[1] - q[1]).map(([x]) => { const out = { ...x } as Partial<T>; delete out.z; return out as Omit<T, "z">; });
@@ -2311,5 +2337,6 @@ export function fromCdxml(input: string | Xml): CdxmlRead {
   if (kept.length) mol.groups = kept;
   if (fills.length) mol.fills = fills.map((f) => ({ ...f, atoms: f.atoms.map(ix) }));
   if (octet && top!.guides !== undefined) mol.guides = readGuides(top!.guides);
-  return { mol: tidyGroups(mol), style, lost };
+  // π rings from Octet 1.0.x (no app on the root) as ligand() now orders them.
+  return { mol: tidyGroups(migrateCycles(octet && top!.app === undefined ? oldLigands(mol) : mol)), style, lost };
 }

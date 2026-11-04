@@ -1,6 +1,6 @@
 import { Component, Fragment, type ErrorInfo, type ReactNode } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { listen } from "@tauri-apps/api/event";
+import { listen } from "./listen";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import Editor, { keepNow, rescue } from "./Editor";
 import Gallery from "./Gallery";

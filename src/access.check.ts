@@ -42,7 +42,7 @@ if (existsSync(new URL("opsin.js", dir))) {
   attachOpsin(opsin, readFileSync(new URL("names.txt", dir), "utf8"), json("./nameindex.json"), DRUGS, json("./abbreviations.json"));
   const { checkedName, setNamer, withAbbreviation } = await import("./naming.ts");
   setNamer((await import("./namer.ts")).iupacName);
-  const inchiOf = (s: Mol | string) => { try { return chem.toInchi(typeof s === "string" ? chem.parseStructure(s) : s); } catch { return undefined; } };
+  const inchiOf = (s: Mol | string) => { try { return chem.toInchi(typeof s === "string" ? chem.parseStructure(s, false) : s); } catch { return undefined; } };
   nameOf = (m) => { const bare = checkedName(m, chem.expandLabels(m), nameToSmiles, inchiOf, chem.cipOf, knownName); return bare && withAbbreviation(bare, abbreviationOf(inchiOf(m))); };
 } else console.log("access.check: names skipped (no OPSIN build)");
 
@@ -226,6 +226,8 @@ const css = readFileSync(new URL("./editor.css", import.meta.url), "utf8"), rule
 assert.match(rule, /box-shadow: var\(--shadow-focus\)/);
 assert.match(rule, /outline: 2px solid transparent/);
 assert.ok(!/canvas-access[^{]*\{[^}]*(transition|animation)/.test(css), "no motion on the canvas's focus");
+// The names given after each edit read a name's structure only for its InChI, so it is Indigo's layout, untidied.
+assert.match(readFileSync(new URL("./Editor.tsx", import.meta.url), "utf8"), /const inchiOf = \(s: Mol \| string\) => \{ try \{ return toInchi\(typeof s === "string" \? parseStructure\(s, false\) : s\)/);
 
 // ——— Speed: a drawing of about 500 atoms ———
 // n benzene rings in a grid, each with a side group, a caption under every fourth and an arrow between every fifth pair.

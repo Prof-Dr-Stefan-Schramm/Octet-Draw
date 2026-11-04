@@ -14,10 +14,13 @@ import { readPalettes, readSize, type FloatingPalette, type SavedTemplate, type 
 import type { OwnName } from "./names";
 import { QUICK, readPurposes, type DocStyle, type OwnPurpose, type PurposeKind } from "./docstyle";
 import { DEFAULT_FILES, type FilePrefs } from "./SettingsWindow";
-import { PICTURES } from "./export";
+import { DPI_MIN, DPI_MAX, PICTURES } from "./export";
 import { WARNING_TYPES, type WarningType } from "./check";
 import { MS_DEFAULTS, readMsPrefs, type MsPrefs } from "./msanalysis";
 import { readLayout, type HomeLayout } from "./homeLayout";
+import { CURSOR_INKS, type CursorInk } from "./cursor";
+
+const inRange = (n: unknown, lo: number, hi: number) => typeof n === "number" && n >= lo && n <= hi;
 
 export type Settings = {
   snap: boolean; snapGrid: boolean; guides: { grid: boolean; rulers: boolean; crosshair: boolean }; rulerUnit: RulerUnit; eraser: number; keys: Record<string, string[]>; variants: { select: string; bond: string; ring: string; template: string; symbol: string; orbital: string; arrow: string; cycle: string; shape: string; bracket: string; more: string };
@@ -32,11 +35,13 @@ export type Settings = {
   // was last opened (ms), for "Welcome back". homeLayout: Home's sections in the user's order, and those folded to
   // their heading (src/homeLayout.ts).
   userName: string | null; tutorialDone: boolean; lastSeen: number; homeLayout: HomeLayout;
+  seenNotes: string; // the version whose notes (releases.ts) the user has seen, so they show once after an update
   updates: boolean; // check for updates when Octet opens: on unless the user turns it off in Settings (decision 0010)
   warnings: boolean; // View > Show Chemical Warnings: problems marked on the drawing and listed in Actions
   warningTypes: Partial<Record<WarningType, boolean>>; // Settings > Warnings: each kind switched on or off (unset: its default)
   checkCopy: boolean; // ChemDraw's "Check Structure When Copying to Clipboard or Exporting"
   pairBars: boolean; // new lone pairs drawn as bars (lines), as some countries draw Lewis structures; Option-click still switches
+  outlines: boolean; // Settings > Page edges: All (the other sizes the purpose gives, such as journal columns, show with the page) or Page only
   windows: boolean; // each drawing in a window of its own, with Home in its own (decision 0020); off: one window
   // What new drawings are for (IDEA-SIZE-1): Quick start or the purpose ⌘N starts (the last one picked; Return on
   // Home starts Quick start), the style of Quick start and of each built-in purpose when the user made it their own
@@ -72,11 +77,16 @@ export type Settings = {
   // aromaticOnOpen: Normalize Aromatic Display (on opening and importing: alternating bonds or circles; "" leaves
   // each structure as the file has it).
   autoMap: boolean; stereoParens: boolean; hideAbs: boolean; mdlFlags: boolean; aromaticOnOpen: "" | "kekule" | "circles";
+  cursor: CursorInk; // Settings > General > Cursor: Octet's cursors black, white, or the one that shows on the page
+  selectColour: SelectColour; // Settings > General > Selection: the selection's colour on the canvas (--select-* in brand/tokens.css)
 };
+// The selection colours to choose from, each a token pair in brand/tokens.css that stands 3:1 off the page.
+export type SelectColour = "blue" | "slate" | "grey";
+export const SELECT_COLOURS: [SelectColour, string][] = [["blue", "Blue"], ["slate", "Slate"], ["grey", "Grey"]];
 export type Swatch = { name: string; hex: string };
 export type RulerUnit = "mm" | "cm" | "in" | "pt" | "pc";
 export const RULER_UNITS: [RulerUnit, string][] = [["mm", "Millimetres"], ["cm", "Centimetres"], ["in", "Inches"], ["pt", "Points"], ["pc", "Picas"]];
-const DEFAULTS: Settings = { snap: true, snapGrid: false, guides: { grid: false, rulers: false, crosshair: false }, rulerUnit: "mm", eraser: 0.15, keys: {}, variants: { select: "box", bond: "single", ring: "benzene", template: "lib:Alanine", symbol: "plus", orbital: "p-shaded", arrow: "reaction", cycle: "circle", shape: "box-plain", bracket: "brackets", more: "tlc" }, strips: {}, actions: true, templates: [], pinned: [], actionLayout: {}, layoutVersion: 3, folded: [], panelMenus: false, captionOptionReturn: false, userName: null, tutorialDone: false, homeLayout: readLayout([], []), updates: true, warnings: true, warningTypes: {}, checkCopy: false, pairBars: false, windows: true, lastSeen: 0, purpose: QUICK, purposeStyles: {}, ownPurposes: [], files: DEFAULT_FILES, settingsModule: "document", curvedArrows: ["curved-120", "fishhook-120"], libraryRings: [], palettes: [], librarySize: "medium", dictionary: [], templateSets: [], nameHistory: [], paletteWide: false, palette: [], elementColours: {}, properties: false, propertyRows: ["formula", "weight"], nmrMhz: 400, nmrSolvent: "CDCl₃", nmrSolventPeaks: true, nmrDetails: false, massSpec: MS_DEFAULTS, scaleLabels: true, onlineSearch: true, fixedLengths: true, fixedAngles: true, sproutRings: false, clickTriple: false, interpretation: false, autoMap: true, stereoParens: true, hideAbs: false, mdlFlags: false, aromaticOnOpen: "" };
+const DEFAULTS: Settings = { snap: true, snapGrid: false, guides: { grid: false, rulers: false, crosshair: false }, rulerUnit: "mm", eraser: 0.15, keys: {}, variants: { select: "box", bond: "single", ring: "benzene", template: "lib:Alanine", symbol: "plus", orbital: "p-shaded", arrow: "reaction", cycle: "circle", shape: "box-plain", bracket: "brackets", more: "tlc" }, strips: {}, actions: true, templates: [], pinned: [], actionLayout: {}, layoutVersion: 3, folded: [], panelMenus: false, captionOptionReturn: false, userName: null, tutorialDone: false, seenNotes: "", homeLayout: readLayout([], []), updates: true, warnings: true, warningTypes: {}, checkCopy: false, pairBars: false, outlines: true, windows: true, lastSeen: 0, purpose: QUICK, purposeStyles: {}, ownPurposes: [], files: DEFAULT_FILES, settingsModule: "document", curvedArrows: ["curved-120", "fishhook-120"], libraryRings: [], palettes: [], librarySize: "medium", dictionary: [], templateSets: [], nameHistory: [], paletteWide: false, palette: [], elementColours: {}, properties: false, propertyRows: ["formula", "weight"], nmrMhz: 400, nmrSolvent: "CDCl₃", nmrSolventPeaks: true, nmrDetails: false, massSpec: MS_DEFAULTS, scaleLabels: true, onlineSearch: true, fixedLengths: true, fixedAngles: true, sproutRings: false, clickTriple: false, interpretation: false, autoMap: true, stereoParens: true, hideAbs: false, mdlFlags: false, aromaticOnOpen: "", cursor: "auto", selectColour: "blue" };
 export const SETTINGS_KEY = "octet.settings";
 const KEY = SETTINGS_KEY;
 
@@ -85,7 +95,8 @@ export function loadSettings(): Settings {
     const saved = JSON.parse(localStorage.getItem(KEY) ?? "{}");
     const list = <T,>(v: unknown, ok: (x: unknown) => boolean) => (Array.isArray(v) ? (v.filter(ok) as T[]) : []);
     return {
-      ...DEFAULTS, ...saved, variants: { ...DEFAULTS.variants, ...saved.variants },
+      // The Cycle tool's Reagent in and Product out (Octet 1.0.29) are its Catalytic cycle now: side arrows pull out of it.
+      ...DEFAULTS, ...saved, variants: { ...DEFAULTS.variants, ...saved.variants, ...(["in", "out"].includes(saved.variants?.cycle) ? { cycle: "circle" } : {}) },
       templates: list<SavedTemplate>(saved.templates, (t) => typeof t === "object" && t !== null),
       pinned: list<string>(saved.pinned, (k) => typeof k === "string"),
       libraryRings: list<string>(saved.libraryRings, (k) => typeof k === "string"),
@@ -99,12 +110,14 @@ export function loadSettings(): Settings {
       ).filter((k: { name: string; smiles: string }) => k.name.length <= 300 && k.smiles.length <= 2000).slice(0, 50),
       curvedArrows: Array.isArray(saved.curvedArrows) ? list<string>(saved.curvedArrows, (k) => typeof k === "string") : DEFAULTS.curvedArrows,
       ...readPurposes(saved),
-      // A saved 350 dpi is the old default, not a choice: it moves to the new default.
-      files: { ...DEFAULT_FILES, ...(typeof saved.files === "object" && saved.files ? saved.files : {}), ...(saved.files?.dpi === 350 ? { dpi: DEFAULT_FILES.dpi } : {}), clipboard: { ...DEFAULT_FILES.clipboard, ...(saved.files?.clipboard ?? {}) }, saveAs: saved.files?.saveAs === "cdxml" ? "cdxml" : "oct", quick: PICTURES.includes(saved.files?.quick) ? saved.files.quick : DEFAULT_FILES.quick },
+      // A saved 350 dpi is the old default, not a choice: it moves to the new default. A dpi or JPEG quality out of
+      // range (the quality a whole number, as Rust reads it), or a background Octet does not have, takes the default.
+      files: { ...DEFAULT_FILES, ...(typeof saved.files === "object" && saved.files ? saved.files : {}), ...(saved.files?.dpi === 350 || !inRange(saved.files?.dpi, DPI_MIN, DPI_MAX) ? { dpi: DEFAULT_FILES.dpi } : {}),
+        ...(Number.isInteger(saved.files?.quality) && inRange(saved.files.quality, 1, 100) ? {} : { quality: DEFAULT_FILES.quality }), ...(["white", "transparent", "page"].includes(saved.files?.background) ? {} : { background: DEFAULT_FILES.background }), clipboard: { ...DEFAULT_FILES.clipboard, ...(saved.files?.clipboard ?? {}) }, saveAs: saved.files?.saveAs === "cdxml" ? "cdxml" : "oct", quick: PICTURES.includes(saved.files?.quick) ? saved.files.quick : DEFAULT_FILES.quick },
       paletteWide: saved.paletteWide === true,
       warningTypes: Object.fromEntries(WARNING_TYPES.flatMap((w) => (typeof saved.warningTypes?.[w.id] === "boolean" ? [[w.id, saved.warningTypes[w.id]]] : []))),
       checkCopy: saved.checkCopy === true,
-      windows: saved.windows !== false, pairBars: saved.pairBars === true,
+      windows: saved.windows !== false, outlines: saved.outlines !== false, pairBars: saved.pairBars === true,
       snapGrid: saved.snapGrid === true,
       // Settings from before Show Grid: Gridlines set (a step in mm) in the default style, or in the style of the
       // purpose New starts, shows the grid.
@@ -119,6 +132,8 @@ export function loadSettings(): Settings {
       fixedLengths: saved.fixedLengths !== false, fixedAngles: saved.fixedAngles !== false, sproutRings: saved.sproutRings === true, clickTriple: saved.clickTriple === true,
       autoMap: saved.autoMap !== false, stereoParens: saved.stereoParens !== false, hideAbs: saved.hideAbs === true, mdlFlags: saved.mdlFlags === true,
       aromaticOnOpen: saved.aromaticOnOpen === "kekule" || saved.aromaticOnOpen === "circles" ? saved.aromaticOnOpen : "",
+      cursor: CURSOR_INKS.some(([c]) => c === saved.cursor) ? saved.cursor : DEFAULTS.cursor,
+      selectColour: SELECT_COLOURS.find(([c]) => c === saved.selectColour)?.[0] ?? DEFAULTS.selectColour,
       scaleLabels: saved.scaleLabels !== false,
       onlineSearch: saved.onlineSearch !== false,
       interpretation: saved.interpretation === true,
@@ -135,6 +150,7 @@ export function loadSettings(): Settings {
       labelReturnNewLine: saved.labelReturnNewLine === true,
       userName: typeof saved.userName === "string" ? saved.userName.slice(0, 40) : null,
       tutorialDone: saved.tutorialDone === true,
+      seenNotes: typeof saved.seenNotes === "string" && saved.seenNotes.length <= 20 ? saved.seenNotes : "",
       homeLayout: readLayout(saved.homeLayout?.order, saved.homeLayout?.folded),
       updates: typeof saved.updates === "boolean" ? saved.updates : true,
       lastSeen: typeof saved.lastSeen === "number" && Number.isFinite(saved.lastSeen) ? saved.lastSeen : 0,

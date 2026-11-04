@@ -76,7 +76,7 @@ const structures: [string, string, number][] = [
   ["phenyl isothiocyanate", "S=C=Nc1ccccc1", 163.87],
   ["dimethylketene", "CC(C)=C=O", 77.38],
   ["penta-2,3-diene", "CC=C=CC", 87.9],
-  ["carbon dioxide", "O=C=O", 35.88],
+  ["carbon dioxide", "O=C=O", 35.89], // cleaned exactly straight, so its double bonds are centred
   ["dicyclohexylcarbodiimide", "C1CCC(CC1)N=C=NC1CCCCC1", 227.32],
   ["benzonitrile", "N#Cc1ccccc1", 165.43],
   ["1-phenylpropyne", "CC#Cc1ccccc1", 194.35],

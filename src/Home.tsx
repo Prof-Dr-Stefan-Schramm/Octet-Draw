@@ -1,6 +1,6 @@
 // Home (decision 0003): where Octet opens. The lockup, a greeting by name and time of day, then four sections, each
 // under its own heading and hairline: New (Quick start: a seamless canvas with no page, focused when Home opens, so
-// Return starts it), Templates (purposes, IDEA-SIZE-1: Paper, Thesis, Slides and Poster, then the user's own, then
+// Return starts it), Templates (purposes, IDEA-SIZE-1: Paper, Thesis, Slides, Poster and Experiment, then the user's own, then
 // Custom template), Recent (the recent drawings as pictures, or three example drawings before there are any, with
 // Open), and Projects. One click starts or opens a drawing. On first launch Home asks the user's name first, in the
 // dotted frame a selected group gets. Nothing here needs an account.
@@ -15,14 +15,17 @@
 // drawing are Add to folder (or the folder it is in) and Change thumbnail; under each folder, Thumbnail, Colour and
 // Rename. Each tile also has a right-click menu (the Menu key and Shift+F10 open it too) with the same options and more.
 // A folder opens in Home's place, with Home to go back. A picture dropped on a tile becomes its thumbnail.
+// Experiments, beside Open… when there are any, opens the experiment pages Octet has opened or saved (discussion #15) in
+// Home's place too: a table with each one's picture, Title, Date, Project, Notebook and Yield, sorted by Date or Title
+// (a click on the column's name), a search over their details, and Export CSV….
 // Keys: the arrow keys move between tiles, across sections. Tab goes from section to section (its heading, then one
 // stop for its tiles, the tile last focused there, then that tile's buttons), and each section is a region named by
 // its heading, for screen readers.
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { listen } from "@tauri-apps/api/event";
+import { listen } from "./listen";
 import {
-  ArrowCounterClockwise, ArrowDown, ArrowLeft, ArrowUp, ArrowsInLineVertical, ArrowsOutLineVertical, CaretDown, DotsThree, FilePlus, FolderOpen, FolderPlus,
+  ArrowCounterClockwise, ArrowDown, ArrowLeft, ArrowUp, ArrowsInLineVertical, ArrowsOutLineVertical, CaretDown, CaretUp, DotsThree, Export, FilePlus, Flask, FolderOpen, FolderPlus,
   FolderSimpleMinus, FolderSimplePlus, ImageSquare, MagnifyingGlass, MinusCircle, Palette, PencilSimple, Plus, Trash, X,
 } from "@phosphor-icons/react";
 import { COLOURS, QUICK, outlines, type DocStyle, type PurposeKind } from "./docstyle";
@@ -41,6 +44,8 @@ import { moveSection, rowsOf, type HomeLayout, type SectionId } from "./homeLayo
 import { MAX_INPUT } from "./thumbs";
 import type { HomeLibrary, ThumbTarget, TilePicture } from "./homeLibrary";
 import { STARTERS } from "./starters";
+import { experimentRows, type ExperimentEntry, type ExperimentSort } from "./experiment";
+import { formatAmount } from "./stoich";
 
 export type RecentEntry = { path: string; name: string; at: number; thumb?: string; found: boolean };
 // A drawing open in a window of its own (src-tauri/src/windows.rs), with its picture as an SVG when it has one.
@@ -81,7 +86,7 @@ function Mark({ size }: { size: number }) {
 }
 
 // A purpose's page as a picture: the page and its outlines, with a small scheme (two rings and an arrow) at its true
-// size on that page, so each tile shows how big a structure is on it.
+// size on that page, so each tile shows how big a structure is on it. Experiment shows its details as lines at the top.
 export function PurposePicture({ style, kind }: { style: DocStyle; kind: PurposeKind }) {
   const all = outlines(style, kind), w = Math.max(...all.map((o) => o[1])), h = Math.max(...all.map((o) => o[2]));
   const b = (style.bond * 25.4) / 72, r = (Math.sqrt(3) / 2) * b; // bond length (mm); a ring's half width
@@ -91,6 +96,7 @@ export function PurposePicture({ style, kind }: { style: DocStyle; kind: Purpose
     <svg viewBox={`${-w / 2} ${-h / 2} ${w} ${h}`} aria-hidden>
       {all.map(([name, ow, oh], k) => <rect key={name} className={k ? "guide" : "sheet"} x={-ow / 2} y={-oh / 2} width={ow} height={oh} vectorEffect="non-scaling-stroke" />)}
       <path className="scheme" d={`${ring(-half - r)}${ring(half + r)}M${-arrow / 2} 0H${arrow / 2}M${arrow / 2 - 0.35 * b} ${-0.2 * b}L${arrow / 2} 0L${arrow / 2 - 0.35 * b} ${0.2 * b}`} vectorEffect="non-scaling-stroke" />
+      {kind === "experiment" && <path className="scheme" d={[0.45, 0.8, 0.8, 1].map((k, i) => `M${15 - w / 2} ${20 - h / 2 + 9 * i}h${k * (w - 30)}`).join("")} vectorEffect="non-scaling-stroke" />}
     </svg>
   );
 }
@@ -189,6 +195,7 @@ type Props = {
   drops?: boolean; // files from Finder can be dropped on a tile (the app; the UI-only preview takes pictures by the browser's drop)
   palette?: { name: string; hex: string }[]; // the user's own colours, after Octet's, as in every colour row
   layout: HomeLayout; onLayout: (layout: HomeLayout) => void; // the sections' order and the folded ones (settings)
+  experiments: ExperimentEntry[]; onRemoveExperiment: (path: string) => void; onExportExperiments: (list: ExperimentEntry[]) => void;
 };
 
 // What a right-click menu is for. only: the part a button under the tile opens.
@@ -199,6 +206,7 @@ type MenuFor = { at: { x: number; y: number }; keyboard?: boolean } & (
   | { kind: "recovered"; entry: RecoveredEntry }
   | { kind: "starter"; text: string; name: string }
   | { kind: "section"; id: SectionId; name: string }
+  | { kind: "experiment"; path: string; name: string }
 );
 
 // The first time Home shows (not when a drawing closes back to it), its tiles arrive one after another (FEEL-44): the
@@ -206,6 +214,7 @@ type MenuFor = { at: { x: number; y: number }; keyboard?: boolean } & (
 let arrived = false;
 const arrive = (k: number) => ({ "--i": Math.min(k, 7) }) as React.CSSProperties;
 const drawings = (n: number) => `${n} ${n === 1 ? "drawing" : "drawings"}`;
+const experimentCount = (n: number) => `${n} ${n === 1 ? "experiment" : "experiments"}`;
 const TITLES: Record<SectionId, string> = { new: "New", templates: "Templates", recent: "Recent", projects: "Folders" };
 const PICTURE = /\.(png|jpe?g|gif|bmp|tiff?|webp)$/i;
 
@@ -220,6 +229,8 @@ export function Home(p: Props) {
   // A project's colour being picked freely (Custom colour…): shown on its folder as it changes, kept when it closes.
   const [picking, setPicking] = useState<{ id: string; hex: string; anchor: DOMRect; keep: HTMLElement | null }>();
   const open = projectOf(lib.store, lib.open);
+  // The Experiments list, open in Home's place, with its search and sort.
+  const [lab, setLab] = useState(false), [search, setSearch] = useState(""), [sort, setSort] = useState<ExperimentSort>({ by: "date", down: true });
   const n = 1 + p.purposes.length + (p.onCustom ? 1 : 0); // the New tiles: Quick start, the templates, Custom template
   // Home covers the editor, which takes no keys or clicks until Home goes.
   useModal(page, !p.leaving);
@@ -255,6 +266,7 @@ export function Home(p: Props) {
       const tiles = [...(grid.current?.querySelectorAll<HTMLElement>("button.home-tile") ?? [])], at = tiles.indexOf(document.activeElement as HTMLElement);
       if (e.key === "Enter" && at < 0 && !(document.activeElement instanceof HTMLButtonElement)) { e.preventDefault(); p.onNew(QUICK); return; }
       if (e.key === "Escape" && open) { e.preventDefault(); back(); return; }
+      if (e.key === "Escape" && lab) { e.preventDefault(); closeLab(); return; }
       if (e.key === "Escape" && p.back) { e.preventDefault(); p.back.go(); return; }
       // In a tile's buttons: left and right go along them, up goes back to the tile.
       const act = (document.activeElement as HTMLElement | null)?.closest<HTMLElement>(".home-act");
@@ -283,6 +295,16 @@ export function Home(p: Props) {
     const id = lib.open;
     lib.setOpen(undefined);
     requestAnimationFrame(() => page.current?.querySelector<HTMLElement>(`.home-tile[data-tile="project:${CSS.escape(id ?? "")}"]`)?.focus());
+  };
+  const openLab = () => {
+    lib.setOpen(undefined);
+    setLab(true);
+    page.current?.scrollTo({ top: 0 });
+    requestAnimationFrame(() => page.current?.querySelector<HTMLElement>(".home-search input")?.focus());
+  };
+  const closeLab = () => {
+    setLab(false);
+    requestAnimationFrame(() => page.current?.querySelector<HTMLElement>("[data-experiments]")?.focus());
   };
   const openProject = (id: string) => {
     lib.setOpen(id);
@@ -545,6 +567,7 @@ export function Home(p: Props) {
     }
     if (m.kind === "purpose") return [[item("new", "New drawing", <FilePlus size={18} />)], m.own ? [item("remove", "Remove template", <MinusCircle size={18} />)] : []];
     if (m.kind === "recovered") return [[item("open", "Open", <FolderOpen size={18} />)], [item("discard", "Discard", <Trash size={18} />)]];
+    if (m.kind === "experiment") return [[item("open", "Open", <FolderOpen size={18} />)], [item("remove", "Remove from Experiments", <MinusCircle size={18} />)]];
     return [[item("open", "Open", <FolderOpen size={18} />)]];
   };
   // The options an option with more opens: a drawing's folders, and a folder's colours.
@@ -604,6 +627,7 @@ export function Home(p: Props) {
     }
     if (m.kind === "purpose") return key === "new" ? p.onNew(m.id) : p.onRemovePurpose(m.id);
     if (m.kind === "recovered") return key === "open" ? p.onRecovered(m.entry) : p.onDiscard(m.entry);
+    if (m.kind === "experiment") return key === "open" ? p.onRecent({ path: m.path }) : p.onRemoveExperiment(m.path);
     if (m.kind === "starter") return p.onStarter(m.text);
   };
 
@@ -780,7 +804,12 @@ export function Home(p: Props) {
   const titleOf = (id: SectionId) => (id === "recent" && !p.recents.length && !p.recovered.length ? "Examples" : TITLES[id]);
   const section = (id: SectionId) => (
     <Section key={id} id={id} title={titleOf(id)}
-      action={id === "recent" && <button className="home-open" onClick={p.onOpen}><FolderOpen size={16} aria-hidden />Open…{p.openKey && <kbd>{p.openKey}</kbd>}</button>}
+      action={id === "recent" && (
+        <span className="home-actions">
+          {p.experiments.length > 0 && <button className="home-open" data-experiments onClick={openLab}><Flask size={16} aria-hidden />Experiments</button>}
+          <button className="home-open" onClick={p.onOpen}><FolderOpen size={16} aria-hidden />Open…{p.openKey && <kbd>{p.openKey}</kbd>}</button>
+        </span>
+      )}
       heading={{ folded: isFolded(id), lifted: drag?.id === id, unfolding: unfolded === id,
         props: { onClick: () => fold(id), onPointerDown: (e) => headingPress(e, id), ...menuProps(() => ({ kind: "section", id, name: titleOf(id) })) } }}>
       {bodies[id]()}
@@ -845,6 +874,61 @@ export function Home(p: Props) {
     </>
   );
 
+  // The Experiments list: a row for each experiment page, its title opening it. A click on Title or Date sorts by it,
+  // and again turns the order round.
+  const rows = lab ? experimentRows(p.experiments, search, sort) : [];
+  const sortBy = (by: ExperimentSort["by"], name: string) => {
+    const on = sort.by === by;
+    return (
+      <th aria-sort={on ? (sort.down ? "descending" : "ascending") : "none"}>
+        <button className="home-sort" onClick={() => setSort({ by, down: on ? !sort.down : by === "date" })}>{name}{on && (sort.down ? <CaretDown size={12} aria-hidden /> : <CaretUp size={12} aria-hidden />)}</button>
+      </th>
+    );
+  };
+  const experimentList = lab && (
+    <>
+      <button className="home-back" onClick={closeLab}><ArrowLeft size={16} aria-hidden />Home</button>
+      <div className="home-title-row"><h1 className="home-greeting home-project-name">Experiments</h1></div>
+      <Section id="experiments" title={experimentCount(rows.length)} className="home-project" action={
+        <span className="home-actions">
+          <label className="library-search home-search">
+            <MagnifyingGlass size={16} aria-hidden />
+            <input type="search" aria-label="Search experiments" placeholder="Search" spellCheck={false} maxLength={200} value={search} onChange={(e) => setSearch(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); if (search) setSearch(""); else closeLab(); } }} />
+          </label>
+          {rows.length > 0 && <button className="home-open" onClick={() => p.onExportExperiments(rows)}><Export size={16} aria-hidden />Export CSV…</button>}
+        </span>
+      }>
+        {rows.length ? (
+          <table className="home-table">
+            <thead>
+              <tr><th><span className="visually-hidden">Picture</span></th>{sortBy("title", "Title")}{sortBy("date", "Date")}<th>Project</th><th>Notebook</th><th className="num">Yield</th><th><span className="visually-hidden">Remove</span></th></tr>
+            </thead>
+            <tbody>
+              {rows.map((x) => {
+                const title = x.details.title ?? x.name, go = () => p.onRecent({ path: x.path });
+                return (
+                  <tr key={x.path} className={x.found ? undefined : "missing"} onClick={go} {...menuProps(() => ({ kind: "experiment", path: x.path, name: title }))}>
+                    <td className="home-cell-picture"><DrawingPicture name={title} picture={lib.pictureFor(x.path)} /></td>
+                    <td>
+                      <button className="home-cell-open" data-tip={tilde(x.path, lib.home)} onClick={(e) => { e.stopPropagation(); go(); }}>{title}</button>
+                      <span className="home-when">{x.found ? x.name : "Moved or deleted"}</span>
+                    </td>
+                    <td>{x.details.date}</td>
+                    <td>{x.details.project}</td>
+                    <td>{x.details.notebook}</td>
+                    <td className="num">{formatAmount(x.yield, "yield")}</td>
+                    <td><button className="home-remove home-cell-remove" aria-label={`Remove ${title} from Experiments`} data-tip="Remove from Experiments" onClick={(e) => { e.stopPropagation(); p.onRemoveExperiment(x.path); }}><X size={12} /></button></td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        ) : <p className="home-none">{p.experiments.length ? "Nothing matches" : "No experiments"}</p>}
+      </Section>
+    </>
+  );
+
   const deleteName = deleting?.name;
   const menuLabel = (m: MenuFor) => (m.kind === "project" ? (m.only === "colour" ? "Colour" : m.only === "thumb" ? "Thumbnail" : projectOf(lib.store, m.id)?.name ?? "Folder") : m.kind === "drawing" && m.only ? (m.only === "thumb" ? "Thumbnail" : "Folder") : "name" in m ? m.name : "entry" in m ? m.entry.name : "Drawing");
   return (
@@ -859,8 +943,8 @@ export function Home(p: Props) {
           </picture>
           {p.back && <button className="home-back home-resume" data-tip={`Back to ${p.back.name}`} data-key={p.back.key} onClick={p.back.go}><ArrowLeft size={16} aria-hidden /><span>{p.back.name}</span></button>}
         </header>
-        <div ref={grid} key={open ? `project:${open.id}` : "home"} className={["home-view", first && !open && "home-arrive"].filter(Boolean).join(" ")}>
-          {project || main}
+        <div ref={grid} key={open ? `project:${open.id}` : lab ? "experiments" : "home"} className={["home-view", first && !open && !lab && "home-arrive"].filter(Boolean).join(" ")}>
+          {project || experimentList || main}
         </div>
       </div>
       {carried && createPortal(

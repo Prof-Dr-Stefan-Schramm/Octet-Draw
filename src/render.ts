@@ -60,8 +60,9 @@ export type Atom = {
   // degrees: ChemDraw's RotationAngle on a label, kept from a file.
   labelAngle?: number;
   hidden?: true; // Toggle Hydrogen Display: an explicit H that is not drawn, nor its bond (it still counts in the formula)
-  // Marks moved round the atom by hand (Shift-drag): each mark's angle in degrees, anticlockwise from the right, by its
-  // key: charge (a circled one), partial, radical0, radical1, pair0 to pair3. Marks without one go in the widest gaps.
+  // Marks moved round the atom by hand (dragged with Select): each mark's angle in degrees, anticlockwise from the right,
+  // by its key: charge (a circled one, or a skeletal carbon's sign), partial, radical0, radical1, pair0 to pair3. Marks
+  // without one go in the widest gaps.
   angles?: Record<string, number>;
   bars?: true; // the lone pairs drawn as bars, not dot pairs (ChemDraw's LonePairBar)
   // Interpret Chemically off (ChemDraw's InterpretChemically="no" on the label): the label is its text, not chemistry.
@@ -425,8 +426,10 @@ const dot = (a: P, b: P) => a[0] * b[0] + a[1] * b[1];
 const cross = (a: P, b: P) => a[0] * b[1] - a[1] * b[0];
 const angle = (a: P, b: P) => Math.acos(Math.max(-1, Math.min(1, dot(a, b) / (len(a) * len(b)))));
 
-// Label type: subscripts 75% and 0.212 em down, charges 75% and 0.33 em up.
-const SUB = 0.75, DROP = 0.212, RISE = 0.33;
+// Label type: subscripts 75% and 0.212 em down, charges 75% and 0.33 em up. A stacked line (indole NH, a label stacked
+// above or below) is 1.167 times the H's cap height from the attaching line, baseline to baseline: 8.35 pt in Arial
+// 10 pt, as ChemDraw stacks NH.
+const SUB = 0.75, DROP = 0.212, RISE = 0.33, STACK = 1.167;
 const TIP = 0.0165; // wedge half-width at the stereocentre, as a fraction of the bond length
 const MAX_TRIM = 0.67; // an inner-line trim longer than this (times the bond length) is skipped
 export const H_FIRST = new Set(['O', 'F', 'S', 'Cl', 'Se', 'Br', 'Te', 'I']); // H2O, HCl; but NH3, CH4
@@ -444,7 +447,12 @@ export function ringCircleRadius(n: number, L: number, spacing: number): number 
 // (from: the atom at the bond's other end), each the ring's reach that way scaled as an aromatic circle is for a ring
 // of its size (spacing: the double bond spacing as a fraction of the bond length). Any units, y either way.
 export function ligandEllipse(ring: P[], c: P, from: P | undefined, spacing: number): { across: P; along: P; ra: number; rb: number } {
-  const along: P = from && len(sub(c, from)) > 1e-9 ? unit(sub(c, from)) : [0, 1], across = perp(along), n = ring.length;
+  // The ellipse takes the ring's own flattening (the short axis of its points' spread about c), so it stays true to the
+  // ring when the ring moves without the atom it hangs from (issue 6). A ring drawn round takes the bond's line.
+  let xx = 0, yy = 0, xy = 0;
+  for (const q of ring) { const [x, y] = sub(q, c); xx += x * x; yy += y * y; xy += x * y; }
+  const flat = Math.hypot(xx - yy, 2 * xy) > 1e-6 * (xx + yy), t = Math.atan2(2 * xy, xx - yy) / 2 + Math.PI / 2;
+  const along: P = flat ? [Math.cos(t), Math.sin(t)] : from && len(sub(c, from)) > 1e-9 ? unit(sub(c, from)) : [0, 1], across = perp(along), n = ring.length;
   const reach = (d: P) => Math.max(...ring.map((q) => Math.abs(dot(sub(q, c), d)))), f = ringCircleRadius(n, 1, spacing) * 2 * Math.sin(Math.PI / n);
   return { across, along, ra: reach(across) * f, rb: reach(along) * f };
 }
@@ -458,18 +466,19 @@ export function circledRings(mol: Mol): number[][] {
   return ringsOf(g).filter((r) => r.length >= 5 && r.length <= 8 && r.every((i) => mol.atoms[i].circle && aromatic[i]));
 }
 
+// radical: Atom.radical; a singlet (3) is one pair, so it takes two hydrogens, as a triplet does.
 export function hydrogens(label: string, charge: number, used: number, radical = 0) {
   const v = VALENCE[label];
   if (v === undefined) return 0;
   const target = v === 4 ? v - Math.abs(charge) : label === 'B' || label === 'Al' ? v - charge : v + charge;
-  return Math.max(0, Math.round(target - used - radical));
+  return Math.max(0, Math.round(target - used - (radical === 3 ? 2 : radical)));
 }
 // Valence electrons, for how many lone pairs an atom can show.
 const SHELL: Record<string, number> = { H: 1, B: 3, Al: 3, C: 4, Si: 4, N: 5, P: 5, As: 5, O: 6, S: 6, Se: 6, Te: 6, F: 7, Cl: 7, Br: 7, I: 7 };
 // The lone pairs an atom has: what is left of its valence electrons after its bonds, hydrogens, charge and radical.
 export function lonePairs(label: string, charge: number, used: number, h: number, radical = 0) {
   const e = SHELL[label];
-  return e === undefined ? 0 : Math.max(0, Math.floor((e - used - h - charge - radical) / 2));
+  return e === undefined ? 0 : Math.max(0, Math.floor((e - used - h - charge - (radical === 3 ? 2 : radical)) / 2));
 }
 
 // Where line p + r·t meets line q + s·t; null if they are parallel.
@@ -698,6 +707,7 @@ export function render(mol: Mol, s: Style, measure: (text: string, face?: Face) 
   for (const back of endOn.values()) if (!labelled[back]) newman.set(back, 0.4 * zOf(scaleOf(mol.atoms[back])).L);
   const labels: Label[] = [], labelAtom = new Map<Label, number>();
   const marks: P[][] = mol.atoms.map(() => []); // ink that is not a label shape (a skeletal carbon's charge)
+  const skeletalSign: (P | undefined)[] = []; // where a skeletal carbon's charge is drawn, to move it (electrons)
   const sign = (c: number) => `${Math.abs(c) > 1 ? Math.abs(c) : ''}${c > 0 ? '+' : '–'}`;
   // A diamond or star attachment point, ChemDraw's size: three quarters of the label size and two line widths across.
   const pointR = (0.75 * s.size + 2 * s.line) / 2;
@@ -734,12 +744,15 @@ export function render(mol: Mol, s: Style, measure: (text: string, face?: Face) 
     const r = ratio[i], S = s.size * r;
     const M = !face && r === 1 ? measure : (t: string): Ink => grown(measure(t, face), r);
     if (!labelled[i]) {
-      // A charged skeletal carbon: the sign alone, in the direction furthest from its bonds (up-right on a tie).
+      // A charged skeletal carbon: the sign alone, in the direction furthest from its bonds (up-right on a tie), or
+      // where it was moved by hand (Atom.angles charge; y is down here).
       if (a.charge && !a.circled) {
-        const t = sign(a.charge), m = M(t), dirs = nbrs[i].map((j) => dir(i, j));
+        const t = sign(a.charge), m = M(t), dirs = nbrs[i].map((j) => dir(i, j)), deg = a.angles?.charge;
         const gap = (c: P) => Math.min(...dirs.map((b) => angle(b, c)));
-        const d = ([[1, -1], [-1, -1], [1, 1], [-1, 1], [0, -1], [1, 0], [0, 1], [-1, 0]] as P[]).map(unit).reduce((best, c) => (gap(c) > gap(best) + 0.01 ? c : best));
+        const d: P = deg !== undefined ? [Math.cos((-deg * Math.PI) / 180), Math.sin((-deg * Math.PI) / 180)]
+          : ([[1, -1], [-1, -1], [1, 1], [-1, 1], [0, -1], [1, 0], [0, 1], [-1, 0]] as P[]).map(unit).reduce((best, c) => (gap(c) > gap(best) + 0.01 ? c : best));
         const c = add(pts[i], mul(d, 0.6 * S));
+        skeletalSign[i] = c;
         labels.push({ text: t, x: c[0] - (m.width * SUB) / 2, y: c[1] + (m.ascent * SUB) / 2, size: S * SUB, colour: a.colour });
         labelAtom.set(labels[labels.length - 1], i);
         marks[i] = m.outline.map(([px, py]) => [c[0] - (m.width * SUB) / 2 + px * SUB, c[1] + (m.ascent * SUB) / 2 + py * SUB]);
@@ -873,7 +886,7 @@ export function render(mol: Mol, s: Style, measure: (text: string, face?: Face) 
       const width = (u: (typeof us)[number]) => W(u) + (u.count ? Mx(u.count, count(u)).width * SUB : 0);
       const first = Mx(us[0].text[0], 0), base = y + first.ascent / 2, same = !us[0].count && [...us[0].text].length === 1;
       if (align === "above" || align === "below") {
-        const pitch = 1.1 * M('H').ascent * (align === "above" ? -1 : 1);
+        const pitch = STACK * M('H').ascent * (align === "above" ? -1 : 1);
         us.forEach((u, k) => {
           const ux = k ? x - width(u) / 2 : x - first.width / 2, uy = base + k * pitch;
           const r = run(u.text, ux, uy, 1, k, at.get(u));
@@ -913,7 +926,7 @@ export function render(mol: Mol, s: Style, measure: (text: string, face?: Face) 
     if (iso) run(iso, ox - isoW, base - RISE * S, SUB, -1);
     const hs = (hx: number, hy: number, line = 0) => { run('H', hx, hy, 1, line); if (count) run(count, hx + hW, hy + DROP * S, SUB, line); };
     let end = ox + lw; // the charge goes here
-    const pitch = 1.1 * M('H').ascent;
+    const pitch = STACK * M('H').ascent;
     if (h && align) {
       if (align === "right") hs(ox - isoW - hW - cW, base);
       else if (align === "above" || align === "below") hs(x - hW / 2, base + (align === "above" ? -pitch : pitch), 1);
@@ -963,7 +976,7 @@ export function render(mol: Mol, s: Style, measure: (text: string, face?: Face) 
   // charge sits up and to the right when that is clear; the rest share out the widest gaps between the bonds and
   // the label, evenly spaced, and each sits just clear of the label.
   const symbols: P[][][] = mol.atoms.map(() => []);
-  const electrons: { atom: number; at: P; key?: string }[] = [], beads: { at: P; r: number }[] = [];
+  const electrons: { atom: number; at: P; key?: string }[] = skeletalSign.flatMap((at, i) => (at ? [{ atom: i, at, key: 'charge' }] : [])), beads: { at: P; r: number }[] = [];
   const TAU = 2 * Math.PI, turn = (x: number) => ((x % TAU) + TAU) % TAU;
   // Every polygon winds one way (see polygons below); a disc or ring built here is turned to match.
   const wound = (poly: P[]) => (poly.reduce((sum, q, j) => sum + cross(q, poly[(j + 1) % poly.length]), 0) > 0 ? poly.reverse() : poly);
@@ -1362,9 +1375,12 @@ export function render(mol: Mol, s: Style, measure: (text: string, face?: Face) 
       polygons.push([add(base, mul(pl.n, -w)), add(base, mul(pl.n, w)), E]);
     }
     if (pl.kind === 'hash') {
-      // round(length / hash spacing) marks at even pitch, the last one flush with the wide end.
-      const start = drawnEnd(pl, pl.a), D = pl.length - pl.cut[0] - pl.cut[1], marks = Math.max(1, Math.round(D / hash)), pitch = D / marks;
-      for (let j = 1; j <= marks; j++) {
+      // Marks at even pitch, the last one flush with the wide end. Hash Spacing is the gap between marks, so the pitch
+      // is the spacing plus the line width, as ChemDraw draws it. Where another bond meets an unlabelled wide end, the
+      // last mark is left out so it doesn't run into that bond, as ChemDraw does (issue 7).
+      const start = drawnEnd(pl, pl.a), D = pl.length - pl.cut[0] - pl.cut[1], marks = Math.max(1, Math.round(D / (hash + 2 * hw))), pitch = D / marks;
+      const joined = !labelled[pl.b] && nbrs[pl.b].length > 1 && marks > 1;
+      for (let j = 1; j <= marks - (joined ? 1 : 0); j++) {
         const t = j * pitch - hw, c = add(start, mul(pl.u, t));
         bar(add(c, mul(pl.u, -hw)), add(c, mul(pl.u, hw)), pl.n, tip + ((wide - tip) * t) / D);
       }
@@ -1448,7 +1464,7 @@ export function render(mol: Mol, s: Style, measure: (text: string, face?: Face) 
     for (const poly of polygons.slice(before)) { colours.push(mol.atoms[r[0]].colour); alphas.push(fade(...r)); for (const q of poly) grow(r[0], q); }
   }
   // A π ligand (a ring of delocalised bonds round a multi-centre point) has an ellipse inside, sized as an aromatic
-  // circle for the ring and flattened with it: its axes across and along the bond to the point.
+  // circle for the ring and flattened as the ring is (ligandEllipse).
   mol.atoms.forEach((a, i) => {
     const r = a.centre && !a.centre.variable ? a.centre.atoms : [];
     if (r.length < 3 || !r.every((x) => r.filter((y) => bondAt.get(key(x, y))?.type === 4).length === 2)) return;

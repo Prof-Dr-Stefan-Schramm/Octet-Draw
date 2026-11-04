@@ -40,7 +40,7 @@ export const ACTIONS: Action[] = [
   group("cpLigand", "Add a cyclopentadienyl ligand (η5)"), group("phenylLigand", "Add a phenyl ligand (η6)"),
   group("sulfonyl", "Add a sulfonyl"), group("tBu", "Add a tert-butyl"),
   bond("single", "Make bond single"), bond("double", "Make bond double"), bond("triple", "Make bond triple"), bond("quadruple", "Make bond quadruple"), bond("hydrogen", "Make bond a hydrogen bond"), bond("bolddouble", "Make bond bold double"), bond("dasheddouble", "Make bond dashed double"), bond("aromaticdouble", "Make bond aromatic double"), bond("eitherdouble", "Make bond double either"),
-  bond("wedge", "Make bond a wedge"), bond("hashwedge", "Make bond a hashed wedge"), bond("hashed", "Make bond hashed"),
+  bond("wedge", "Make bond a wedge"), bond("hashwedge", "Make bond a hashed wedge"), bond("hollow", "Make bond a hollow wedge"), bond("dative", "Make bond dative"), bond("hashed", "Make bond hashed"),
   bond("bold", "Make bond bold"), bond("dashed", "Make bond dashed"), bond("wavy", "Make bond wavy"),
   bond("left", "Put the double bond's second line on the left"), bond("centre", "Centre the double bond"), bond("right", "Put the double bond's second line on the right"),
   bond("auto", "Place the double bond's second line automatically"), bond("front", "Bring the bond to the front where bonds cross"), bond("properties", "Bond properties"),
@@ -68,12 +68,18 @@ export const ACTIONS: Action[] = [
   any("edit.delete", "Delete the selection, or what is under the pointer", "Edit"),
   // The Actions panel's own actions (no menu command or canvas key does them): each can take a key here, so every
   // action the panel and its right-click menu show can run from the keyboard. ChemDraw has no keys for them.
-  ...([["select_structure", "Select the whole structure"], ["pairs", "Show or hide lone pairs"], ["number", "Number the compounds"], ["show_warnings", "Show hidden warnings"],
+  ...([["select_structure", "Select the whole structure"], ["pairs", "Show or hide lone pairs"], ["number", "Number the compounds"], ["show_warnings", "Show hidden warnings"], ["hide_warnings", "Hide the selection's warnings"],
     ["caption.add", "Add a caption under the structure"], ["template.add", "Add the selection to the templates"], ["cycle.make", "Make a catalytic cycle"], ["align.row", "Line up structures in a row"],
     ["align.column", "Line up structures in a column"], ["align.spread-row", "Space structures evenly"], ["bond.flip", "Point the bond the other way"], ["caption.edit", "Edit the text"],
     ["caption.attach", "Tie the text to its structure"], ["caption.detach", "Un-tie the text from its structure"], ["reaction.map", "Map the reaction's atoms"], ["reaction.unmap", "Clear the atom map"],
     ["cycle.centre", "Add a centre label to the cycle"], ["cycle.in", "Add a reagent coming in"], ["cycle.out", "Add a product going out"], ["cycle.tidy", "Tidy the cycle"],
-    ["cycle.reverse", "Reverse the cycle"], ["cycle.ungroup", "Remove the cycle"], ["arrow.reverse", "Reverse the arrow"], ["arrow.flip", "Flip the arrow's curve"],
+    ["cycle.step.reversible", "Make the cycle's step reversible or one way"], ["cycle.step.balance.equal", "Balance the reversible step equally"],
+    ["cycle.step.balance.forward", "Make the reversible step's forward half longer"], ["cycle.step.balance.back", "Make the reversible step's back half longer"],
+    ["cycle.step.reset", "Reset the cycle's step"], ["cycle.step.hide", "Hide or show the step's arc"], ["cycle.step.show", "Show the cycle's hidden arcs"], ["cycle.side.add", "Add a side arrow to the cycle"], ["cycle.name", "Add a step name"],
+    ["cycle.side.ends.both", "Give the side arrow both ends"], ["cycle.side.ends.in", "Make the side arrow come in only"], ["cycle.side.ends.out", "Make the side arrow go out only"],
+    ["cycle.side.swap", "Swap the side arrow's in and out"], ["cycle.side.inside", "Put the side arrow inside or outside the cycle"], ["cycle.side.reset", "Reset the side arrow's position"],
+    ["cycle.side.remove", "Remove the side arrow"],
+    ["cycle.reverse", "Reverse the cycle"], ["cycle.remove", "Remove the cycle"], ["arrow.reverse", "Reverse the arrow"], ["arrow.flip", "Flip the arrow's curve"],
     ["arrow.point", "Add or remove the arrow's point"], ["arrow.closed", "Open or close the curve"], ["arrow.above", "Add conditions above the arrow"], ["arrow.below", "Add conditions below the arrow"],
     ["orbital.swap", "Swap the orbital's phases"], ["shape.lanes.1", "Add a lane to the plate"], ["shape.lanes.copy", "Duplicate the plate's lane"], ["shape.lanes.-1", "Delete the plate's lane"],
     ["shape.rf", "Show or hide the plate's Rf values"], ["shape.ticks", "Show or hide the plate's side ticks"], ["shape.transparent", "Make the plate transparent or opaque"], ["spot.setrf", "Set the spot's Rf"],
@@ -100,7 +106,7 @@ export const DEFAULT_KEYS: Record<string, string[]> = {
   "group.cyclohexyl": ["6"], "group.cyclopentyl": ["7"], "group.methylidene": ["8"], "group.dimethyl": ["9"], "group.alkyne": ["z"],
   "group.cpLigand": ["j"], "group.phenylLigand": ["shift+j"],
   "group.cyclopropyl": ["v"], "group.cyclobutyl": ["u"], "group.sulfonyl": ["k"], "group.tBu": ["shift+k"],
-  "bond.single": ["1"], "bond.double": ["2"], "bond.triple": ["3"], "bond.quadruple": [], "bond.hydrogen": [], "bond.wedge": ["w"], "bond.hashwedge": ["h", "shift+w"],
+  "bond.single": ["1"], "bond.double": ["2"], "bond.triple": ["3"], "bond.quadruple": [], "bond.hydrogen": [], "bond.wedge": ["w"], "bond.hashwedge": ["h", "shift+w"], "bond.hollow": [], "bond.dative": [],
   "bond.hashed": ["shift+h"], "bond.bold": ["b"], "bond.bolddouble": ["shift+b"], "bond.dasheddouble": ["shift+d"], "bond.aromaticdouble": [], "bond.eitherdouble": [], "bond.dashed": ["d"], "bond.wavy": ["y"],
   "bond.left": ["l"], "bond.centre": ["c"], "bond.right": ["r"], "bond.auto": [], "bond.front": ["f"], "bond.properties": ["/", "?"],
   "bond.ring3": ["v"], "bond.ring4": ["4"], "bond.ring5": ["5"], "bond.ring6": ["6"], "bond.ring7": ["7"], "bond.ring8": ["8"],
@@ -118,7 +124,9 @@ export const DEFAULT_KEYS: Record<string, string[]> = {
 };
 
 export type Keymap = Record<string, string[]>;
-export const keymap = (changes: Keymap = {}): Keymap => ({ ...DEFAULT_KEYS, ...changes });
+// A key saved for an action under its old id works for it under its new one.
+const RENAMED: Record<string, string> = { "action.cycle.ungroup": "action.cycle.remove" };
+export const keymap = (changes: Keymap = {}): Keymap => ({ ...DEFAULT_KEYS, ...Object.fromEntries(Object.entries(changes).map(([k, v]) => [RENAMED[k] && !changes[RENAMED[k]] ? RENAMED[k] : k, v])) });
 
 // One key press as a string: "n", "shift+n", "+", "shift+arrowup", "alt+arrowleft". Letters and named keys keep
 // Shift; on their own, symbols such as + are already shifted. Option changes the letter a key types on a Mac, so the

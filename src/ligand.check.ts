@@ -2,11 +2,11 @@
 // are joined through, stop working: drawing, deleting, copying, CDXML and chemistry.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { EMPTY, addGroupAt, deleteAtoms, extractSelection, fragments, insertMol, moveAtoms, neighbours, placeCentres, pos, sandwich, sprout } from "./edit.ts";
+import { EMPTY, addGroupAt, deleteAtoms, extractSelection, fragments, insertMol, moveAtoms, neighbours, placeCentres, pos, sandwich, sprout, toFront } from "./edit.ts";
 import { fromCdxml, toCdxml } from "./cdxml.ts";
 import { parse, serialize } from "./file.ts";
 import { DEFAULT_STYLE } from "./docstyle.ts";
-import { render, type Ink, type Mol } from "./render.ts";
+import { ligandEllipse, render, type Ink, type Mol } from "./render.ts";
 
 const iron: Mol = { atoms: [{ label: "Fe", location: [0, 0, 0] }], bonds: [] };
 const centres = (m: Mol) => m.atoms.flatMap((a, i) => (a.centre ? [i] : []));
@@ -63,6 +63,10 @@ assert.equal(one.atoms[centres(one)[0]].centre!.atoms.length, 4);
 // Moving a ring moves its point (as the editor keeps it).
 const moved = placeCentres(moveAtoms(ferrocene, new Set(lower), [3, 0]));
 assert.ok(Math.abs(pos(moved, centres(moved)[0])[0] - 3) < 1e-9);
+// Its ellipse keeps the ring's flattening, though the bond to the metal now leans (issue 6).
+const axes = (x: Mol) => { const c = centres(x)[0], r = x.atoms[c].centre!.atoms, q = (i: number) => pos(x, i) as [number, number]; return ligandEllipse(r.map(q), q(c), q(neighbours(x, c)[0]), 0.18); };
+const [was, now] = [axes(ferrocene), axes(moved)];
+assert.ok(Math.abs(Math.abs(was.along[0] * now.along[0] + was.along[1] * now.along[1]) - 1) < 1e-9 && Math.abs(was.rb - now.rb) < 1e-9, "the ellipse moves with its ring");
 // Copy and paste keep the point on the copied ring.
 const copy = extractSelection(ferrocene, new Set(ferrocene.atoms.map((_, i) => i)), new Set());
 const twice = insertMol(ferrocene, copy, [10, 0]).mol;
@@ -110,6 +114,62 @@ const S = { bond: 19.2, line: 0.8, bold: 2.67, spacing: 0.18 * 19.2, hash: 3.33,
 const drawn = render(ferrocene, S, ink), plain = render({ ...ferrocene, atoms: ferrocene.atoms.map(({ centre: _, ...a }) => a) }, S, ink);
 assert.equal(drawn.labels.filter((l) => l.text !== "Fe").length, 0, "no label on the points");
 assert.ok(drawn.polygons.length > plain.polygons.length + 100, "two ellipses");
+// Where the bond to the point crosses its ring, the ring's near (bold or wedged) edge is in front of the bond and its
+// far edge behind it (issue 6). onTop(x, metal, point, edge): whether the bond from the metal to the point is drawn
+// whole where it crosses the level ring edge (atoms edge), the edge being cut round it.
+type P = [number, number];
+const inside = (poly: P[], q: P) => { let c = false; for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) if ((poly[i][1] > q[1]) !== (poly[j][1] > q[1]) && q[0] < ((poly[j][0] - poly[i][0]) * (q[1] - poly[i][1])) / (poly[j][1] - poly[i][1]) + poly[i][0]) c = !c; return c; };
+const onTop = (x: Mol, metal: number, point: number, edge: number[]) => {
+  const d = render(x, S, ink, S.bond), covered = (q: P) => d.polygons.some((poly) => inside(poly, q)), at = (i: number): P => [pos(x, i)[0] * S.bond, -pos(x, i)[1] * S.bond];
+  const [a, b] = [at(metal), at(point)], y = at(edge[0])[1], t = (y - a[1]) / (b[1] - a[1]), cx = a[0] + t * (b[0] - a[0]), out = Math.sign(y - b[1]);
+  assert.ok(Math.abs(at(edge[1])[1] - y) < 1e-6 && t > 0 && t < 1, "the bond crosses the edge");
+  // On the bond 2 px outside the edge, and on the edge 1.5 px to the side of the bond: inside the gap cut in the one
+  // behind, clear of the one in front.
+  const bond = covered([cx, y + 2 * out]), side = covered([cx + 1.5, y]);
+  assert.notEqual(bond, side, "one of the two is cut");
+  return bond;
+};
+{
+  const [cp] = addGroupAt(iron, 0, "cpLigand"), c = centres(cp)[0], r = cp.atoms[c].centre!.atoms;
+  // j on a lone metal: the Cp below it; the bond comes down through the ring's far side.
+  const far = r.filter((i) => Math.abs(pos(cp, i)[1] - Math.max(...r.map((j) => pos(cp, j)[1]))) < 1e-9);
+  assert.equal(onTop(cp, 0, c, far), true, "the bond is in front of a Cp's far edge");
+  // It comes from the bonds' order, so CDXML (bond Z) carries it, and Bring to Front on the far edge changes it.
+  assert.equal(onTop(fromCdxml(toCdxml(cp, DEFAULT_STYLE)).mol, 0, c, far), true, "CDXML keeps the order");
+  assert.equal(onTop(toFront(cp, new Set(far)), 0, c, far), false, "Bring to Front puts the far edge in front");
+  // j again: the Cp above; the bond goes up through its bold near edge.
+  const [both] = addGroupAt(cp, 0, "cpLigand"), u = centres(both)[1], ur = both.atoms[u].centre!.atoms;
+  assert.equal(onTop(both, 0, u, ur.filter((i) => Math.abs(pos(both, i)[1] - Math.min(...ur.map((j) => pos(both, j)[1]))) < 1e-9)), false, "the bond is behind a Cp's bold edge");
+  // Shift+J below a metal, then the metal moved with the lasso to below the ring: the bond crosses the far edge, then
+  // the bold near edge.
+  const [ph] = addGroupAt(iron, 0, "phenylLigand"), q = centres(ph)[0], pr = ph.atoms[q].centre!.atoms;
+  const level = (x: Mol, top: boolean) => { const ys = pr.map((i) => pos(x, i)[1]), y = top ? Math.max(...ys) : Math.min(...ys); return pr.filter((i) => Math.abs(pos(x, i)[1] - y) < 1e-9); };
+  assert.equal(onTop(ph, 0, q, level(ph, true)), true, "the bond is in front of a phenyl's far edge");
+  const under = moveAtoms(ph, new Set([0]), [0, -2.5]);
+  assert.equal(onTop(under, 0, q, level(under, false)), false, "the bond is behind a phenyl's bold edge");
+}
+{
+  // A Cp from Octet 1.0.x: every ring edge after the bond to the point, so the far edge is drawn over the bond. Octet
+  // reorders it once when it opens a 1.0.x file (.oct JSON or Octet's CDXML, neither with an app), and only then.
+  const [cp] = addGroupAt(iron, 0, "cpLigand"), c = centres(cp)[0], r = cp.atoms[c].centre!.atoms, edge = (b: Mol["bonds"][number]) => r.includes(b.atoms[0]) && r.includes(b.atoms[1]);
+  const far = r.filter((i) => Math.abs(pos(cp, i)[1] - Math.max(...r.map((j) => pos(cp, j)[1]))) < 1e-9);
+  const old: Mol = { ...cp, bonds: [...cp.bonds.filter((b) => !edge(b)), ...cp.bonds.filter(edge)] }, order = (x: Mol) => x.bonds.map((b) => b.atoms.join(" "));
+  assert.equal(onTop(old, 0, c, far), false, "1.0.x drew the far edge over the bond");
+  const json = (x: Mol, app: boolean) => { const d = JSON.parse(serialize(x)); assert.ok(d.app); if (!app) delete d.app; return parse(JSON.stringify(d)); };
+  assert.equal(onTop(json(old, false), 0, c, far), true, "a 1.0.x .oct opens with the far edge behind the bond");
+  assert.deepEqual(order(json(old, true)), order(old), "a 1.1.0 .oct is unchanged");
+  // A 1.0.x Cp whose bond to the point the user brought to the front stays as it is.
+  const front = { ...old, bonds: [...old.bonds.filter((b) => b.atoms.includes(c) === false), ...old.bonds.filter((b) => b.atoms.includes(c))] };
+  assert.deepEqual(order(json(front, false)), order(front), "a Bring to Front is kept");
+  const xml = toCdxml(old, DEFAULT_STYLE);
+  assert.ok(/&quot;app&quot;:&quot;[^&]+&quot;,/.test(xml));
+  assert.equal(onTop(fromCdxml(xml.replace(/&quot;app&quot;:&quot;[^&]+&quot;,/, "")).mol, 0, c, far), true, "Octet 1.0.x CDXML opens with the far edge behind the bond");
+  assert.deepEqual(order(fromCdxml(xml).mol), order(old), "Octet 1.1.0 CDXML is unchanged");
+  // ChemDraw's file (no Octet attributes) keeps its own order.
+  const chemdraw = fromCdxml(xml.replace(/ Octet="[^"]*"/g, "")).mol;
+  assert.ok(chemdraw.atoms[c].centre, "ChemDraw's file has the point");
+  assert.deepEqual(order(chemdraw), order(old), "a ChemDraw file is unchanged");
+}
 console.log("ligand.check: drawing ok");
 
 // Chemistry: the points are not atoms; ferrocene is one compound, C10H10Fe, as ChemDraw gives it (chem.ts analyse).

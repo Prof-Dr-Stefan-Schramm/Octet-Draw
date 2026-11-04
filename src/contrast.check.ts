@@ -63,6 +63,17 @@ for (const [name, theme] of [["light", light], ["dark", dark]] as const)
       const r = contrast(theme[fg], theme[bg]);
       assert.ok(r >= need, `${name}: --${fg} on --${bg} is ${r.toFixed(2)}:1, under ${need}:1`);
     }
+// Every selection colour in Settings (settings.ts SELECT_COLOURS) is a token pair that stands 3:1 off the page and the
+// chrome in both themes, with ink on it (a selected atom's label) at 4.5:1. The canvas draws the selection in it.
+const choices = [...(/SELECT_COLOURS[^=]*=\s*\[(.*)\];/.exec(read("./settings.ts"))?.[1] ?? "").matchAll(/\["(\w+)", "[^"]+"\]/g)].map((m) => m[1]);
+assert.deepEqual(choices, ["blue", "slate", "grey"], "the selection colours in settings.ts");
+for (const [name, theme] of [["light", light], ["dark", dark]] as const)
+  for (const c of choices) {
+    const v = theme[`select-${c}`];
+    assert.ok(v, `${name}: --select-${c} in tokens.css`);
+    for (const bg of ["canvas", "surface"]) assert.ok(contrast(v, theme[bg]) >= 3, `${name}: --select-${c} on --${bg} is ${contrast(v, theme[bg]).toFixed(2)}:1, under 3:1`);
+    assert.ok(contrast(theme.ink, v) >= 4.5, `${name}: --ink on --select-${c} is ${contrast(theme.ink, v).toFixed(2)}:1, under 4.5:1`);
+  }
 // Dark swatches (black, ink) on a dark panel keep a 3:1 edge.
 assert.ok(contrast(dark["swatch-edge"], dark["surface-raised"]) >= 3, "dark: swatch edge on surface-raised");
 // The backdrop dims the window in both themes: never lighter than what is under it.
@@ -87,4 +98,15 @@ for (const r of rules) {
   const typed = r.body.match(/#[0-9a-f]{3,8}\b|rgba?\(/gi);
   assert.ok(!typed, `${r.selector}: a colour typed by hand (${typed}); use a token from brand/tokens.css`);
 }
+// The canvas draws the selection in the colour chosen, Blue unless set.
+for (const sel of [".selection-marks circle", ".selection-marks line", ".selection-marks rect", ".selection-marks .arrow-mark", ".box", ".selection-frame", ".resize-handle", ".handle"])
+  assert.ok(rules.some((r) => r.selector === sel && /:\s*var\(--select\)/.test(r.body)), `${sel} is drawn in the selection colour`);
+// Blue unless set, on the canvas and on the Spectrum panel's copy of the drawing (a <use> of the canvas's, which
+// inherits from the panel, so with no --select there its marks would fill black); each other choice on both.
+for (const [c, sel] of choices.map((c) => [c, c === "blue" ? ".canvas, .spectrum-inset" : `.editor[data-select="${c}"] :is(.canvas, .spectrum-inset)`]))
+  assert.ok(rules.some((r) => r.selector === sel && new RegExp(`--select:\\s*var\\(--select-${c}\\)`).test(r.body)), `${sel} takes --select-${c}`);
+assert.match(read("./Editor.tsx"), /className=\{[^}]*"editor"\} data-select=\{settings\.selectColour\}/, "the editor carries the selection colour chosen");
+// The selection is multiplied into a light page and screened on a dark one, so what is drawn under it still shows.
+assert.ok(rules.some((r) => r.selector === ".selection-marks" && /mix-blend-mode:\s*multiply/.test(r.body)), "the selection multiplies on a light page, and in the Spectrum panel's copy");
+assert.ok(rules.some((r) => r.selector === '.canvas[data-theme="dark"] .selection-marks' && /mix-blend-mode:\s*screen/.test(r.body)), "the selection screens on a dark page");
 console.log("contrast.check: ok");

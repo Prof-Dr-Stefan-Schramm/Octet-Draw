@@ -8,6 +8,7 @@
 #                                     first item whose name starts with New and that is not a submenu
 #   windows.ps1 keys ^v               press keys (SendKeys) in Octet's window
 #   windows.ps1 running               yes while Octet runs
+#   windows.ps1 front                 the title of Octet's window in front, if one is
 #   windows.ps1 menu-names            the menus in Octet's menu bar (Win32), one a line
 #   windows.ps1 uia-menu              the items in Octet's menu bar as UI Automation shows them to a screen reader
 #   windows.ps1 uia-open              open each menu through UI Automation, as a screen reader does: one line a
@@ -39,6 +40,7 @@ public static class Menus {
     [DllImport("user32.dll")] static extern bool GetMenuItemRect(IntPtr hwnd, IntPtr menu, uint pos, out RECT rect);
     [DllImport("user32.dll")] static extern bool IsWindowVisible(IntPtr hwnd);
     [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr hwnd, out uint pid);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern int GetWindowText(IntPtr hwnd, StringBuilder text, int max);
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern IntPtr FindWindowEx(IntPtr parent, IntPtr after, string cls, string name);
     [DllImport("user32.dll")] static extern bool SetCursorPos(int x, int y);
     [DllImport("user32.dll")] static extern void mouse_event(uint flags, int dx, int dy, uint data, UIntPtr extra);
@@ -54,6 +56,19 @@ public static class Menus {
             items.Add(Tuple.Create(name, (GetMenuState(menu, i, MF_BYPOSITION) & MF_POPUP) != 0));
         }
         return items;
+    }
+
+    // The window in front if it is one of the process's with a menu bar (Home or a drawing), else none.
+    public static IntPtr Front(uint pid) {
+        IntPtr h = GetForegroundWindow();
+        uint owner;
+        GetWindowThreadProcessId(h, out owner);
+        return owner == pid && GetMenu(h) != IntPtr.Zero ? h : IntPtr.Zero;
+    }
+    public static string Title(IntPtr window) {
+        var text = new StringBuilder(512);
+        GetWindowText(window, text, text.Capacity);
+        return text.ToString();
     }
 
     // The names in the window's menu bar.
@@ -230,12 +245,14 @@ public static class Uia {
 
 function Octet-Process { Get-Process octet -ErrorAction SilentlyContinue | Select-Object -First 1 }
 
-# Octet's main window, once it has its menu bar.
+# Octet's window in front (Home or a drawing: menu commands go to the window in front, src-tauri/src/windows.rs), else
+# its main window, once it has its menu bar.
 function Octet-Window {
     for ($i = 0; $i -lt 40; $i++) {
         $p = Octet-Process
         if (-not $p) { throw 'Octet is not running' }
-        $h = $p.MainWindowHandle
+        $h = [Menus]::Front($p.Id)
+        if ($h -eq [IntPtr]::Zero) { $h = $p.MainWindowHandle }
         if ($h -ne [IntPtr]::Zero -and [Menus]::GetMenu($h) -ne [IntPtr]::Zero) { return $h }
         Start-Sleep -Milliseconds 250
     }
@@ -269,6 +286,7 @@ switch ($Command) {
         [System.Windows.Forms.SendKeys]::SendWait($Rest[0])
     }
     'running' { if (Octet-Process) { 'yes' } else { 'no' } }
+    'front' { $p = Octet-Process; if ($p) { $h = [Menus]::Front($p.Id); if ($h -ne [IntPtr]::Zero) { [Menus]::Title($h) } } }
     'menu-names' { [Menus]::Bar((Octet-Window)) }
     'uia-menu' { [Uia]::MenuBarItems((Octet-Window)) }
     'uia-open' { [Uia]::OpenEach((Octet-Window)) }

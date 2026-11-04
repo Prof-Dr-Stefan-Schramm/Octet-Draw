@@ -67,8 +67,8 @@ export type DocStyle = {
   // The style's size against its preset (1 is 100%): bond, line, bold, margin, hash and the two text sizes hold the
   // preset's values times it (decision 0007). Bond spacing is a percent, so it does not change.
   scale: number;
-  // What the drawing is for: "paper", "thesis", "slides", "poster" or one of the user's own (PURPOSES). It sets the
-  // outlines on the canvas. A file from another program has none.
+  // What the drawing is for: "paper", "thesis", "slides", "poster", "experiment" or one of the user's own
+  // (PURPOSES). It sets the outlines on the canvas. A file from another program has none.
   purpose?: string;
 };
 
@@ -143,10 +143,6 @@ export const COLOURS: [string, string][] = [
   ["Green", "#22775B"], ["Amber", "#8B4E18"], ["Red", "#B42323"],
 ];
 
-// Colour by Element: heteroatom labels in their usual colours (N blue, O red, S gold, P orange, halogens green, Br
-// brown, I purple); carbon and hydrogen keep the ink. Settings > Colours can change each one.
-export const ELEMENT_COLOURS: Record<string, string> = { N: "#2F55D4", O: "#D9342B", S: "#B58900", P: "#E07B00", F: "#1E9E4A", Cl: "#1E9E4A", Br: "#A5442A", I: "#7B2FBE", B: "#C76B6B", Si: "#8A6D3B", Se: "#B58900" };
-
 // Highlight fills: light tints of the brand's colours, pale enough to print behind black ink.
 export const TINTS: [string, string][] = [
   ["Light blue", "#DCE4F6"], ["Light green", "#DCEFE6"], ["Light amber", "#F6E6D3"], ["Light red", "#F6DCDC"], ["Light grey", "#E9ECF0"],
@@ -161,7 +157,7 @@ export const HIGHLIGHT_COLOURS: [string, string][] = [["Blue", "#2F6FED"], ["Sky
 export const RING_FILLS: [string, string][] = [...HIGHLIGHT_COLOURS, ["Mint", "#3DD68C"], ["Peach", "#FFB380"], ["Lavender", "#B4A7F5"], ["Sand", "#D9C38A"], ["Olive", "#808A2E"]];
 
 // Colour by element (ChemDraw's Colors > By Element): each heteroatom label takes its atom-* token, as the light
-// theme gives it, since the page is white. Carbon and the rest stay ink.
+// theme gives it, since the page is white. Carbon and the rest stay ink. Settings > Colours lists the same colours.
 const METALS = "Li Na K Rb Cs Be Mg Ca Sr Ba Al Ga In Tl Sn Pb Bi Sc Ti V Cr Mn Fe Co Ni Cu Zn Y Zr Nb Mo Ru Rh Pd Ag Cd Hf Ta W Re Os Ir Pt Au Hg La Ce Sm Eu Gd Yb Lu U".split(" ");
 export function elementColours(token?: (name: string) => string): Record<string, string> {
   if (!token) {
@@ -173,7 +169,8 @@ export function elementColours(token?: (name: string) => string): Record<string,
     return values;
   }
   const by: Record<string, string> = { N: token("n"), O: token("o"), S: token("s"), Se: token("s"), P: token("p") };
-  for (const e of ["F", "Cl", "Br", "I"]) by[e] = token("halogen");
+  for (const e of ["F", "Cl"]) by[e] = token("halogen");
+  for (const e of ["Br", "I", "B", "Si"]) by[e] = token(e.toLowerCase());
   for (const e of METALS) by[e] = token("metal");
   return by;
 }
@@ -214,12 +211,14 @@ export function readStyle(v: unknown): DocStyle {
 // What a drawing is for (IDEA-SIZE-1 to 3): a journal style at a scale, on a page. Paper and Thesis keep the journal's
 // own sizes. Slides is ACS at 200% on PowerPoint's 16:9 slide (a 28.8 pt bond, near ChemDraw's 30 pt New Slide, with
 // ACS's proportions). Poster is ACS at 300% on A0: 30 pt text, which UC Davis gives as legible from 6 feet.
-export type PurposeKind = "paper" | "thesis" | "slides" | "poster";
+// Experiment is ACS on A4 (or US Letter, when the user's Paper is) with the experiment's details (experiment.ts).
+export type PurposeKind = "paper" | "thesis" | "slides" | "poster" | "experiment";
 export const PURPOSES: Record<PurposeKind, { name: string; scale: number; page: PageName; landscape: boolean }> = {
   paper: { name: "Paper", scale: 1, page: "A4", landscape: false },
   thesis: { name: "Thesis", scale: 1, page: "A4", landscape: false },
   slides: { name: "Slides", scale: 2, page: "Slide169", landscape: true },
   poster: { name: "Poster", scale: 3, page: "A0", landscape: false },
+  experiment: { name: "Experiment", scale: 1, page: "A4", landscape: false },
 };
 export const isKind = (id: unknown): id is PurposeKind => typeof id === "string" && id in PURPOSES;
 // A purpose's style as Octet gives it: ACS Document 1996 at the purpose's scale, on its page.
@@ -230,8 +229,10 @@ export const purposeStyle = (kind: PurposeKind): DocStyle =>
 export const QUICK = "quick";
 export const QUICK_STYLE: DocStyle = { ...DEFAULT_STYLE, edges: false };
 // A user's own purpose (a template: Save as template… or Custom template on Home): its name, its style, and the
-// purpose it was made from, which sets its outlines.
-export type OwnPurpose = { id: string; name: string; kind: PurposeKind; style: DocStyle };
+// purpose it was made from, which sets its outlines. start: what a new drawing from a template made from Experiment
+// starts with (its details and text, experiment.ts templateOf), in Octet's file form, read with its checks when used.
+export type OwnPurpose = { id: string; name: string; kind: PurposeKind; style: DocStyle; start?: string };
+export const MAX_START = 200_000;
 // An open drawing given another purpose: its drawn values, scale and page. Its background, page edges, gridlines,
 // text colour and carbon label choices stay.
 export function forPurpose(s: DocStyle, p: DocStyle): DocStyle {
@@ -254,7 +255,7 @@ export function readPurposes(saved: Record<string, unknown>): Purposes {
   const ownPurposes = (Array.isArray(saved.ownPurposes) ? saved.ownPurposes : []).flatMap((p: unknown): OwnPurpose[] => {
     const o = (typeof p === "object" && p ? p : {}) as Record<string, unknown>;
     return typeof o.id === "string" && /^u[a-z0-9]{1,30}$/.test(o.id) && typeof o.name === "string" && o.name.trim() && isKind(o.kind)
-      ? [{ id: o.id, name: o.name.trim().slice(0, 40), kind: o.kind, style: { ...readStyle(o.style), purpose: o.id } }] : [];
+      ? [{ id: o.id, name: o.name.trim().slice(0, 40), kind: o.kind, style: { ...readStyle(o.style), purpose: o.id }, ...(typeof o.start === "string" && o.start.length <= MAX_START ? { start: o.start } : {}) }] : [];
   }).slice(0, MAX_PURPOSES);
   const purpose = typeof saved.purpose === "string" && (saved.purpose === QUICK || isKind(saved.purpose) || ownPurposes.some((p) => p.id === saved.purpose)) ? saved.purpose : QUICK;
   return { purpose, purposeStyles, ownPurposes };
@@ -263,10 +264,12 @@ export const MAX_PURPOSES = 12;
 // Two styles the same in every value, whatever their purpose and preset name.
 export const sameStyle = (a: DocStyle, b: DocStyle) => (Object.keys({ ...a, ...b }) as (keyof DocStyle)[]).every((k) => k === "preset" || k === "purpose" || JSON.stringify(a[k]) === JSON.stringify(b[k]));
 // The style a new drawing for a purpose starts with: the user's own purpose, the user's style for a built-in one or
-// for Quick start, or Octet's. An unknown purpose is Quick start.
+// for Quick start, or Octet's. An unknown purpose is Quick start. Octet's Experiment takes US Letter from the user's
+// Paper.
 export function styleFor(s: Pick<Purposes, "purposeStyles" | "ownPurposes">, id: string): DocStyle {
   const own = s.ownPurposes.find((p) => p.id === id);
   if (own) return own.style;
+  if (id === "experiment" && !s.purposeStyles.experiment && s.purposeStyles.paper?.page === "Letter") return { ...purposeStyle("experiment"), page: "Letter" };
   return isKind(id) ? s.purposeStyles[id] ?? purposeStyle(id) : s.purposeStyles[QUICK] ?? QUICK_STYLE;
 }
 // A purpose's name and kind (the kind sets its outlines), for an id; undefined when there is no such purpose.
@@ -283,16 +286,18 @@ const COLUMNS: Record<string, [string, number, number][]> = {
 };
 // The outlines a drawing shows on the canvas (IDEA-SIZE-6), in mm, each with its name: its page first, then what its
 // purpose needs. Paper: the journal's columns. Thesis: the text block of an A4 thesis (150 x 257 mm: a 40 mm binding
-// margin, 20 mm on the other sides). Slides: the slide alone. Poster: A0 with A1 inside. With no purpose: the page's
-// ISO or US series (A4, A3, A2 or Letter, Legal, Tabloid).
-export function outlines(s: DocStyle, kind?: PurposeKind): [string, number, number][] {
+// margin, 20 mm on the other sides). Slides and Experiment: the page alone. Poster: A0 with A1 inside. With no
+// purpose: the page's ISO or US series (A4, A3, A2 or Letter, Legal, Tabloid). others false (Settings > Page edges >
+// Page only): the page alone.
+export function outlines(s: DocStyle, kind?: PurposeKind, others = true): [string, number, number][] {
   const named = (page: PageName, size = pageSize({ ...s, page })): [string, number, number] =>
     [page === "Custom" ? `${Math.round(size[0])} × ${Math.round(size[1])} mm` : PAGE_NAMES[page].replace("US ", ""), size[0], size[1]];
   const turned = (name: string, w: number, h: number): [string, number, number] => (s.landscape ? [name, h, w] : [name, w, h]);
   const page = named(s.page, pageSize(s));
+  if (!others) return [page];
   if (kind === "paper") return [page, ...(COLUMNS[presetOf(s)] ?? [])];
   if (kind === "thesis") return [page, turned("Text block", 150, 257)];
-  if (kind === "slides") return [page];
+  if (kind === "slides" || kind === "experiment") return [page];
   if (kind === "poster") return s.page === "A0" ? [page, named("A1")] : [page];
   const series = (["A4", "A3", "A2"] as PageName[]).includes(s.page) ? ["A4", "A3", "A2"] : (["Letter", "Legal", "Tabloid"] as PageName[]).includes(s.page) ? ["Letter", "Legal", "Tabloid"] : [];
   return [page, ...(series as PageName[]).filter((n) => n !== s.page).map((n) => named(n))];

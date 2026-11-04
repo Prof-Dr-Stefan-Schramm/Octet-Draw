@@ -13,6 +13,13 @@ const map = keymap();
 // The same key means different things over an atom and over a bond.
 assert.equal(actionFor(map, "h", "atom"), "element.H");
 assert.equal(actionFor(map, "h", "bond"), "bond.hashwedge");
+assert.equal(actionFor(map, "w", "bond"), "bond.wedge");
+assert.equal(actionFor(map, "shift+w", "bond"), "bond.hashwedge");
+assert.equal(actionFor(map, "w", "atom"), "element.N");
+// Hollow wedge and dative take a key but have none by default, as in ChemDraw.
+assert.ok(!map["bond.hollow"]?.length && !map["bond.dative"]?.length);
+assert.equal(actionFor(keymap({ "bond.hollow": ["shift+v"] }), "shift+v", "bond"), "bond.hollow");
+assert.equal(actionFor(keymap({ "bond.dative": ["shift+v"] }), "shift+v", "bond"), "bond.dative");
 // ChemDraw: b is bromine over an atom and bold over a bond; Shift+B is boron.
 assert.equal(actionFor(map, "b", "atom"), "element.Br");
 assert.equal(actionFor(map, "b", "bond"), "bond.bold");
@@ -30,6 +37,18 @@ assert.equal(actionFor(mine, "n", "atom"), undefined);
 assert.deepEqual(clashes(map, "element.N", "o"), ["element.O"]);
 assert.deepEqual(clashes(map, "element.N", "2"), ["group.acetyl"]);
 assert.deepEqual(clashes(map, "bond.double", "n"), []);
+// Issue #10: every bond kind can take a key over a bond (Settings), the hollow wedge and dative bond too, with no
+// default key, as in ChemDraw. w and h (and Shift+W) are the wedge keys.
+import { BONDS } from "./kinds.ts";
+assert.deepEqual(Object.keys(BONDS).filter((k) => !ACTIONS.some((a) => a.id === `bond.${k}` && a.place === "bond")), []);
+assert.deepEqual([map["bond.hollow"], map["bond.dative"]], [[], []]);
+assert.equal(actionFor(keymap({ "bond.hollow": ["shift+w"], "bond.hashwedge": ["h"] }), "shift+w", "bond"), "bond.hollow");
+assert.deepEqual(["w", "h", "shift+w"].map((k) => actionFor(map, k, "bond")), ["bond.wedge", "bond.hashwedge", "bond.hashwedge"]);
+// A bond key over a bond, on a selection and as an Actions panel style chip (which shows that key) all go through
+// keyBond, so Wedge on a wedge turns it round in each.
+import { readFileSync } from "node:fs";
+const bondKeys = readFileSync(new URL("Editor.tsx", import.meta.url), "utf8").match(/\w+\([^()]*BONDS\[arg as BondKind\]\.spec/g) ?? [];
+assert.ok(bondKeys.length >= 3 && bondKeys.every((s) => s.startsWith("keyBond(")), bondKeys.join("\n"));
 // Every Actions panel action can take a key (CD-34): none has one by default, as in ChemDraw, and a key set for one
 // runs it anywhere.
 import { ACTIONS, registerMenu } from "./keys.ts";
@@ -37,6 +56,8 @@ const panelActions = ACTIONS.filter((a) => a.id.startsWith("action."));
 assert.ok(panelActions.length > 30 && panelActions.every((a) => !map[a.id]?.length));
 assert.equal(new Set(ACTIONS.map((a) => a.id)).size, ACTIONS.length, "action ids are unique");
 assert.equal(actionFor(keymap({ "action.cycle.reverse": ["shift+r"] }), "shift+r", "atom"), "action.cycle.reverse");
+// A key saved for Remove the cycle under its old id (cycle.ungroup) still removes it.
+assert.equal(actionFor(keymap({ "action.cycle.ungroup": ["shift+u"] }), "shift+u", "none"), "action.cycle.remove");
 import { label } from "./keys.ts";
 assert.equal(label("+"), "+");
 assert.ok(["↩", "Enter"].includes(label("enter")));

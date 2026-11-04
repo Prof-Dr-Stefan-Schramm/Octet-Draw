@@ -57,9 +57,13 @@ fn live(dir: &Path, id: &str) -> bool {
     OpenOptions::new().write(true).open(dir.join(format!("{}.lock", session_of(id)))).is_ok_and(|f| f.try_lock().is_err())
 }
 
-fn remove(dir: &Path, id: &str) {
-    let _ = fs::remove_file(dir.join(format!("{id}.json")));
-    let _ = fs::remove_file(dir.join(format!("{id}.oct")));
+// A copy that is not there is removed already. Any other failure is said: the page logs it (issue 2).
+fn remove(dir: &Path, id: &str) -> Result<(), String> {
+    let gone = |ext: &str| match fs::remove_file(dir.join(format!("{id}.{ext}"))) {
+        Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(e.to_string()),
+        _ => Ok(()),
+    };
+    gone("json").and(gone("oct"))
 }
 
 // The name and time kept with a drawing; without them (a crash between the two writes), "Untitled" and the file's time.
@@ -167,13 +171,18 @@ pub async fn recovery_write(window: Window, session: State<'_, Session>, name: S
 
 #[tauri::command]
 pub async fn recovery_clear(window: Window, session: State<'_, Session>) -> Result<(), String> {
-    remove(session.dir()?, &copy_id(&session.id, window.label()));
-    Ok(())
+    remove(session.dir()?, &copy_id(&session.id, window.label()))
 }
 
-// Drawings kept by Octet sessions that ended without closing them, newest first (24 at most).
+// Drawings kept by Octet sessions that ended without closing them, newest first (24 at most). A folder Octet cannot
+// read is an error, not an empty list, so the page can say so (issue 2).
 #[tauri::command]
 pub async fn recovery_list(session: State<'_, Session>) -> Result<Vec<Recovered>, String> {
+    if let Some(Err(e)) = session.dir.as_deref().map(fs::read_dir) {
+        if e.kind() != std::io::ErrorKind::NotFound {
+            return Err(e.to_string());
+        }
+    }
     Ok(session.list())
 }
 
@@ -186,8 +195,7 @@ pub async fn recovery_open(window: Window, session: State<'_, Session>, id: Stri
 // The user discarded a kept drawing on Home.
 #[tauri::command]
 pub async fn recovery_discard(session: State<'_, Session>, id: String) -> Result<(), String> {
-    remove(session.other(&id)?, &id);
-    Ok(())
+    remove(session.other(&id)?, &id)
 }
 
 #[cfg(test)]
@@ -220,7 +228,7 @@ mod tests {
         assert!(list.iter().any(|r| r.id == id && r.name == "Suzuki cycle"));
         assert_eq!(second.open("draw-5", &id).unwrap(), ("Suzuki cycle".into(), "<CDXML/>".into()));
         let heck = second.list().iter().find(|r| r.name == "Heck cycle").map(|r| r.id.clone()).unwrap();
-        remove(&dir, &heck);
+        remove(&dir, &heck).unwrap();
         let third = Session::start_in(Some(dir.clone()));
         assert!(third.list().is_empty(), "the second session has it now");
         drop(second);
@@ -228,7 +236,8 @@ mod tests {
         // A copy with no name file still comes back, as Untitled.
         fs::remove_file(dir.join(format!("{}.json", third.list()[0].id))).unwrap();
         assert_eq!(third.list()[0].name, "Untitled");
-        remove(&dir, &third.list()[0].id);
+        remove(&dir, &third.list()[0].id).unwrap();
+        assert!(remove(&dir, "gone").is_ok(), "a copy that is not there is removed already");
         assert!(third.list().is_empty());
         assert!(third.open("draw-1", "../etc").is_err());
         let _ = fs::remove_dir_all(&dir);

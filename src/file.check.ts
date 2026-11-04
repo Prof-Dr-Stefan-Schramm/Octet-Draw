@@ -10,6 +10,12 @@ const mol = setBondSpec(setElement(addRing(EMPTY, 6, true, { point: [0, 0] }), 0
 const back = parse(serialize(mol));
 assert.deepEqual(back.bonds, mol.bonds);
 assert.deepEqual(back.atoms.map((a) => a.label), mol.atoms.map((a) => a.label));
+// A hidden warning stays hidden on reopen.
+{
+  const hid: Mol = { ...mol, atoms: mol.atoms.map((a, i) => (i === 0 ? { ...a, ignoreWarnings: true } : a)), bonds: mol.bonds.map((b, k) => (k === 2 ? { ...b, ignoreWarnings: true } : b)) };
+  const again = parse(serialize(hid));
+  assert.deepEqual([again.atoms.map((a) => !!a.ignoreWarnings), again.bonds.map((b) => !!b.ignoreWarnings)], [hid.atoms.map((a) => !!a.ignoreWarnings), hid.bonds.map((b) => !!b.ignoreWarnings)]);
+}
 for (let i = 0; i < mol.atoms.length; i++) assert.ok(Math.abs(back.atoms[i].location[0] - mol.atoms[i].location[0]) < 1e-4);
 console.log("file.check: round trip ok");
 

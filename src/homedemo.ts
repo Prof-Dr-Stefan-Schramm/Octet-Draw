@@ -19,6 +19,13 @@ let recents: Recent[] = [
   { path: `${dir}/Teaching/aldol mechanism.cdx`, name: "Aldol mechanism", at: t - 9 * day, thumb: cycle, found: true },
   { path: `${dir}/Desktop/old scheme.cdx`, name: "Old scheme", at: t - 40 * day, found: false },
 ];
+// Experiment pages on the Experiments list: one also on the recent list (with its picture), one moved.
+let experiments = [
+  { path: `${dir}/Thesis/suzuki scheme.cdxml`, name: "Suzuki scheme", at: t - 3 * 3600, found: true, details: { title: "Suzuki coupling of 4-bromoanisole", date: "3 November 2026", notebook: "SE-012-041", project: "Biaryls", author: "Sam" }, yield: 0.82 },
+  { path: `${dir}/Lab/boc glutamic.oct`, name: "boc glutamic", at: t - 2 * day, found: true, details: { title: "Boc protection of D-glutamic acid", date: "1 November 2026", notebook: "SE-012-034", project: "Peptides" }, yield: 0.913 },
+  { path: `${dir}/Lab/grignard.oct`, name: "grignard", at: t - 12 * day, found: true, details: { title: "Grignard addition, -78 °C", date: "22 October 2026", notebook: "SE-011-120", project: "Biaryls" } },
+  { path: `${dir}/Desktop/old prep.oct`, name: "old prep", at: t - 40 * day, found: false, details: { date: "30 September 2026", notebook: "SE-010-007" } },
+];
 const thumbs = new Map<string, string>();
 let count = 0, store: HomeStore | undefined;
 const id = () => (++count).toString(16).padStart(16, "0");
@@ -75,6 +82,8 @@ export async function answer(cmd: string, args: Record<string, unknown> = {}): P
     case "recovery_list": return [];
     case "recent_remove": recents = recents.filter((r) => r.path !== args.path); return null;
     case "recent_thumb": return null;
+    case "experiment_list": return experiments;
+    case "experiment_remove": experiments = experiments.filter((x) => x.path !== args.path); return null;
     case "open_recent": {
       const r = recents.find((x) => x.path === args.path), text = STARTERS[r?.thumb === reaction ? 1 : r?.thumb === cycle ? 2 : 0].text;
       return [args.path, text];

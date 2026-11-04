@@ -5,7 +5,8 @@ import { Dialog } from "./Dialog";
 import icon from "../src-tauri/icons/app-icon.svg";
 import { version } from "../package.json";
 
-export function About({ onClose }: { onClose: () => void }) {
+// onWhatsNew: shows this version's notes (releases.ts); left out when it has none.
+export function About({ onClose, onWhatsNew }: { onClose: () => void; onWhatsNew?: () => void }) {
   return (
     <Dialog title="About Octet Draw" onClose={onClose} plain>
       <div className="about">
@@ -24,8 +25,9 @@ export function About({ onClose }: { onClose: () => void }) {
           Chemistry by Indigo (Apache-2.0). Names read by OPSIN (MIT). NMR shifts contain information from nmrshiftdb2
           (www.nmrshiftdb.org), which is made available here under the nmrshiftdb2 Database License.
         </p>
-        {/* Every licence notice Octet ships (scripts/licences.mjs), in the system's text app. */}
+        {/* This version's notes, then every licence notice Octet ships (scripts/licences.mjs), in the system's text app. */}
         <p className="about-credits">
+          {onWhatsNew && <><button className="about-link" onClick={onWhatsNew}>What’s new</button>{" · "}</>}
           <button className="about-link" onClick={() => void invoke("open_licences").catch(() => undefined)}>Licences</button>
         </p>
       </div>

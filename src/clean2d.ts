@@ -99,10 +99,26 @@ function pass(xy: Float64Array, bonds: readonly (readonly [number, number, numbe
   // Blocks: each bond on its own in the first pass, biconnected blocks in the second.
   let inc: Uint8Array[] = external ? blocks(n, nei) : bonds.map(([a, b]) => { const c = new Uint8Array(n); c[a] = c[b] = 1; return c; });
   let trivial = external ? inc.map((c) => c.reduce((s, x) => s + x, 0) === 2) : inc.map(() => true);
-  // An atom between a triple and a single bond, or two double bonds, is straight: its two blocks join.
+  // An atom between a triple and a single bond, or two double bonds, is straight: its two blocks join. In a ring of up
+  // to 8 atoms, where a straight alkyne does not fit, or in a lone ring, it stays bent, so the ring stays a regular
+  // polygon (ChemDraw draws cyclooctyne so). An arylene-ethynylene macrocycle keeps its straight alkynes.
+  const ringBlocks = external ? [] : blocks(n, nei);
+  const bent = (v: number) => {
+    const c = ringBlocks.find((c) => c[v] && c[nei[v][0]] && c[nei[v][1]]);
+    if (!c) return false;
+    if (c.reduce((s, x) => s + x, 0) === bonds.filter(([a, b]) => c[a] && c[b]).length) return true;
+    // The shortest path between v's neighbours round the ring, not through v: 6 bonds or fewer is a ring of up to 8.
+    let front = [nei[v][0]];
+    const seen = new Set([v, nei[v][0]]);
+    for (let d = 0; d < 6 && front.length; d++) {
+      front = front.flatMap((u) => nei[u].filter((w) => c[w] && !seen.has(w) && seen.add(w)));
+      if (seen.has(nei[v][1])) return true;
+    }
+    return false;
+  };
   const straight = new Uint8Array(n), uniteTo: number[][] = inc.map(() => []), uniteWith = inc.map((_, c) => c);
   for (let v = 0; v < n; v++) {
-    if (nei[v].length !== 2 || !inc.some((c, k) => c[v] && trivial[k]) || bonds[neiE[v][0]][2] + bonds[neiE[v][1]][2] !== 4) continue;
+    if (nei[v].length !== 2 || !inc.some((c, k) => c[v] && trivial[k]) || bonds[neiE[v][0]][2] + bonds[neiE[v][1]][2] !== 4 || bent(v)) continue;
     straight[v] = 1;
     let c1 = -1, c2 = -1;
     inc.forEach((c, k) => { if (c[v]) [c2, c1] = [c1, k]; });
@@ -123,7 +139,8 @@ function pass(xy: Float64Array, bonds: readonly (readonly [number, number, numbe
   inc.forEach((c, k) => { const m = merged[at.get(uniteWith[k])!]; for (let v = 0; v < n; v++) m[v] |= c[v]; });
   [inc, trivial] = [merged, kept.map((c) => trivial[c])];
   const C = inc.length;
-  if (C <= 1) return;
+  // One block is left as it is, unless it is one straight chain (2-butyne, a nitrile), which still needs straightening.
+  if (C <= 1 && !straight.includes(1)) return;
   const art = new Uint8Array(n);
   for (let v = 0; v < n; v++) { let k = 0; for (const c of inc) k += c[v]; art[v] = k > 1 ? 1 : 0; }
   const validBase = (v: number) => art[v] || nei[v].length === 1;
@@ -204,7 +221,7 @@ function pass(xy: Float64Array, bonds: readonly (readonly [number, number, numbe
     }
     return same;
   };
-  const ringBlocks = external ? [] : blocks(n, nei), same = pairsOf(inc), ring = external ? undefined : pairsOf(ringBlocks);
+  const same = pairsOf(inc), ring = external ? undefined : pairsOf(ringBlocks);
   // The first pass's ring angles: at each joining atom, the neighbour pairs in one ring and not in one block.
   const angles: number[][] = Array.from({ length: n }, () => []);
   if (ring)
@@ -463,6 +480,8 @@ export function clean2d(points: readonly (readonly number[])[], bonds: readonly 
   const graph = bonds.map((b) => [b.atoms[0], b.atoms[1], b.order === 2 ? 2 : b.order >= 3 ? 3 : 1] as const);
   pass(xy, graph, false, performance.now() + ms);
   pass(xy, graph, true, performance.now() + ms);
-  if (!xy.every(Number.isFinite)) return points.map((p) => [p[0], p[1]]);
+  // A straight chain drawn with its ends on one point has no line to lie on, and its atoms would fall onto that point.
+  const collapsed = graph.some(([a, b]) => xy[2 * a] === xy[2 * b] && xy[2 * a + 1] === xy[2 * b + 1]);
+  if (collapsed || !xy.every(Number.isFinite)) return points.map((p) => [p[0], p[1]]);
   return points.map((_, i) => [xy[2 * i], xy[2 * i + 1]]);
 }

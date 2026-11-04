@@ -4,6 +4,10 @@
 #
 #   linux-menu.py PID Edit Paste      the Edit menu's Paste item in the window of process PID
 #   linux-menu.py PID File New*       the first item whose name starts with New and that is not a submenu
+#   linux-menu.py PID                 the name of the process's window in front
+#
+# Octet has a window for Home and one for each drawing. The menu bar used is the one of the window in front, as a
+# person uses it; Octet sends each menu command to the window in front (src-tauri/src/windows.rs).
 import sys
 import time
 
@@ -53,7 +57,12 @@ def main():
         time.sleep(0.25)
     if app is None:
         sys.exit(f"AT-SPI shows no application for process {pid}")
-    bar = next((n for n in walk(app) if n.getRoleName() == "menu bar"), None)
+    frames = [n for n in children(app) if n.getRoleName() == "frame"]
+    front = next((f for f in frames if f.getState().contains(pyatspi.STATE_ACTIVE)), None)
+    if not path:
+        print(front.name if front else "")
+        return
+    bar = next((n for n in walk(front or app) if n.getRoleName() == "menu bar"), None)
     if bar is None:
         sys.exit("Octet's window has no menu bar on the accessibility bus")
     node = bar

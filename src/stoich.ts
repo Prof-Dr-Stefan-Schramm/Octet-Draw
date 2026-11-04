@@ -58,14 +58,14 @@ const UNITS: Record<Field, Record<string, number>> = {
   purity: { "%": 0.01 },
 };
 // A typed amount in base units: "250 mg", "1.2 eq", "0.5 mL", "98%". A bare number is taken in the field's usual unit
-// (mg, mmol, mL, g/mL, M, eq, %). Undefined when it is not a positive number with a unit the field takes.
+// (mg, mmol, mL, g/mL, M, eq, %). Undefined when it is not a finite number of 0 or more, with a unit the field takes.
 export function parseAmount(text: string, field: Field): number | undefined {
   const m = /^\s*(\d+(?:\.\d+)?|\.\d+)(?:e([+-]?\d+))?\s*([a-zA-Zµ%/0-9]*)\s*$/.exec(text.replace(",", "."));
   if (!m) return undefined;
   const value = Number(m[1]) * 10 ** Number(m[2] ?? 0), unit = m[3], units = UNITS[field];
   const plain: Record<Field, string> = { mass: "mg", measured: "mg", moles: "mmol", volume: "mL", density: "g/mL", molarity: "M", equiv: "eq", purity: "%" };
   const k = unit === "" ? units[plain[field]] : units[unit];
-  return k === undefined || !(value >= 0) ? undefined : value * k;
+  return k === undefined || !(value >= 0) || !Number.isFinite(value * k) ? undefined : value * k;
 }
 // An amount for the grid in the unit that reads best (250 mg, 1.25 mmol, 0.50 mL), three significant figures.
 export function formatAmount(value: number | undefined, field: Field | "mw" | "yield"): string {
@@ -96,10 +96,12 @@ const WEIGHT: Record<string, number> = {
 export function formulaWeight(text: string): number | undefined {
   const s = text.replace(/\s+/g, "").replace(/[₀-₉]/g, (d) => String("₀₁₂₃₄₅₆₇₈₉".indexOf(d)));
   let i = 0;
-  const group = (): number | undefined => {
+  const dot = () => s[i] === "·" || s[i] === ".";
+  // part: one part after a dot (the 5H2O of CuSO4·5H2O·NH3), so its number counts it alone.
+  const group = (part = false): number | undefined => {
     let total = 0;
-    while (i < s.length && s[i] !== ")") {
-      if (s[i] === "·" || s[i] === ".") { i++; const k = /^\d+/.exec(s.slice(i))?.[0]; if (k) i += k.length; const rest = group(); return rest === undefined ? undefined : total + (k ? Number(k) : 1) * rest; }
+    while (i < s.length && s[i] !== ")" && !(part && dot())) {
+      if (dot()) { i++; const k = /^\d+/.exec(s.slice(i))?.[0]; if (k) i += k.length; const w = group(true); if (w === undefined) return undefined; total += (k ? Number(k) : 1) * w; continue; }
       let w: number | undefined;
       if (s[i] === "(") { i++; w = group(); if (s[i] !== ")") return undefined; i++; }
       else { const el = /^[A-Z][a-z]?/.exec(s.slice(i))?.[0]; if (!el || WEIGHT[el] === undefined) return undefined; i += el.length; w = WEIGHT[el]; }

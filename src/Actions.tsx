@@ -5,13 +5,13 @@
 // ChemDraw users expect it (menus and keys).
 import { useEffect, useId, useRef, useState } from "react";
 import {
-  AlignCenterHorizontal, AlignCenterVertical, Flask, Palette, Table, Repeat, ArrowsInSimple, ArrowsClockwise, ArrowsDownUp, CaretDown, CaretRight, SignIn, SignOut, ArrowsLeftRight, ArrowsOutSimple, Atom, BookmarkSimple, BookOpenText, CaretUpDown, Graph,
+  AlignCenterHorizontal, AlignCenterVertical, Flask, Palette, Table, Repeat, ArrowsInSimple, ArrowsClockwise, ArrowsDownUp, CaretDown, CaretRight, ArrowsLeftRight, ArrowsHorizontal, ArrowsOutSimple, Atom, BookmarkSimple, BookOpenText, CaretUpDown, Graph,
   AlignBottomSimple, AlignTopSimple, ArrowLineDown, ArrowLineUp, CursorText, DotsThree, DotsThreeVertical, Faders, Polygon, Rectangle, ArrowArcLeft, ArrowArcRight, ArrowsCounterClockwise, ArrowUDownLeft, CircleDashed, CornersOut, MagnifyingGlass, Swap,
-  ClipboardText, CopySimple, IdentificationBadge, Key, Target, LineSegments, Minus, Plus, Stack, StackSimple, Eye, FileArrowDown, FlipHorizontal, FlipVertical, GearSix, House, LinkBreak, LinkSimple, ListNumbers, Hash, MagicWand, MinusCircle,
+  ArrowUUpLeft, ClipboardText, CopySimple, IdentificationBadge, Key, Target, LineSegments, Minus, Plus, Stack, StackSimple, Eye, FileArrowDown, FlipHorizontal, FlipVertical, GearSix, House, LinkBreak, LinkSimple, ListNumbers, Hash, MagicWand, MinusCircle,
   PencilSimpleLine, PlusCircle, SelectionAll, SlidersHorizontal, SquareSplitHorizontal, TagSimple, TextAlignCenter, TextAlignLeft,
   TextAlignJustify, TextAlignRight, Tag, TextB, TextItalic, TextUnderline, Trash, Warning, X, Plus as PlusIcon, Rows, RowsPlusBottom, RowsPlusTop, Columns, ColumnsPlusRight, ColumnsPlusLeft, ArrowsInLineHorizontal, Backspace, Broom, CirclesThree, FlowArrow, Subtitles, Textbox, WarningCircle, WaveSine, Circle, TextSubscript, TextSuperscript, Cube, Square, BoundingBox, SelectionSlash, AlignLeft, AlignRight, AlignTop, AlignBottom, ArrowsOutLineHorizontal, ArrowsOutLineVertical, BezierCurve, LineSegment, ArrowsMerge, ArrowsInCardinal, FadersHorizontal, Copy, ListDashes, Percent,
-  EyeSlash, Angle, Resize, Unite, SelectionPlus, Paragraph, Checkerboard, CubeTransparent, CircleHalf, ClockCounterClockwise, Shuffle, ArrowBendDownRight,
-  Question, EyeClosed, ArrowsInLineVertical, BracketsRound, TreeStructure, Asterisk, AsteriskSimple, BracketsSquare, SquaresFour, StarFour, TextTSlash,
+  EyeSlash, Angle, Resize, Unite, SelectionPlus, Paragraph, Checkerboard, CubeTransparent, CircleHalf, ClockCounterClockwise, Shuffle, ArrowBendDownRight, Path, Scissors, CircleNotch,
+  Question, EyeClosed, BellSlash, ArrowsInLineVertical, BracketsRound, TreeStructure, Asterisk, AsteriskSimple, BracketsSquare, SquaresFour, StarFour, TextTSlash,
 } from "@phosphor-icons/react";
 import type { Analysis } from "./chem";
 import type { Problem } from "./check";
@@ -25,10 +25,15 @@ import { ARROW_KINDS, curved, isBracket, isLine, ORBITAL_SHAPES, PHASES, SWEEPS,
 import { BracketGlyph, ElementGlyph, OrbitalGlyph, orbitalName, shapeName, FillGlyph, LineGlyph } from "./elements";
 import { invoke } from "@tauri-apps/api/core";
 import { COLOURS, fontStack, HIGHLIGHT_COLOURS, RING_FILLS, roundPt, TINTS } from "./docstyle";
-import { ArrowGlyph, arrowName, ARROWS, BondGlyph, BONDS, RingGlyph, ShapeGlyph, SHAPES, STRAIGHT, TlcGlyph, withSize, type BondKind } from "./tools";
+import { ArrowGlyph, arrowName, ARROWS, BondGlyph, BONDS, RingGlyph, ShapeGlyph, SHAPES, SideGlyph, STRAIGHT, TlcGlyph, withSize, type BondKind } from "./tools";
 
+// The heads an arrow's or a cycle's side arrow's ends can take, as the Start and End picks list them.
+const HEADS = [["none", "None"], ["full", "Arrowhead"], ["left", "Half, left"], ["right", "Half, right"]] as const;
 // A selected atom label's text style (the first labelled atom's, for a structure), for the label style buttons.
 export type LabelText = { bold: boolean; italic: boolean; underline: boolean; font: string; size: number; align?: string; chemical?: boolean }; // align and chemical: an atom label's
+// A cycle's side arrow: the ends it has, inside the circle (undefined: all its ends are structures), moved from where
+// Octet puts it, and its heads.
+export type CycleSide = { ends: "both" | "in" | "out"; inside?: boolean; moved: boolean; start: Head; end: Head };
 export type Context =
   | { kind: "empty" }
   | { kind: "drawing"; nameable: boolean; generic?: boolean }
@@ -40,9 +45,9 @@ export type Context =
       // labelable: Octet can read a picked caption as an atom label (Make element). chemical: their Interpret chemically,
       // shown when the document's is on and one of them reads as chemistry.
       script?: "sub" | "super"; font?: string; fonts?: string[]; labelable?: boolean; chemical?: boolean;
-      // cycleSide: one picked caption that is a cycle's reagent (in) or product (out): moved from where Octet puts it,
-      // and inside the circle. cycleName: one picked caption that is a step's name, moved from where Octet puts it.
-      cycleSide?: { side: "in" | "out"; moved: boolean; inside: boolean; through: boolean }; cycleName?: { moved: boolean } }
+      // cycleSide: one picked caption that labels a cycle's side arrow (CycleSide). cycleName: one picked caption that is
+      // a step's name, moved from where Octet puts it.
+      cycleSide?: CycleSide; cycleName?: { moved: boolean } }
   // size: the heads' palette size ("own" for a size set by hand), when the arrows have heads. ratio: an equilibrium's.
   // fillable: closed curves and block arrows, which take a fill.
   | { kind: "arrow"; count: number; arrow: ArrowKind; curved: boolean; sweep?: number; style: string; orbital?: { shape: OrbitalShape; phase: Phase };
@@ -51,7 +56,10 @@ export type Context =
   | { kind: "shape"; count: number; shape: ShapeKind; dashed: boolean; boldLine: boolean; colour: string; style: string; side: string; mark: string; rf: boolean; lines: TableLine[]; cellAlign?: string; weight: number; cell: boolean; hide?: string[];
       shade: { depth: number; blur: number; opacity: number; pt: number }; text?: LabelText;
       ticks?: boolean; transparent?: boolean; lane?: boolean; rgroup?: boolean } // a TLC plate's side ticks and transparency, and whether a lane is picked
-  | { kind: "cycle"; clockwise: boolean; steps: number; centre: boolean; width: number; gap: number }
+  // step: one step of the cycle is picked; reversible, balance, shaped and hidden are that step's (shaped: it has a lead,
+  // trail, bow or balance to reset; hidden: its arc is not drawn). arcs: some step's arc is hidden. side: one of its side
+  // arrows is picked.
+  | { kind: "cycle"; clockwise: boolean; steps: number; centre: boolean; width: number; gap: number; step: boolean; reversible: boolean; balance: "equal" | "forward" | "back"; shaped: boolean; hidden: boolean; arcs: boolean; named: boolean; side?: CycleSide }
   | { kind: "reaction"; steps: number; structures: number; clean: boolean; mapped: boolean; grid: boolean }
   // A stoichiometry grid's cell picked: its column a product or a reactant (the limiting one or not), and whether any
   // of the grid's rows or columns are hidden.
@@ -245,11 +253,11 @@ const MORE_GROUPS = ["marks", "other", "library"];
 const KIND_OF: Record<string, string> = {
   select_all: "view", zoom_fit: "view", import: "file", select_structure: "view",
   "shape.row.before": "table", "shape.col.before": "table", "shape.row.delete": "table", "shape.col.delete": "table", "shape.fit": "table", "shape.clear": "table", "shape.dashed": "table",
-  "shape.hide.origin": "plate", "shape.hide.front": "plate", "shape.hide.border": "plate", "shape.ticks": "plate", "shape.transparent": "plate", "cycle.reverse": "cycle", "cycle.ungroup": "cycle",
+  "shape.hide.origin": "plate", "shape.hide.front": "plate", "shape.hide.border": "plate", "shape.ticks": "plate", "shape.transparent": "plate", "cycle.reverse": "cycle", "cycle.remove": "cycle",
   structure_to_name: "analysis", properties: "analysis", show_stereo: "analysis", predict_1h: "analysis", predict_13c: "analysis",
   search_reaxys: "search", search_reaxys_exact: "search", search_pubchem: "search", search_pubchem_sub: "search",
   "rotate.cw15": "turn", "rotate.ccw15": "turn", flip_h: "turn", flip_v: "turn", mirror_h: "turn", mirror_v: "turn", structure_perspective: "turn", flatten: "turn", clean_3d: "turn", clean_reaction_augmented: "turn", rotate_dialog: "turn", scale_dialog: "turn",
-  pairs: "marks", number: "marks", atom_numbers: "marks", show_warnings: "marks", explain_warning: "marks", "caption.add": "marks", colour_by_element: "marks", aromatic_display: "marks", hydrogen_display: "marks", contract_label: "marks",
+  pairs: "marks", number: "marks", atom_numbers: "marks", show_warnings: "marks", hide_warnings: "marks", explain_warning: "marks", "caption.add": "marks", colour_by_element: "marks", aromatic_display: "marks", hydrogen_display: "marks", contract_label: "marks",
   "cycle.make": "arrange", "align.row": "arrange", "align.column": "arrange", "align.spread-row": "arrange", group: "group", ungroup: "group", group_integral: "group",
   arrange_left: "arrange", arrange_centre: "arrange", arrange_right: "arrange", arrange_top: "arrange", arrange_middle: "arrange", arrange_bottom: "arrange",
   arrange_across: "arrange", arrange_down: "arrange", bring_front: "arrange", send_back: "arrange", centre_page: "arrange", join: "arrange",
@@ -269,6 +277,9 @@ export function SearchGlyph({ letter }: { letter: string }) {
 export function actionItems(context: Context, messy: boolean, hiddenWarnings = false, warned = 0, online = false): Item[] {
   const items: Item[] = [];
   const it = (icon: React.ReactNode, name: string, command: string, accent?: boolean, small?: boolean): Item => ({ icon, name, command, accent, small });
+  // A cycle's side arrow, picked or labelled by the text picked: the same items for each (its ends and heads are picks).
+  const sideItems = (c: CycleSide) => [it(<Shuffle size={18} />, "Swap in and out", "cycle.side.swap"), ...(c.inside !== undefined ? [it(<CircleHalf size={18} />, c.inside ? "Put outside the cycle" : "Put inside the cycle", "cycle.side.inside")] : []),
+    ...(c.moved ? [it(<ClockCounterClockwise size={18} />, "Reset position", "cycle.side.reset")] : []), it(<Scissors size={18} />, "Remove the side arrow", "cycle.side.remove")];
   const small = (i: Item): Item => ({ ...i, small: true });
   const clean = it(<MagicWand size={18} />, "Clean up structure", "clean_up", messy);
   const nameIt = { ...it(<TagSimple size={18} />, "Convert structure to name", "structure_to_name"), short: "Structure to name" };
@@ -304,7 +315,8 @@ export function actionItems(context: Context, messy: boolean, hiddenWarnings = f
   // On an atom or a bond: its whole structure (ChemDraw's Molecule > Select).
   const whole = small(it(<SelectionPlus size={18} />, "Select structure", "select_structure"));
   // ChemDraw's Explain This Warning and Display Warnings, for every selection with a warning marked or hidden on it.
-  const warnings = (rows = false) => [...(warned ? [it(<Question size={18} />, warned > 1 ? "Explain these warnings" : "Explain this warning", "explain_warning", false, !rows)] : []),
+  const warnings = (rows = false) => [...(warned ? [it(<Question size={18} />, warned > 1 ? "Explain these warnings" : "Explain this warning", "explain_warning", false, !rows),
+    it(<BellSlash size={18} />, warned > 1 ? "Hide these warnings" : "Hide this warning", "hide_warnings", false, !rows)] : []),
     ...(hiddenWarnings ? [it(<WarningCircle size={18} />, "Show warnings", "show_warnings", false, !rows)] : [])];
 
   switch (context.kind) {
@@ -315,7 +327,7 @@ export function actionItems(context: Context, messy: boolean, hiddenWarnings = f
     case "drawing":
       items.push(clean, ...(context.nameable ? [nameIt] : []), ...(context.generic ? [expandIt] : []), toStructure, ...flips,
         small(it(<CopySimple size={18} />, "Copy as SMILES", "copy_smiles")), small(it(<IdentificationBadge size={18} />, "Copy as InChI", "copy_inchi")), small(it(<Key size={18} />, "Copy as InChIKey", "copy_inchikey")), ...searches, small(it(<FileArrowDown size={18} />, "Import a structure…", "import")),
-        small(it(<SelectionAll size={18} />, "Select all", "select_all")), small(it(<CornersOut size={18} />, "Fit to window", "zoom_fit")), centre);
+        small(it(<SelectionAll size={18} />, "Select all", "select_all")), small(it(<CornersOut size={18} />, "Fit to window", "zoom_fit")), centre, ...warnings());
       break;
     case "selection":
       items.push(...join, ...(context.atoms ? [clean] : []), it(<CopySimple size={18} />, "Copy", "copy"), ...warnings(), ...turnsAndFlips, ...objects, ...order, ...frames, keep, ...(context.atoms ? [dict] : []), del);
@@ -356,17 +368,11 @@ export function actionItems(context: Context, messy: boolean, hiddenWarnings = f
       if (context.labelable) items.push(it(<TextTSlash size={18} />, "Make element", "make_element"));
       if (context.convertible) items.push(toStructure);
       if (context.count === 1) items.push(it(<PencilSimpleLine size={18} />, "Edit text", "caption.edit"));
-      if (context.cycleSide) {
-        const c = context.cycleSide;
-        items.push(it(<Shuffle size={18} />, c.side === "in" ? "Make it a product" : "Make it a reagent", "cycle.side.swap"),
-          it(<CircleHalf size={18} />, c.inside ? "Put outside the cycle" : "Put inside the cycle", "cycle.side.inside"),
-          it(<ArrowBendDownRight size={18} />, c.through ? "Stop at the cycle" : "Pass through the cycle", "cycle.side.through"));
-        if (c.moved) items.push(it(<ClockCounterClockwise size={18} />, "Reset position", "cycle.side.reset"));
-      }
+      if (context.cycleSide) items.push(...sideItems(context.cycleSide));
       if (context.cycleName?.moved) items.push(it(<ClockCounterClockwise size={18} />, "Reset position", "cycle.side.reset"));
       if (context.attached) items.push(it(<LinkBreak size={18} />, "Un-tie from structure", "caption.detach"));
       else if (context.attachable) items.push(it(<LinkSimple size={18} />, "Tie to structure", "caption.attach"));
-      items.push(small(it(<Paragraph size={18} />, "Line spacing…", "line_spacing")), ...turnings, rotate, centre, ...order, keep, del);
+      items.push(...warnings(), small(it(<Paragraph size={18} />, "Line spacing…", "line_spacing")), ...turnings, rotate, centre, ...order, keep, del);
       break;
     case "reaction":
       items.push(it(<Broom size={18} />, "Clean up reaction", "clean_reaction", !context.clean), small(it(<StarFour size={18} />, "Augmented clean up reaction", "clean_reaction_augmented")),
@@ -380,10 +386,20 @@ export function actionItems(context: Context, messy: boolean, hiddenWarnings = f
         ...(context.hidden ? [it(<Eye size={18} />, "Show all rows and columns", "grid.show")] : []), del);
       break;
     case "cycle":
+      if (context.side) {
+        items.push(...sideItems(context.side));
+        break;
+      }
+      if (context.step) {
+        items.push(it(<ArrowsHorizontal size={18} />, context.reversible ? "Make the step one way" : "Make the step reversible", "cycle.step.reversible"),
+          it(<ArrowBendDownRight size={18} />, "Add a side arrow", "cycle.side.add"), it(<Tag size={18} />, context.named ? "Edit the step name" : "Add a step name", "cycle.name"),
+          ...(context.shaped ? [it(<ArrowUUpLeft size={18} />, "Reset the step", "cycle.step.reset")] : []), it(<Path size={18} />, context.hidden ? "Show the arc" : "Hide the arc", "cycle.step.hide"));
+        break;
+      }
       if (!context.centre) items.push(it(<Textbox size={18} />, "Add a centre label", "cycle.centre"));
-      items.push(it(<SignIn size={18} />, "Add a reagent coming in", "cycle.in"), it(<SignOut size={18} />, "Add a product going out", "cycle.out"), it(<Tag size={18} />, "Add a step name", "cycle.name"),
-        it(<CirclesThree size={18} />, "Tidy the cycle", "cycle.tidy"), small(it(<ArrowsCounterClockwise size={18} />, "Reverse the direction", "cycle.reverse")),
-        small(it(<CircleDashed size={18} />, "Remove the cycle", "cycle.ungroup")), ...turnsAndFlips, ...objects, ...order, keep, del);
+      items.push(it(<ArrowBendDownRight size={18} />, "Add a side arrow", "cycle.side.add"), it(<Tag size={18} />, "Add a step name", "cycle.name"),
+        ...(context.arcs ? [it(<CircleNotch size={18} />, "Show the hidden arcs", "cycle.step.show")] : []), it(<CirclesThree size={18} />, "Tidy the cycle", "cycle.tidy"), small(it(<ArrowsCounterClockwise size={18} />, "Reverse the direction", "cycle.reverse")),
+        small(it(<CircleDashed size={18} />, "Remove the cycle", "cycle.remove")), ...turnsAndFlips, ...objects, ...order, keep, del);
       break;
     case "shape":
       if (context.shape === "tlc") {
@@ -962,7 +978,7 @@ export function Actions({ open, context, analysis, problems, fonts, hiddenWarnin
         // The rest of ChemDraw's Curves menu, one small button each: the line, the head at each end, the heads' shape,
         // the curve's sweep and a closed curve's fill. Each shows its choice; a click opens the others. An orbital's
         // line is plain, dashed or bold, as ChemDraw's drawing element menu has it.
-        const c = context, HEADS = [["none", "None"], ["full", "Arrowhead"], ["left", "Half, left"], ["right", "Half, right"]] as const, orbital = c.arrow === "orbital";
+        const c = context, orbital = c.arrow === "orbital";
         return (
           <div className="picks" role="group" aria-label="Line and arrowheads">
             {(c.heads || orbital) && <PickButton label="Line" value={c.style ?? "plain"} onPick={(v) => run(`arrow.style.${v}`)}
@@ -981,6 +997,24 @@ export function Actions({ open, context, analysis, problems, fonts, hiddenWarnin
           </div>
         );
       })()}
+      {(() => {
+        // A cycle's side arrow: which ends it has, and the heads at its start and end (as an arrow's).
+        const c = context.kind === "cycle" ? context.side : context.kind === "caption" ? context.cycleSide : undefined;
+        return c && (
+          <div className="picks" role="group" aria-label="Side arrow">
+            <PickButton label="Ends" value={c.ends} onPick={(v) => run(`cycle.side.ends.${v}`)} options={([["both", "Reagent and product"], ["in", "Reagent"], ["out", "Product"]] as const).map(([id, name]) => ({ id, name, glyph: <SideGlyph ends={id} /> }))} />
+            <PickButton label="Start" value={c.start} onPick={(v) => run(`cycle.side.start.${v}`)} options={HEADS.map(([id, name]) => ({ id, name, glyph: <LineGlyph start={id} /> }))} />
+            <PickButton label="End" value={c.end} onPick={(v) => run(`cycle.side.end.${v}`)} options={HEADS.map(([id, name]) => ({ id, name, glyph: <LineGlyph end={id} /> }))} />
+          </div>
+        );
+      })()}
+      {context.kind === "cycle" && context.step && context.reversible && (
+        // A reversible step's balance: which half is longer, as an unbalanced equilibrium's.
+        <div className="picks" role="group" aria-label="Step">
+          <PickButton label="Balance" value={context.balance} onPick={(v) => run(`cycle.step.balance.${v}`)}
+            options={([["equal", "Equal", "equilibrium"], ["forward", "Forward longer", "unbalanced"], ["back", "Back longer", "unbalanced"]] as const).map(([id, name, kind]) => ({ id, name, glyph: id === "back" ? <span className="pick-turned"><ArrowGlyph kind={kind} /></span> : <ArrowGlyph kind={kind} /> }))} />
+        </div>
+      )}
       {((context.kind === "shape" && context.shape !== "highlight" && context.shape !== "table" && context.style !== "solid" && context.style !== "shaded") || context.kind === "arrow" || context.kind === "cycle" || (context.kind === "selection" && context.width !== undefined)) && (
         // The width of the lines, for every object drawn in lines, and for lines picked together (a table's is with its
         // lines, above).

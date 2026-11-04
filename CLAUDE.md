@@ -169,8 +169,10 @@ better, modern way to do it. This repository is public.
 2. Make the change.
 3. Show Sam a preview: run the app so its window opens on Sam's Mac, or
    show the diff when there is nothing to run.
-4. When Sam approves, commit and push straight to `main`. No branches or
-   pull requests are needed. This is standing permission from Sam.
+4. Don't commit or push until Sam explicitly says "commit". Approving a
+   fix is not a go-ahead. Octet has over 1000 users, so fixes are batched,
+   not pushed one by one. When Sam says to, commit and push straight to
+   `main`. No branches or pull requests are needed.
 
 Never force-push or rewrite history on `main`.
 

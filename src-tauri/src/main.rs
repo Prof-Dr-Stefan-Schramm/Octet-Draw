@@ -53,6 +53,36 @@ fn print_page(window: tauri::WebviewWindow) -> Result<(), String> {
 #[derive(Default)]
 pub struct Picked(pub Mutex<HashSet<PathBuf>>);
 
+// Each drawing file's size and time when Octet last read or wrote it. Save and the window coming to the front compare
+// them with the file on disk, so a change another app made is never written over without a question (issue 2).
+#[derive(Default)]
+pub struct Stamps(Mutex<HashMap<PathBuf, Stamp>>);
+type Stamp = (u64, Option<std::time::SystemTime>);
+fn stamp_of(path: &Path) -> Option<Stamp> {
+    fs::metadata(path).ok().map(|m| (m.len(), m.modified().ok()))
+}
+// Called before Octet reads a drawing and after it writes one.
+pub fn stamp(app: &AppHandle, path: &Path) {
+    note_stamp(&app.state::<Stamps>(), path);
+}
+fn note_stamp(stamps: &Stamps, path: &Path) {
+    let mut held = stamps.0.lock().unwrap();
+    match stamp_of(path) {
+        Some(s) => held.insert(path.to_path_buf(), s),
+        None => held.remove(path),
+    };
+}
+// True when the file is there and is not as Octet last read or wrote it. A file that is gone is not changed: Save
+// writes it again.
+fn changed(stamps: &Stamps, path: &Path) -> bool {
+    let held = stamps.0.lock().unwrap().get(path).copied();
+    held.is_some_and(|s| stamp_of(path).is_some_and(|now| now != s))
+}
+#[tauri::command]
+fn file_changed(stamps: State<'_, Stamps>, path: String) -> bool {
+    changed(&stamps, Path::new(&path))
+}
+
 // Tickable menu items, so the page can set their ticks from the user's saved settings.
 struct Checks(Mutex<Vec<CheckMenuItem<Wry>>>);
 
@@ -172,8 +202,8 @@ fn set_text_lists(app: AppHandle, fonts: Vec<String>, sizes: Vec<f64>) -> Result
 }
 
 // What new drawings are for (IDEA-SIZE-1): the user's own purposes by name (12 at most, names cut to 40 characters)
-// after Paper, Thesis, Slides and Poster in File > New For, and the name of the one File > New starts, which New shows
-// as ChemDraw's New shows its stationery. The menu bar is built again with them.
+// after Paper, Thesis, Slides, Poster and Experiment in File > New For, and the name of the one File > New starts,
+// which New shows as ChemDraw's New shows its stationery. The menu bar is built again with them.
 #[derive(Default)]
 struct Purposes(Mutex<(Vec<String>, String)>);
 
@@ -238,13 +268,15 @@ pub fn read_text_or_cdx(path: &Path) -> std::io::Result<String> {
 }
 
 // Write to a temporary file next to the target, flush it to disk, then rename it over the target.
-// A crash mid-save leaves the old file intact.
+// A crash mid-save leaves the old file intact. Each write has a temporary file of its own, so two saves of one file
+// at the same time (two windows, or Save pressed twice) never write into the same one (issue 2).
 pub fn write_atomic(path: &Path, data: &[u8]) -> std::io::Result<()> {
+    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
     let dir = path.parent().unwrap_or(Path::new("."));
     let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-    let tmp = dir.join(format!(".{name}.saving-{}", std::process::id()));
+    let tmp = dir.join(format!(".{name}.saving-{}-{}", std::process::id(), NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)));
     let result = (|| {
-        let mut file = fs::File::create(&tmp)?;
+        let mut file = fs::File::create_new(&tmp)?;
         file.write_all(data)?;
         file.sync_all()?;
         fs::rename(&tmp, path)
@@ -270,6 +302,7 @@ async fn open_drawing(app: AppHandle, picked: State<'_, Picked>) -> Result<Optio
     if size > MAX_BYTES {
         return Err("This file is larger than 64 MB. Octet cannot open it.".into());
     }
+    stamp(&app, &path);
     let text = read_text_or_cdx(&path).map_err(|e| e.to_string())?;
     // A template file's panes become templates: it is not a drawing to save over or to list on Home.
     if !is_template_file(&path) {
@@ -281,7 +314,7 @@ async fn open_drawing(app: AppHandle, picked: State<'_, Picked>) -> Result<Optio
 
 // File > Revert to Saved: the drawing's file as it is on disk, for a file the user picked before.
 #[tauri::command]
-async fn revert_drawing(picked: State<'_, Picked>, path: String) -> Result<String, String> {
+async fn revert_drawing(app: AppHandle, picked: State<'_, Picked>, path: String) -> Result<String, String> {
     let p = PathBuf::from(&path);
     if !picked.0.lock().unwrap().contains(&p) {
         return Err("Octet cannot read this drawing again. Open it with File > Open.".into());
@@ -290,6 +323,7 @@ async fn revert_drawing(picked: State<'_, Picked>, path: String) -> Result<Strin
     if size > MAX_BYTES {
         return Err("This file is larger than 64 MB. Octet cannot open it.".into());
     }
+    stamp(&app, &p);
     read_text_or_cdx(&p).map_err(|e| e.to_string())
 }
 
@@ -315,6 +349,8 @@ async fn open_link(app: tauri::AppHandle, name: String) -> Result<(), String> {
         "author" => "https://www.linkedin.com/in/sam-ellis-132781206/".to_string(),
         // Help > Report a Problem.
         "issues" => "https://github.com/SamChemMan/Octet-Draw/issues/new".to_string(),
+        // What's new > All versions: every version's notes.
+        "releases" => "https://github.com/SamChemMan/Octet-Draw/releases".to_string(),
         // The Feedback button: a new mail to Sam, with the version and system filled in.
         "feedback" => format!(
             "mailto:{FEEDBACK_TO}?subject=Octet%20Draw%20feedback&body=%0A%0A--%0AOctet%20Draw%20{}%20on%20{}",
@@ -422,6 +458,7 @@ async fn save_drawing(app: AppHandle, picked: State<'_, Picked>, path: Option<St
         contents.into_bytes()
     };
     write_atomic(&target, &bytes).map_err(|e| e.to_string())?;
+    stamp(&app, &target);
     picked.0.lock().unwrap().insert(target.clone());
     recent::note(&app, &target);
     Ok(Some(target.to_string_lossy().into_owned()))
@@ -462,12 +499,13 @@ fn menu(app: &AppHandle, palette: &[String], text: &(Vec<String>, Vec<f64>), ove
     }
     recent_items.push(&clear);
     let open_recent = Submenu::with_items(app, "Open Recent", true, &recent_items)?;
-    // File > New For: Quick start (as on Home), then Paper, Thesis, Slides and Poster, then the user's own purposes.
+    // File > New For: Quick start (as on Home), then Paper, Thesis, Slides, Poster and Experiment, then the user's own
+    // purposes.
     let (own, current) = app.state::<Purposes>().0.lock().unwrap().clone();
     section.replace("File › New For".into());
     let quick = item("new_quick", "Quick start", "")?;
     let quick_sep = sep()?;
-    let purposes = [("paper", "Paper"), ("thesis", "Thesis"), ("slides", "Slides"), ("poster", "Poster")].iter()
+    let purposes = [("paper", "Paper"), ("thesis", "Thesis"), ("slides", "Slides"), ("poster", "Poster"), ("experiment", "Experiment")].iter()
         .map(|(id, name)| item(&format!("new_{id}"), name, ""))
         .collect::<tauri::Result<Vec<_>>>()?;
     let own_items = own.iter().enumerate().map(|(k, name)| item(&format!("new_own_{k}"), name, "")).collect::<tauri::Result<Vec<_>>>()?;
@@ -759,6 +797,8 @@ fn menu(app: &AppHandle, palette: &[String], text: &(Vec<String>, Vec<f64>), ove
         &item("text_sub", "Subscript", "CmdOrCtrl+-")?,
         &item("text_super", "Superscript", "CmdOrCtrl+=")?,
         &item("text_formula", "Formula", "CmdOrCtrl+F")?,
+        // Octet's own: *italic*, **bold**, LaTeX's \textit{…} and $^{13}$C in the text become rich text (experiment.ts).
+        &item("text_markup", "Apply Markup", "")?,
         &sep()?,
         &item("align_left", "Flush Left", "CmdOrCtrl+Shift+L")?,
         &item("align_centre", "Centre", "CmdOrCtrl+Shift+C")?,
@@ -906,10 +946,12 @@ fn main() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(Picked::default())
+        .manage(Stamps::default())
         .manage(export::Exported::default())
         .manage(update::Found::default())
         .manage(open::Waiting::default())
         .manage(recent::Recents::default())
+        .manage(recent::Experiments::default())
         .manage(home::Home::default())
         .manage(windows::Windows::default())
         .manage(MenuKeys::default())
@@ -919,7 +961,7 @@ fn main() {
         .manage(TextLists::default())
         .manage(Purposes::default())
         .manage(TemplateSets::default())
-        .invoke_handler(tauri::generate_handler![recent::recent_list, recent::recent_thumb, recent::recent_remove, recent::open_recent, home::home_read, home::home_write, home::home_pick_drawings, home::home_pick_picture, home::thumb_save, home::thumb_load, home::thumb_drop, revert_drawing, menu_items, set_menu_keys, set_online_search, search::search_online, pubchem::pubchem_structure, open_link, open_licences, reveal_file, open_drawing, pick_style_file, save_drawing, set_check, set_palette, set_text_lists, set_purposes, set_template_sets, import_structure, print_page, clipboard::copy_to_clipboard, clipboard::read_clipboard, export::export_file, export::system_fonts, #[cfg(feedback)] feedback::snapshot, #[cfg(feedback)] feedback::send_feedback, update::update_check, update::update_install, recovery::recovery_write, recovery::recovery_clear, recovery::recovery_list, recovery::recovery_open, recovery::recovery_discard, crashlog::log_error, crashlog::crash_report, crashlog::show_log, quit::set_edited, quit::quit_answer, open::take_opened, windows::open_window, windows::window_start, windows::window_info, windows::window_list, windows::window_show, windows::show_home])
+        .invoke_handler(tauri::generate_handler![recent::recent_list, recent::recent_thumb, recent::recent_remove, recent::open_recent, file_changed, recent::experiment_note, recent::experiment_list, recent::experiment_remove, home::home_read, home::home_write, home::home_pick_drawings, home::home_pick_picture, home::thumb_save, home::thumb_load, home::thumb_drop, revert_drawing, menu_items, set_menu_keys, set_online_search, search::search_online, pubchem::pubchem_structure, open_link, open_licences, reveal_file, open_drawing, pick_style_file, save_drawing, set_check, set_palette, set_text_lists, set_purposes, set_template_sets, import_structure, print_page, clipboard::copy_to_clipboard, clipboard::read_clipboard, export::export_file, export::system_fonts, #[cfg(feedback)] feedback::snapshot, #[cfg(feedback)] feedback::send_feedback, update::update_check, update::update_install, recovery::recovery_write, recovery::recovery_clear, recovery::recovery_list, recovery::recovery_open, recovery::recovery_discard, crashlog::log_error, crashlog::crash_report, crashlog::show_log, quit::set_edited, quit::quit_answer, open::take_opened, windows::open_window, windows::close_window, windows::window_start, windows::window_info, windows::window_empty, windows::window_list, windows::window_show, windows::show_home])
         .setup(|app| {
             let handle = app.handle();
             // Files named when Octet starts (Explorer and file managers pass them as arguments).
@@ -999,4 +1041,28 @@ fn main() {
             tauri::RunEvent::ExitRequested { api, .. } if quit::ending() => api.prevent_exit(),
             _ => {}
         });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // Another app writes the drawing after Octet read it: changed, until Octet reads or writes it again. A file that
+    // is gone, or one Octet never read, is not changed.
+    #[test]
+    fn a_file_changed_elsewhere_is_seen() {
+        let path = std::env::temp_dir().join(format!("octet-stamp-test-{}.oct", std::process::id()));
+        let stamps = Stamps::default();
+        fs::write(&path, "<CDXML/>").unwrap();
+        assert!(!changed(&stamps, &path), "a file Octet never read");
+        note_stamp(&stamps, &path);
+        assert!(!changed(&stamps, &path));
+        fs::write(&path, "<CDXML><page/></CDXML>").unwrap();
+        assert!(changed(&stamps, &path));
+        write_atomic(&path, b"<CDXML/>").unwrap();
+        note_stamp(&stamps, &path);
+        assert!(!changed(&stamps, &path), "Octet's own save");
+        fs::remove_file(&path).unwrap();
+        assert!(!changed(&stamps, &path), "a file that is gone");
+    }
 }

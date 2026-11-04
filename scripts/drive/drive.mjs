@@ -5,7 +5,8 @@
 // screenshots to drive-out/. No dependencies: Node's fetch speaks WebDriver.
 //
 //   node scripts/drive/drive.mjs           drive Octet (Windows or Linux)
-//   node scripts/drive/drive.mjs --dry     print the steps and the commands each platform runs, and run nothing
+//   node scripts/drive/drive.mjs --dry     print the steps, the commands each platform runs, the WebDriver calls that
+//                                          change window and what each step waits for, and run nothing
 import { execFileSync, spawn } from "node:child_process";
 import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
@@ -52,6 +53,7 @@ const system = WIN
       menu: (...names) => ps("menu", ...names),
       key: (keys) => ps("keys", { "ctrl+v": "^v" }[keys] ?? keys),
       running: () => ps("running").toString().trim() === "yes",
+      front: () => ps("front").toString().trim(),
       menuNames: () => ps("menu-names").toString().split(/\r?\n/).filter(Boolean),
       uiaMenu: () => ps("uia-menu").toString().split(/\r?\n/).filter(Boolean),
       // Each menu opens and closes in turn: up to about 3 s a menu.
@@ -68,14 +70,10 @@ const system = WIN
       formats: () => run("xclip", ["-selection", "clipboard", "-o", "-t", "TARGETS"]).toString().split("\n").filter(Boolean),
       read: (format) => run("xclip", ["-selection", "clipboard", "-o", "-t", format]),
       menu: (...names) => run("python3", [path.join(HERE, "linux-menu.py"), pid(), ...names]),
-      // Real key presses (XTEST), to Octet's window, which takes the focus first. The search runs on its own: xdotool
-      // reads the word after --pid as a name to look for, so a chained command would be taken as one.
-      key: (keys) => {
-        const win = run("xdotool", ["search", "--sync", "--onlyvisible", "--pid", pid()]).toString().split("\n")[0].trim();
-        run("xdotool", ["windowfocus", "--sync", win || "WINDOW"]);
-        return run("xdotool", ["key", "--clearmodifiers", keys]);
-      },
+      // Real key presses (XTEST), to the window in front: the drawing's (Quick start checks that it is).
+      key: (keys) => run("xdotool", ["key", "--clearmodifiers", keys]),
       running: () => pid() !== "",
+      front: () => run("python3", [path.join(HERE, "linux-menu.py"), pid()]).toString().trim(),
     };
 // Octet's process on Linux ("" when there is none).
 function pid() {
@@ -85,8 +83,9 @@ function pid() {
 
 // ---- WebDriver (tauri-driver on port 4444) ----
 
-let session;
+let session = DRY ? "SESSION" : undefined;
 async function wd(method, url, body) {
+  if (DRY) return void log(`    WebDriver: ${method} ${url}`);
   // Two minutes at most, so a page that stops answering fails the step instead of holding the run.
   const r = await fetch(`http://127.0.0.1:${PORT}${url}`, { method, headers: { "content-type": "application/json" }, body: body && JSON.stringify(body), signal: AbortSignal.timeout(120_000) });
   const j = await r.json().catch(() => ({}));
@@ -96,7 +95,7 @@ async function wd(method, url, body) {
 // A script in the page; its result.
 const page = async (script, ...args) => (DRY ? undefined : wd("POST", `/session/${session}/execute/sync`, { script, args }));
 async function until(what, test, ms = 20_000) {
-  if (DRY) return;
+  if (DRY) return void log(`    wait for ${what}`);
   const end = Date.now() + ms;
   for (;;) {
     let last;
@@ -105,6 +104,19 @@ async function until(what, test, ms = 20_000) {
     await sleep(250);
   }
 }
+// Each window has its own page: Home's, and each drawing's (src-tauri/src/windows.rs). WebDriver acts on one at a time.
+const handles = () => wd("GET", `/session/${session}/window/handles`);
+const toWindow = (handle) => wd("POST", `/session/${session}/window`, { handle });
+// The window that opens next (one not in `before`), once it is in front with the drawing's name, as a new window of
+// Octet's is. Menu commands and keys go to the window in front.
+async function opened(before, title) {
+  let handle;
+  await until("a new window", async () => (handle = (await handles()).find((h) => !before.includes(h))));
+  if (DRY) system.front(); // prints the command the wait below runs
+  await until(`the new window in front, named ${title}`, () => system.front() === title);
+  return handle;
+}
+let drawing; // the first drawing's window
 async function screenshot(name) {
   if (DRY || !session) return;
   try { writeFileSync(path.join(OUT, `${name}.png`), Buffer.from(await wd("GET", `/session/${session}/screenshot`), "base64")); } catch { /* the window is gone */ }
@@ -141,8 +153,12 @@ const steps = [
     for (const l of opened) log(`    ${l}`);
     if (!DRY && (shut.length || opened.length !== menus.length)) throw new Error(`through UI Automation: ${shut.join("; ") || `${opened.length} of ${menus.length} menus tried`}`);
   }]] : []),
-  ["Home's Quick start opens a new drawing", async () => {
+  ["Home's Quick start opens a new drawing in a window of its own, and Home stays", async () => {
+    const before = await handles();
     await page("document.querySelector('main.home .home-tile.new').click()");
+    drawing = await opened(before, "Untitled");
+    if (!DRY && !(await page("return !!document.querySelector('main.home')"))) throw new Error("Home's window no longer shows Home");
+    await toWindow(drawing);
     await until("the drawing", () => page("return !document.querySelector('main.home') && !!document.querySelector('svg.canvas')"));
     await sleep(5000); // the chemistry engine (WebAssembly) loads
   }],
@@ -189,15 +205,21 @@ const steps = [
     await page("document.querySelector(arguments[0]).dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))", nameField);
     await until("the name field closed", async () => !(await page("return !!document.querySelector(arguments[0])", nameField)));
   }],
-  ["File > New asks about the unsaved drawing, and Don't Save opens a new one", async () => {
+  ["File > New opens a new drawing in another window, and the drawing stays", async () => {
+    const before = await handles();
     system.menu("File", "New*");
+    const next = await opened(before, "Untitled");
+    await pasted(2);
+    await toWindow(next);
+    await until("the new drawing", () => page("return !!document.querySelector('svg.canvas')"));
+    await pasted(0);
+  }],
+  ["File > Exit asks about the unsaved drawing, and Don't Save ends Octet", async () => {
+    system.menu("File", "Exit");
+    await toWindow(drawing);
     const dontSave = "[...document.querySelectorAll('button')].find((b) => /Don.t Save/.test(b.textContent))";
     await until("the question", () => page(`return !!${dontSave}`));
     await page(`${dontSave}.click()`);
-    await pasted(0);
-  }],
-  ["File > Exit ends Octet", async () => {
-    system.menu("File", "Exit");
     await until("Octet to end", () => !system.running(), 15_000);
     session = undefined;
   }],

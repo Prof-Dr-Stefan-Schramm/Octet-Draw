@@ -89,19 +89,20 @@ assert.equal(new Set(RING_FILLS.map(([n]) => n)).size, RING_FILLS.length);
 assert.equal(new Set(RING_FILLS.map(([, h]) => h.toLowerCase())).size, RING_FILLS.length);
 assert.ok(RING_FILLS.every(([n, h]) => /^[A-Z][a-z]+$/.test(n) && /^#[0-9A-F]{6}$/.test(h)));
 assert.deepEqual(RING_FILLS.slice(0, HIGHLIGHT_COLOURS.length), HIGHLIGHT_COLOURS);
-// Colour by element reads the atom-* tokens: nitrogen, oxygen, sulfur (and selenium), phosphorus, the halogens and the
-// metals. Carbon, hydrogen and abbreviations such as Ph or Pr keep the ink colour.
+// Colour by element reads the atom-* tokens: nitrogen, oxygen, sulfur (and selenium), phosphorus, fluorine and chlorine,
+// bromine, iodine, boron, silicon and the metals. Carbon, hydrogen and abbreviations such as Ph or Pr keep the ink colour.
 const by = elementColours((name) => `token:${name}`);
 assert.equal(by.N, "token:n");
 assert.equal(by.O, "token:o");
 assert.equal(by.S, "token:s");
 assert.equal(by.Se, "token:s");
 assert.equal(by.P, "token:p");
-for (const e of ["F", "Cl", "Br", "I"]) assert.equal(by[e], "token:halogen");
+for (const e of ["F", "Cl"]) assert.equal(by[e], "token:halogen");
+for (const e of ["Br", "I", "B", "Si"]) assert.equal(by[e], `token:${e.toLowerCase()}`);
 for (const e of ["Pd", "Fe", "Li", "Na", "Pt", "Rh", "Bi"]) assert.equal(by[e], "token:metal");
-for (const e of ["C", "H", "Ph", "Pr", "Ac", "Me", "B", "Si"]) assert.equal(by[e], undefined);
+for (const e of ["C", "H", "Ph", "Pr", "Ac", "Me"]) assert.equal(by[e], undefined);
 // The tokens are there to read, in both themes.
 const tokens = read("../brand/tokens.css");
-for (const name of ["n", "o", "s", "p", "halogen", "metal"]) assert.equal(tokens.match(new RegExp(`--atom-${name}:`, "g"))?.length, 3);
+for (const name of ["n", "o", "s", "p", "halogen", "br", "i", "b", "si", "metal"]) assert.equal(tokens.match(new RegExp(`--atom-${name}:`, "g"))?.length, 3);
 
 console.log("look: ok");

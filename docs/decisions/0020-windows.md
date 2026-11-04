@@ -10,15 +10,19 @@ more than one drawing open at a time, each in a window of its own, with Home lis
 - ChemDraw 26.1 has a window for each document. New Document and Open Document open a new window. On Windows its
   toolbar has Cascade, Tile Horizontal and Tile Vertical (`~/octet-research/notes/chemdraw26-inventory.md`).
 - Mac document apps (TextEdit, Pages) open a file into an untouched empty Untitled window instead of a new one.
+- ChemDraw 22.2 starts in a document window; files opened later open in windows of their own.
 
 ## Decision
 
 - Home is the window `main`. Each drawing has a window `draw-1`, `draw-2` and on (`src-tauri/src/windows.rs`).
-- What opens from Home opens in a new window, and Home stays. New and Open in a drawing window open a new window,
-  unless the window holds an untouched new drawing.
+- The first drawing opens in Home's window, as Octet's one window did (Sam, 3 November 2026). Once a drawing is open,
+  what opens from Home or from a drawing window opens in a new window. A window that holds an untouched new drawing
+  takes the next one instead, and so does Home's window when no drawing window is open. Opening several files at once
+  puts the first in that window and each of the others in a window of its own.
 - Home has an Open windows section first, with each window's name, picture and state (Edited, Saved, New). A click
   brings the window to the front. A drawing that is open already comes to the front instead of opening twice.
-- File > Home in a drawing window brings Home to the front, and opens it again if it was closed.
+- File > Home in a drawing window brings Home to the front, and opens it again if it was closed. When Home's window
+  holds a drawing, Home shows over it, as File > Home does in that window.
 - Menu commands go to the window in front. Each window sends its ticks, colours and fonts when it comes to the front;
   the menu bar is built again only when a list changes. On the Mac the Window menu lists the windows.
 - Quit asks about each window with unsaved changes in turn; Cancel stops it. The Dock's Quit and a logout do the same.

@@ -151,6 +151,40 @@ assert.equal(fused.atoms.length, 6);
   const side = (m: typeof base) => Math.sign(m.atoms.slice(3).reduce((s, a) => s + a.location[1], 0) / 4 - (pos(base, 1)[1] + pos(base, 2)[1]) / 2);
   assert.equal(side(one), side(two), "both on the open side");
 }
+// A chair on a bond of a chair of the same kind is that chair moved along (trans-decalin): ten atoms, and no atom
+// has two bonds in a straight line, so no corner looks missing (issue 3).
+for (const which of [1, 2] as const) {
+  const c = addChair(EMPTY, which, { point: [0, 0] });
+  for (let b = 0; b < 6; b++) {
+    const f = addChair(c, which, { bond: b });
+    assert.equal(f.atoms.length, 10);
+    const dirs = (i: number) => neighbours(f, i).map((j) => Math.atan2(pos(f, j)[1] - pos(f, i)[1], pos(f, j)[0] - pos(f, i)[0]));
+    for (let i = 0; i < f.atoms.length; i++) for (const [x, y] of dirs(i).flatMap((x, k, all) => all.slice(k + 1).map((y) => [x, y]))) {
+      assert.ok(Math.abs(Math.abs(x - y) - Math.PI) > 0.05, `chair ${which} on bond ${b}: a straight corner at atom ${i}`);
+    }
+  }
+}
+// Dragged from a bond, a ring goes on the side dragged to, and a chair fits the bond the way whose middle is nearest
+// the pointer, never on top of the drawing (issue 3).
+{
+  const bond = sprout(EMPTY, [0, 0]);
+  for (const y of [1, -1]) {
+    const r = addRing(bond, 6, false, { bond: 0, toward: [0.5, 3 * y] });
+    assert.ok(Math.sign(r.atoms.reduce((s, a) => s + a.location[1], 0)) === y, "the ring on the side dragged to");
+  }
+  const ring = addRing(EMPTY, 6, false, { point: [0, 0] });
+  const inward = addRing(ring, 6, false, { bond: 0, toward: [0, 0] });
+  assert.equal(inward.atoms.length, 10, "dragged into a ring, the new ring goes on the open side");
+  const c = addChair(EMPTY, 2, { point: [0, 0] }), seen = new Set<string>();
+  for (let k = 0; k < 16; k++) {
+    const [a, b] = c.bonds[0].atoms.map((i) => pos(c, i)), m = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2], t = (k * Math.PI) / 8;
+    const f = addChair(c, 2, { bond: 0, toward: [m[0] + 3 * Math.cos(t), m[1] + 3 * Math.sin(t)] });
+    assert.equal(f.atoms.length, 10, "a dragged chair shares only the bond");
+    for (let i = 6; i < 10; i++) for (let j = 0; j < 6; j++) assert.ok(Math.hypot(pos(f, i)[0] - pos(f, j)[0], pos(f, i)[1] - pos(f, j)[1]) > 0.6, "and runs into nothing");
+    seen.add(f.atoms.slice(6).map((x) => x.location.slice(0, 2).map((v) => v.toFixed(3)).join(",")).join(";"));
+  }
+  assert.ok(seen.size > 2, "dragging round the bond turns the chair");
+}
 // Lasso: atoms inside the path are picked.
 assert.deepEqual(atomsInPolygon(chair, [[-5, -5], [5, -5], [5, 5], [-5, 5]]).length, 6);
 assert.deepEqual(atomsInPolygon(chair, [[10, 10], [11, 10], [11, 11]]), []);
@@ -332,6 +366,15 @@ console.log("edit.check: align ok");
   assert.equal(insertMol(m, alone, [1, 0]).mol.captions?.length, 4, "the free copies paste");
   assert.deepEqual(extractSelection(m, new Set([0, 1, 2]), new Set([12]), at).captions?.map((c) => c.under), [[0, 1, 2]]);
   console.log("edit.check: copy and paste ok");
+  // Delete an arrow (issue 12): its conditions stay where they are drawn, as free text.
+  const gone = deleteGraphics(m, new Set([10]), at);
+  assert.deepEqual([gone.arrows, gone.captions?.map((c) => [c.text, c.x, c.y, c.on, c.placed])], [[], [["heat", 4, 1, undefined, undefined], ["1", 0, 0, undefined, undefined]]]);
+  console.log("edit.check: an arrow's conditions stay when it is deleted");
+  // Cut an arrow, as onCut does: what goes on the clipboard leaves the drawing, so Paste brings one copy of "heat" back.
+  const clip = extractSelection(m, new Set(), new Set([10]), at), cut = deleteGraphics(m, new Set([10, ...clip.captions!.map((c) => c.id)]), at);
+  assert.deepEqual(cut.captions?.map((c) => c.text), ["1"]);
+  assert.deepEqual(insertMol(cut, clip).mol.captions?.map((c) => c.text), ["1", "heat"]);
+  console.log("edit.check: cut then paste keeps one copy of an arrow's conditions");
 }
 
 // Expand Label joins the group where the label was, pointing away from the structure; Contract Label undoes it.

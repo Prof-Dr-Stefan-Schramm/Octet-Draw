@@ -66,18 +66,20 @@ fn mean(stops: &[usvg::Stop], opacity: f32) -> ([f32; 3], f32) {
 // are 72.
 fn marks(tree: &usvg::Tree) -> Vec<Mark> {
     let mut out = Vec::new();
-    walk(tree.root(), 1.0, &mut out);
+    walk(tree.root(), 1.0, Transform::identity(), &mut out);
     out
 }
-fn walk(g: &usvg::Group, opacity: f32, out: &mut Vec<Mark>) {
+// `base`: what takes the group's own frame to the page. A text's flattened glyphs carry transforms from the text, not
+// from the page, so they get the text's (issue 16: the labels fell outside the picture in Word on Windows).
+fn walk(g: &usvg::Group, opacity: f32, base: Transform, out: &mut Vec<Mark>) {
     for node in g.children() {
         match node {
-            Node::Group(c) => walk(c, opacity * c.opacity().get(), out),
-            Node::Text(t) => walk(t.flattened(), opacity, out),
+            Node::Group(c) => walk(c, opacity * c.opacity().get(), base, out),
+            Node::Text(t) => walk(t.flattened(), opacity, base.pre_concat(t.abs_transform()), out),
             Node::Image(img) if img.is_visible() => out.extend(picture(node, img, opacity).map(Mark::Picture)),
             Node::Image(_) => {}
             Node::Path(p) if p.is_visible() => {
-                let t = p.abs_transform().post_scale(0.75, 0.75);
+                let t = base.pre_concat(p.abs_transform()).post_scale(0.75, 0.75);
                 let at = |q: Point| {
                     let mut q = q;
                     t.map_point(&mut q);
@@ -442,6 +444,23 @@ pub(crate) mod tests {
         assert_eq!(at, emf.len());
         assert_eq!(count, u(52));
         assert_eq!(last, 14);
+    }
+
+    // Issue 16: a copy's view box starts where the selection does, and the labels must land inside the picture with
+    // the bonds, as standaloneSvg writes them (text inside a scaled group).
+    #[test]
+    fn text_lands_inside_the_picture() {
+        let svg = r##"<svg xmlns="http://www.w3.org/2000/svg" width="60pt" height="30pt" viewBox="-302 -425 60 30"><g transform="scale(0.75)"><path d="M-400 -560h40v4h-40z" fill="#000"/><text x="-395" y="-540" fill="#000" font-family="Arial, Helvetica, sans-serif" font-size="13.3333px">NH</text></g></svg>"##;
+        let marks = marks(&crate::export::tree(svg).unwrap());
+        assert!(marks.len() > 1, "the label has glyphs");
+        for m in &marks {
+            let Mark::Shape(sh) = m else { continue };
+            for seg in &sh.segs {
+                if let Seg::Move(x, y) | Seg::Line(x, y) | Seg::Curve(_, _, _, _, x, y) = *seg {
+                    assert!((-1.0..=61.0).contains(&x) && (-1.0..=31.0).contains(&y), "({x}, {y}) is outside the 60 by 30 pt picture");
+                }
+            }
+        }
     }
 
     // A picture as standaloneSvg writes one (src/export.ts): a red PNG of 4 by 2 px, drawn 36 by 18 pt at (18, 9) on a

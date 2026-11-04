@@ -18,7 +18,8 @@ body {
   color: var(--ink);
 }
 
-/* The canvas stays white in dark mode (data-theme="light" on the element), for print fidelity. */
+/* The canvas stays white in dark mode (data-theme="light" on the element), for print fidelity. Its cursors are
+   Octet's own (cursor.ts, --cursor-*), in the colour Settings gives, with the system's as the fallback. */
 .canvas {
   position: absolute;
   inset: 0;
@@ -26,12 +27,26 @@ body {
   height: 100%;
   display: block;
   background: var(--canvas);
-  cursor: crosshair;
+  cursor: var(--cursor-cross, crosshair);
   touch-action: none;
+}
+/* The selection colour (Settings > General > Selection; Editor.tsx puts the choice in data-select), and its soft tint
+   for the hover, the marquee and the lasso. Set on the canvas, so it takes the page's theme, and on the Spectrum
+   panel's copy of the drawing, which takes the window's. */
+.canvas,
+.spectrum-inset {
+  --select: var(--select-blue);
+  --select-tint: color-mix(in srgb, var(--select) 35%, transparent);
+}
+.editor[data-select="slate"] :is(.canvas, .spectrum-inset) {
+  --select: var(--select-slate);
+}
+.editor[data-select="grey"] :is(.canvas, .spectrum-inset) {
+  --select: var(--select-grey);
 }
 
 .canvas[data-tool="select"] {
-  cursor: default;
+  cursor: var(--cursor-select, default);
 }
 
 /* During a zoom (Editor.tsx, onWheel), the drawing's text is laid out at its own size and scaled with the drawing,
@@ -101,25 +116,31 @@ body {
 
 /* Hover: a light tint under the atom or bond. */
 .mark {
-  fill: var(--selection);
-  stroke: var(--selection);
+  fill: var(--select-tint);
+  stroke: var(--select-tint);
   stroke-linecap: round;
 }
 circle.mark {
   stroke: none;
 }
 
-/* Selection: a stronger tint. */
+/* Selection: the selection colour itself, solid, so it stands 3:1 off the page and ink on it keeps 4.5:1. Multiplied
+   into the page (screened on a dark page), so what is drawn under it (an object sent to the back, a fill, an orbital)
+   still shows through. A copy that worked: the selection's tint fades and comes back once; with nothing selected, the
+   page's edge lights once. The light page's rule has no ancestor, so the Spectrum panel's copy (a <use>, which
+   Chromium matches without the canvas above it) blends too. */
 .selection-marks {
-  opacity: 0.28;
+  mix-blend-mode: multiply;
 }
-/* A copy that worked: the selection's tint rises and falls once; with nothing selected, the page's edge lights once. */
+.canvas[data-theme="dark"] .selection-marks {
+  mix-blend-mode: screen;
+}
 .selection-marks.copied {
   animation: copied-tint var(--motion-slow) var(--ease-out);
 }
 @keyframes copied-tint {
   40% {
-    opacity: 0.45;
+    opacity: 0.5;
   }
 }
 .page-copied {
@@ -141,17 +162,17 @@ circle.mark {
   }
 }
 .selection-marks circle {
-  fill: var(--brand-bright);
+  fill: var(--select);
 }
 .selection-marks line {
-  stroke: var(--brand-bright);
+  stroke: var(--select);
   stroke-linecap: round;
 }
 
 /* A group wholly selected: a dotted frame round it, a hairline at any zoom. */
 .group-frame rect {
   fill: none;
-  stroke: var(--brand-bright);
+  stroke: var(--select);
   stroke-width: 1;
   stroke-dasharray: 3 3;
   vector-effect: non-scaling-stroke;
@@ -208,8 +229,8 @@ circle.mark {
 }
 
 .box {
-  fill: var(--selection);
-  stroke: var(--brand-bright);
+  fill: var(--select-tint);
+  stroke: var(--select);
   stroke-width: 1;
 }
 
@@ -230,6 +251,7 @@ circle.mark {
   border-radius: var(--radius-xs);
   outline: none;
   box-shadow: var(--shadow-focus);
+  cursor: var(--cursor-text, text);
   -webkit-user-select: text;
   user-select: text;
 }
@@ -240,7 +262,7 @@ circle.mark {
   white-space: pre;
 }
 .canvas[data-tool="text"] {
-  cursor: text;
+  cursor: var(--cursor-text, text);
 }
 .arrow-mark {
   fill: none;
@@ -248,7 +270,7 @@ circle.mark {
   stroke-linejoin: round;
 }
 .selection-marks .arrow-mark {
-  stroke: var(--brand-bright);
+  stroke: var(--select);
 }
 .erase-marks .arrow-mark {
   stroke: var(--error);
@@ -285,9 +307,21 @@ circle.mark {
 /* Handles on a picked arrow: its ends, and the middle of a curved one. */
 .handle {
   fill: var(--canvas);
-  stroke: var(--brand-bright);
+  stroke: var(--select);
   stroke-width: 1.5;
   cursor: grab;
+  transform-box: fill-box;
+  transform-origin: center;
+  transition: transform var(--motion-fast) var(--ease-out);
+}
+/* A handle under the pointer grows a little. */
+.handle:hover {
+  transform: scale(1.25);
+}
+@media (prefers-reduced-motion: reduce) {
+  .handle {
+    transition: none;
+  }
 }
 /* A drag keeps its cursor until it ends, wherever the pointer goes; one that shows the open hand (a handle, a
    panel's header) shows the closed hand (cursor.ts, dragCursor). */
@@ -297,7 +331,7 @@ circle.mark {
 }
 /* Where Shift with the Arrow tool starts a joined arrow. */
 .handle.join {
-  fill: var(--brand-bright);
+  fill: var(--select);
 }
 /* The mark in a straight arrow's middle: smaller and fainter than a handle, until a click makes it a point. */
 .handle.add {
@@ -306,7 +340,7 @@ circle.mark {
   cursor: pointer;
 }
 .selection-marks rect {
-  fill: var(--brand-bright);
+  fill: var(--select);
 }
 .erase-marks rect {
   fill: var(--error);
@@ -328,6 +362,7 @@ rect.mark {
   overflow: hidden;
   resize: none;
   white-space: pre;
+  cursor: var(--cursor-text, text);
   -webkit-user-select: text;
   user-select: text;
 }
@@ -3424,12 +3459,12 @@ button.variant.add {
 /* The selection's frame and its resize handles: small squares at the corners and the middles of the sides. */
 .selection-frame {
   fill: none;
-  stroke: var(--brand-bright);
+  stroke: var(--select);
   stroke-width: 1;
 }
 .resize-handle {
   fill: var(--canvas);
-  stroke: var(--brand-bright);
+  stroke: var(--select);
   stroke-width: 1.25;
   transition: fill var(--motion-fast) var(--ease-out);
 }
@@ -3439,7 +3474,7 @@ button.variant.add {
 /* The selection's rotation handle (top right of the selection), and the angle (or the scale) shown while dragging. */
 .turn-handle circle {
   fill: var(--surface-raised);
-  stroke: var(--brand-bright);
+  stroke: var(--select);
   stroke-width: 1.25;
   transition: fill var(--motion-fast) var(--ease-out);
 }
@@ -3649,6 +3684,7 @@ button.variant.add {
   background: color-mix(in oklab, var(--canvas) 85%, transparent);
   outline: 1px solid var(--brand-bright);
   box-shadow: var(--shadow-focus);
+  cursor: var(--cursor-text, text);
   -webkit-user-select: text;
   user-select: text;
 }
@@ -3661,8 +3697,8 @@ button.variant.add {
 }
 /* A stoichiometry grid's cell picked with Select. */
 .grid-pick {
-  fill: var(--selection);
-  stroke: var(--brand-bright);
+  fill: var(--select-tint);
+  stroke: var(--select);
   stroke-width: 1px;
   vector-effect: non-scaling-stroke;
 }
@@ -3704,7 +3740,7 @@ button.variant.add {
   height: 140px;
   border-radius: var(--radius-sm);
   background-image: linear-gradient(to top, #000, transparent), linear-gradient(to right, #fff, transparent);
-  cursor: crosshair;
+  cursor: var(--cursor-cross, crosshair);
   touch-action: none;
 }
 .picker-hue {
@@ -4074,13 +4110,13 @@ button.variant.add {
 
 /* A TLC spot picked on its plate, for its colour, style and size. */
 .spot-picked {
-  stroke: var(--brand-bright);
+  stroke: var(--select);
   stroke-width: 2px;
   stroke-dasharray: 3 2;
 }
 /* The lane a picked plate's lane actions act on (the last one pressed or right-clicked). */
 .lane-picked {
-  fill: var(--brand-bright);
+  fill: var(--select);
   fill-opacity: 0.08;
 }
 
@@ -4353,7 +4389,7 @@ button.variant.add {
 }
 .spectrum-plot {
   min-width: 0;
-  cursor: crosshair;
+  cursor: var(--cursor-cross, crosshair);
   touch-action: none;
 }
 .spectrum-plot svg {
@@ -4547,6 +4583,11 @@ button.variant.add {
   display: grid;
   place-items: center;
   width: 32px;
+}
+/* A glyph turned round: a reversible step's back half longer. */
+.pick-turned {
+  display: grid;
+  transform: rotate(180deg);
 }
 /* The spectrum's details: how each shift was found, and how far to trust it. */
 .spectrum-details {
@@ -4745,6 +4786,28 @@ button.variant.add {
   font-size: 11px;
   font-variant-numeric: tabular-nums;
   text-align: center;
+}
+.export-big {
+  color: var(--error);
+}
+.export-pixels .times {
+  color: var(--ink-faint);
+}
+/* The resolution: the dpi typed, and the usual ones in a list beside it. */
+.dpi-field {
+  display: inline-flex;
+  gap: var(--space-1);
+  width: 140px;
+}
+.dpi-field .unit-field {
+  flex: 1;
+  width: auto;
+}
+.select-field.dpi-presets {
+  justify-content: center;
+  width: 28px;
+  min-width: 0;
+  padding: 0;
 }
 @media (prefers-reduced-motion: reduce) {
   .export-button {
@@ -5661,6 +5724,96 @@ button.variant.add {
   color: var(--ink-muted);
   font-weight: 500;
 }
+/* Home's Experiments list (Home.tsx): the search and Export CSV… beside its heading, then a table with a row for each
+   experiment page, its picture small at the start. Remove shows on the row under the pointer or with the focus. */
+.home-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+.home-search {
+  width: 200px;
+  margin: 0;
+}
+.home-table {
+  width: 100%;
+  border-collapse: collapse;
+  color: var(--ink);
+  font: 13px/18px var(--font-sans);
+  font-variant-numeric: tabular-nums;
+}
+.home-table th {
+  padding: 0 var(--space-2) var(--space-2);
+  color: var(--ink-muted);
+  font-weight: 500;
+  text-align: left;
+  white-space: nowrap;
+}
+.home-table td {
+  padding: var(--space-2);
+  border-top: 1px solid var(--hairline);
+  vertical-align: middle;
+}
+.home-table .num {
+  text-align: right;
+}
+.home-table tbody tr {
+  transition: background-color var(--motion-fast) var(--ease-out);
+}
+@media (hover: hover) and (pointer: fine) {
+  .home-table tbody tr:hover {
+    background: var(--surface-sunken);
+  }
+}
+.home-table tr.missing .home-thumb {
+  opacity: 0.5;
+}
+.home-cell-picture {
+  width: 64px;
+}
+.home-cell-picture .home-thumb {
+  width: 64px;
+  border-radius: var(--radius-sm);
+}
+.home-cell-picture .home-initial {
+  font-size: 20px;
+}
+.home-cell-open,
+.home-sort {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 100%;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+}
+.home-cell-open {
+  display: block;
+  color: var(--ink);
+  font-weight: 500;
+}
+.home-cell-open:focus-visible,
+.home-sort:focus-visible {
+  outline: none;
+  box-shadow: var(--shadow-focus);
+}
+.home-table .home-remove.home-cell-remove {
+  position: static;
+}
+.home-table tr:hover .home-cell-remove,
+.home-table tr:focus-within .home-cell-remove {
+  opacity: 1;
+}
+.home-none {
+  margin: 0;
+  color: var(--ink-muted);
+  font: 13px/18px var(--font-sans);
+}
 @media (prefers-reduced-motion: reduce) {
   .home-view:not(.home-arrive),
   .home-carry,
@@ -6061,4 +6214,33 @@ button.variant.add {
 @media (prefers-reduced-motion: reduce) {
   .paste-offer { animation: paste-offer-fade var(--motion-fast) linear; }
   @keyframes paste-offer-fade { from { opacity: 0; } }
+}
+/* What's new (WhatsNew.tsx): the notes scroll inside the dialog; each section a short list. */
+.notes {
+  max-height: min(60vh, 520px);
+  overflow-y: auto;
+  font-size: 13px;
+  line-height: 18px;
+}
+.notes:focus-visible {
+  outline: none;
+  box-shadow: var(--shadow-focus);
+}
+.notes p {
+  margin: 0 0 var(--space-2);
+}
+.notes h3 {
+  margin: var(--space-3) 0 var(--space-1);
+  font-size: 13px;
+  font-weight: 600;
+}
+.notes ul {
+  margin: 0;
+  padding-left: 16px;
+}
+.notes li + li {
+  margin-top: 2px;
+}
+.dialog:has(.notes) {
+  width: min(480px, calc(100vw - 32px));
 }

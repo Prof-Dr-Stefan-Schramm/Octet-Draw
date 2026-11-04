@@ -44,7 +44,8 @@ function drawn(smiles: string, metalText?: string): Mol {
 }
 function labelled(smiles: string, metalText?: string): Mol {
   const m = chem.parseStructure(smiles), tokens = [...smiles.matchAll(/\[[^\]]+\]|Cl|Br|[BCNOPSFI]|[bcnops]/g)].map((t) => t[0]);
-  assert.equal(tokens.length, m.atoms.length, `atoms of ${smiles}`);
+  // The atoms come in the SMILES's order, then any H drawn to carry a stereocentre's wedge (chem.ts placeWedges).
+  assert.equal(tokens.length, m.atoms.filter((a, i) => i < tokens.length || a.label !== "H").length, `atoms of ${smiles}`);
   const metal = new Set(tokens.flatMap((t, i) => (METALS.test(t) ? [i] : [])));
   const atoms = m.atoms.map((a, i) => {
     const h = /^\[([A-Z][a-z]?)H(\d*)/.exec(tokens[i]);

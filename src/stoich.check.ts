@@ -27,6 +27,7 @@ near(parseAmount("1.2", "equiv"), 1.2, "eq");
 near(parseAmount("98%", "purity"), 0.98, "%");
 assert.equal(parseAmount("lots", "mass"), undefined);
 assert.equal(parseAmount("5 mL", "mass"), undefined, "a volume is not a mass");
+assert.equal(parseAmount("1e999", "mass"), undefined, "an amount too large to be a number");
 assert.equal(formatAmount(0.25, "mass"), "250 mg");
 assert.equal(formatAmount(0.0125, "moles"), "12.5 mmol");
 assert.equal(formatAmount(0.9, "yield"), "90.0%");
@@ -34,6 +35,11 @@ assert.equal(formatAmount(0.9, "yield"), "90.0%");
 near(formulaWeight("H2O"), 18.015, "water");
 near(formulaWeight("NaBH₄"), 22.99 + 10.81 + 4 * 1.008, "subscript digits");
 near(formulaWeight("Ca(OH)2"), 40.078 + 2 * (15.999 + 1.008), "brackets");
+// Each part after a dot has its own number (issue 2): CuSO4·5H2O·NH3 is CuSO4 + 5 H2O + NH3.
+const cuso4 = 63.546 + 32.06 + 4 * 15.999, water = 2 * 1.008 + 15.999, ammonia = 14.007 + 3 * 1.008;
+near(formulaWeight("CuSO4·5H2O"), cuso4 + 5 * water, "a hydrate");
+near(formulaWeight("CuSO4.5H2O"), cuso4 + 5 * water, "a hydrate with a full stop");
+near(formulaWeight("CuSO4·5H2O·NH3"), cuso4 + 5 * water + ammonia, "two dots");
 near(formulaWeight("CuSO4·5H2O"), 63.546 + 32.06 + 4 * 15.999 + 5 * 18.015, "hydrate");
 assert.equal(formulaWeight("THF"), undefined, "an abbreviation is not a formula");
 // A product's equivalents are its coefficient: two moles of product for each mole of the limiting reactant.

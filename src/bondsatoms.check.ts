@@ -1,11 +1,13 @@
 // Run: node src/bondsatoms.check.ts. Fails loudly if the bond and atom options taken from ChemDraw 26.1 break:
 // quadruple and hydrogen bonds, crossing bonds, label alignment, hidden hydrogens and placed symbols, and their CDXML.
 import assert from "node:assert/strict";
-import { fromCdxml, toCdxml } from "./cdxml.ts";
+import { readFileSync } from "node:fs";
+import { fromCdxml, parseXml, toCdxml } from "./cdxml.ts";
+import { cdxToXml, xmlToCdx } from "./cdx.ts";
 import { DEFAULT_STYLE, darkColour, readStyle } from "./docstyle.ts";
 import { parse, serialize } from "./file.ts";
 import { problems, showWarnedHydrogens } from "./check.ts";
-import { addSymbol, lowerBond, atomAt, bondAt, bondOrders, cycleBond, deleteAtoms, flipAtoms, interpretLabels, labelWords, rotateAtoms, toFront, setBondSpec, setPosition, toggleHydrogens, toggleLonePairs } from "./edit.ts";
+import { addSymbol, markNear, moveMark, lowerBond, atomAt, bondAt, bondOrders, cycleBond, deleteAtoms, flipAtoms, interpretLabels, labelWords, rotateAtoms, toFront, setBondSpec, setPosition, toggleHydrogens, toggleLonePairs } from "./edit.ts";
 import { HBOND, QUADRUPLE, render, type Atom, type Bond, type Ink, type Mol } from "./render.ts";
 
 type P = [number, number];
@@ -259,6 +261,59 @@ console.log("bondsatoms.check: hidden hydrogens ok");
   assert.deepEqual(rotateAtoms(moved, new Set([1]), 90).atoms[0].angles, { pair0: 90 }, "an atom not turned keeps its marks");
 }
 console.log("bondsatoms.check: placed and styled symbols ok");
+
+// Charges, radicals and lone pairs moved by hand (Sam's feedback, November 2026): a drag with Select on a mark moves it
+// round its atom in 15° steps (free without Fixed Angles or with Option); it stays with the atom and keeps its place
+// in .oct, Octet's CDXML and ChemDraw's (the symbol's place round the atom).
+{
+  const L = S.bond;
+  const doc = (p: P) => [p[0] / L, -p[1] / L] as P;
+  const water: Mol = { atoms: [A("O", 0, 0, { pairs: 2 }), A("C", 1, 0)], bonds: [b(0, 1)] };
+  const e = render(water, S, ink).electrons.find((x) => x.key === "pair0")!;
+  assert.deepEqual(markNear(render(water, S, ink).electrons, water, doc(e.at), L), { atom: 0, mark: "pair0" }, "a press on the pair takes the pair");
+  assert.equal(markNear(render(water, S, ink).electrons, water, [0, 0], L), undefined, "a press on the atom takes the atom");
+  assert.equal(moveMark(water, 0, "pair0", [0.1, 1], true).atoms[0].angles?.pair0, 90, "15° steps");
+  assert.equal(moveMark(water, 0, "pair0", [0.1, 1], false).atoms[0].angles?.pair0, 84, "free");
+  const at = (m: Mol, key: string) => { const d = render(m, S, ink), x = d.electrons.find((y) => y.key === key)!, o = d.labelAt[0]; return Math.round((Math.atan2(o[1] - x.at[1], x.at[0] - o[0]) * 180) / Math.PI); };
+  // A carbocation's sign (a skeletal carbon's charge) moves too, and so do a circled charge and a radical.
+  const cation: Mol = { atoms: [A("C", 0, 0, { charge: 1 }), A("C", 1, 0), A("C", -0.5, 0.87)], bonds: [b(0, 1), b(0, 2)] };
+  assert.ok(markNear(render(cation, S, ink).electrons, cation, doc(render(cation, S, ink).electrons.find((x) => x.key === "charge")!.at), L), "the sign is a mark");
+  const up = moveMark(cation, 0, "charge", [0, -1], true);
+  assert.equal(at(up, "charge"), -90, "the sign goes below");
+  const marked = (more: Partial<Atom>): Mol => ({ atoms: [A("N", 0, 0, more), A("C", 1, 0)], bonds: [b(0, 1)] });
+  for (const [m, key, deg] of [[up, "charge", -90], [marked({ charge: 1, circled: true, angles: { charge: 180 } }), "charge", 180], [marked({ radical: 1, angles: { radical0: -135 } }), "radical0", -135], [marked({ pairs: 1, angles: { pair0: 45 } }), "pair0", 45]] as const) {
+    assert.equal(at(m, key), deg, `${key} drawn where it was put`);
+    assert.equal(parse(serialize(m)).atoms[0].angles?.[key], deg, `${key} in .oct`);
+    assert.equal(fromCdxml(toCdxml(m, DEFAULT_STYLE)).mol.atoms[0].angles?.[key], deg, `${key} in Octet's CDXML`);
+    assert.equal(roundTrip(m).atoms[0].angles?.[key], deg, `${key} from ChemDraw's symbol place`);
+    const plain = toCdxml(m, DEFAULT_STYLE).replace(/ Octet="[^"]*"/g, "").replace(/CreationProgram="[^"]*"/, "");
+    assert.equal(fromCdxml(cdxToXml(xmlToCdx(parseXml(plain)))).mol.atoms[0].angles?.[key], deg, `${key} in CDX`);
+    // It goes with its atom: moved, the mark keeps its angle beside it.
+    const moved: Mol = { ...m, atoms: m.atoms.map((a) => ({ ...a, location: [a.location[0] + 3, a.location[1] - 2, 0] })) };
+    assert.equal(at(moved, key), deg, `${key} follows its atom`);
+  }
+  // A singlet (carbene) pair is pair0 and the atom's lone pairs come after it, in the file as on the page.
+  const nitrene = marked({ radical: 3, pairs: 1, angles: { pair0: 90, pair1: -90 } });
+  assert.deepEqual(roundTrip(nitrene).atoms[0].angles, { pair0: 90, pair1: -90 });
+  // The same with the singlet's symbol after the lone pair in the file, as another program may write it.
+  const pairs = toCdxml(nitrene, DEFAULT_STYLE).replace(/ Octet="[^"]*"/g, "").replace(/CreationProgram="[^"]*"/, "").match(/<graphic[^>]*SymbolType="LonePair"[^>]*?(\/>|>.*?<\/graphic>)/g)!;
+  const swapped = toCdxml(nitrene, DEFAULT_STYLE).replace(/ Octet="[^"]*"/g, "").replace(/CreationProgram="[^"]*"/, "").replace(pairs[0] + pairs[1], pairs[1] + pairs[0]);
+  assert.ok(pairs.length === 2 && swapped.indexOf(pairs[1]) < swapped.indexOf(pairs[0]));
+  assert.deepEqual(fromCdxml(swapped).mol.atoms[0].angles, { pair0: 90, pair1: -90 }, "the singlet's pair is pair0 wherever it comes");
+  // Every mark on one atom at once keeps its own place.
+  const all = marked({ charge: 1, circled: true, radical: 1, pairs: 1, angles: { charge: 150, radical0: -30, pair0: 60 } });
+  assert.deepEqual(roundTrip(all).atoms[0].angles, { charge: 150, radical0: -30, pair0: 60 });
+}
+// A curved arrow drawn from a lone pair or radical starts on it (electronAt): a press there with Select picks the
+// arrow, and a picked arrow's handle comes before the mark, as in 1.0.29.
+{
+  const editor = readFileSync(new URL("Editor.tsx", import.meta.url), "utf8");
+  assert.match(editor, /const end = mark && arrowEndAt\(p\);\s*if \(end !== undefined\) return \{ arrow: end \};\s*if \(mark && !selection\.has\(mark\.atom\)\) return mark;/);
+  const down = editor.slice(editor.indexOf("const handle = tool !== \"erase\" ? handleAt(p) : undefined;"));
+  assert.ok(down.indexOf("handle && handle.which !== \"add\" ? undefined") > 0 && down.indexOf("handle && handle.which !== \"add\" ? undefined") < down.indexOf("setDrag({ kind: \"mark\""), "the handle before the mark");
+  assert.match(editor, /arrowEndAt\(p\) === undefined \? markNear\(/);
+}
+console.log("bondsatoms.check: marks moved by hand ok");
 
 // CD-28. The named palette is saved with the document, in Octet's data and in the CDXML colour table (ChemDraw's
 // document palette); Octet reads the names back. So is a background colour of the user's own.

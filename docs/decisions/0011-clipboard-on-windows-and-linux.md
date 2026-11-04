@@ -13,7 +13,7 @@ the picture change from system to system (`src-tauri/src/clipboard.rs`).
 
 | | macOS | Windows | Linux |
 | --- | --- | --- | --- |
-| Picture | PDF (vector, CDXML in it) | "PNG" and a bitmap (CF_DIB) | image/png and image/svg+xml |
+| Picture | PDF (vector, CDXML in it) | EMF (vector, CDXML in a comment) and a bitmap (CF_DIB) | image/png (CDXML in an iTXt chunk) and image/svg+xml |
 | CDX | ChemDraw's PerkinElmer, Revvity and CambridgeSoft types | "ChemDraw Interchange Format" | chemical/x-cdx |
 | CDXML | com.perkinelmer.cdxml, com.revvity.cdxml and com.cambridgesoft.cdxml | "CDXML" | chemical/x-cdxml |
 | Molfile | com.mdli.molfile (length-prefixed lines) | "MDLCT" (length-prefixed lines) | chemical/x-mdl-molfile (text) |
@@ -29,16 +29,18 @@ the picture change from system to system (`src-tauri/src/clipboard.rs`).
   Info.plist gives each code a Revvity and a CambridgeSoft name, and 22.2's a PerkinElmer and a CambridgeSoft
   name. The name macOS gives can be any of them, so Copy writes all three and Paste reads all three.
 - Paste reads Octet's JSON, then CDXML, then CDX, then the molfile, then SMILES, then the text the webview
-  gives, on every system.
+  gives, on every system. With no JSON or CDXML type, the CDXML comes out of the picture (4 November 2026): the
+  PDF, Keynote's copy of the PDF it was given (com.apple.iWork.TSPData.*), the EMF, Office's own copy of the
+  picture (a zip: "Art::GVML ClipFormat" on Windows, com.microsoft.Art--GVML-ClipFormat on the Mac), the PNG, or a
+  PDF, EMF or PNG file copied in Finder or the file manager. A PDF, EMF or PNG with CDXML in it also opens and drops
+  as the drawing, and Export puts the CDXML in all three.
 - Windows calls the clipboard through `windows-sys`; Linux through GTK (`gtk`), which the window already uses on
   X11 and Wayland. Both crates are in the build through Tauri already.
 
 ## Not done
 
-- A vector picture on Windows. Office for Windows takes vectors as EMF. Octet would need its own EMF writer,
-  and this Mac cannot show an EMF to check one.
-- A picture copied back out of Word on Windows does not paste back as a structure (the Mac's PDF carries the
-  CDXML; a PNG does not).
+- Not checked on Windows: whether Word's copy keeps the EMF's comment, and whether its zip holds the EMF as Octet
+  put it on. Paste tries both.
 
 ## Risks to check
 

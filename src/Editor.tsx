@@ -7,30 +7,30 @@ import {
   FileDashed, ArrowsLeftRight, Angle, CornersOut, Faders, FloppyDiskBack, Broom, Files, Unite, MagnetStraight, Paragraph, Resize, Ruler, GridFour, CrosshairSimple, Swatches, DotsNine, CompassTool, ArrowsVertical,
   EyeSlash, Repeat, CubeTransparent, ArrowsMerge, ArrowsInCardinal, FadersHorizontal, CaretLineUp, Sparkle, PencilRuler, CloudArrowDown, Bug, GraduationCap, CopySimple, IdentificationBadge, Key, FileCode, FileTxt, Notepad,
   File as PageIcon, CheckCircle, Asterisk, AsteriskSimple, BracketsSquare, SquaresFour, FlowArrow, BracketsRound,
-  TreeStructure, StarFour, Lightbulb, Prohibit, SelectionForeground, PaintRoller, WarningDiamond, TextTSlash, NotePencil, ArrowSquareOut, ImageSquare,
+  TreeStructure, StarFour, Lightbulb, Prohibit, SelectionForeground, PaintRoller, WarningDiamond, TextTSlash, NotePencil, ArrowSquareOut, ImageSquare, MarkdownLogo, Notebook,
 } from "@phosphor-icons/react";
 import { invoke } from "@tauri-apps/api/core";
-import { listen } from "@tauri-apps/api/event";
+import { listen } from "./listen";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { labelSmiles, GROUPS } from "./labels";
 import { analyse, chiralFlagOnly, structures, expandWithOrigins, stereoFacts, stereoLabels, smilesWeight, toMolfile, toReaction, toSdf, toInchiKey, type RxnStep, type Structure, cipOf, cleanUp, MOST_CLEAN, expandLabels, fragmentMasses, mapReaction, importStructure, toInchi, toInchiAux, measurer, parseStructure, ready, STYLE, textExtent, textWidth, toSmiles } from "./chem";
 import { MAX_PRINT_PAGES, MAX_PURPOSES, PURPOSES, QUICK, pagesOver, fontStack, pageSize, frameStyle, forPurpose, outlines as pageOutlines, purposeOf, readStyle, roundPt, sameStyle, styleFor, withScale, elementColours, COLOURS, FONTS, HIGHLIGHT_COLOURS, RING_FILLS, sizesAt, darkColour, type DocStyle, type Guides, type OwnPurpose, type PurposeKind } from "./docstyle";
 import { gridLines, gridNudge, gridOf, shownStep, snapToGrid } from "./grid";
 import { Rulers } from "./Rulers";
-import { messy, onCaptions, problems, showWarnedHydrogens, WARNING_TYPES, type Problem, type WarningType } from "./check";
+import { hiddenWarnings, hideProblems, MARK, messy, onCaptions, problemAt, problems, showWarnedHydrogens, showWarnings, WARNING_TYPES, type Problem, type WarningType } from "./check";
 import { parse, serialize } from "./file";
 import {
-  EMPTY, extent, stack, addArrow, addCaption, addCycle, addCharge, addRing, lowerBond, updateArrow, deleteGraphics, inPolygon, nextNumber, updateCaption, atomAt, atomsIn, bondAt, bounds, complete, deleteAtom, deleteAtoms, deleteBond, erase, flipBond,
+  EMPTY, extent, stack, addArrow, addCaption, addCycle, addCharge, addRing, lowerBond, updateArrow, deleteGraphics, deleteChosen, inPolygon, nextNumber, updateCaption, atomAt, atomsIn, bondAt, bounds, complete, deleteAtom, deleteAtoms, flipBond,
   addChair, addGroup, addLane, addTemplate, alignFragments, cutReaction, deleteLane, moveLane, restyleSpot, atomsInPolygon, flipAtoms, fragments, joinOverlaps, joinSelection, setLabel, merge, moveAtoms, neighbours, onSelection, pos, setBondSpec, setElement, setPosition, sprout, subset,
-  addShape, addSymbol, bondOrders, toggleHydrogens, freePairs, nextDirection, appendCurvePoint, moveCurvePoint, nearestOnCurve, removeCurvePoint, splitCurve, withCurve, setAtomMarks, toggleLonePairs, updateShape, type BondSpec, type Group, type P, type SymbolKind, newTable, resizeTable, setTableCell, expandLabel, contractLabel, spliceTable, sizeTable, fitTable, clearTable, pairMap, clearMap, scaleSettings, scaleSizes, transformParts, medianBond, fitSizes, scaleAt, stereocentres, setEnhanced, markDirections, tiltAtoms, turnAboutBond, flattenAtoms, hingeOf, carryDepth, groupsOf, groupSelection, ungroupSelection, duplicateSelection, extractSelection, insertMol, inRow, wholeIntegral, wholeGroups, groupTargets, selectedGroups, outermost, outerGroups, pivotOf,
-  toFront, addChain, chainPoints, chainThrough, snake, clickBond, dragBond, addGroupAt, farBond, jumpHot, keepHot, walkHot, type Hot, keyElement, placeCentres, pickAtoms, nextGroup,
+  addShape, addSymbol, markNear, moveMark, bondOrders, toggleHydrogens, freePairs, nextDirection, appendCurvePoint, moveCurvePoint, nearestOnCurve, removeCurvePoint, splitCurve, withCurve, setAtomMarks, toggleLonePairs, updateShape, type BondSpec, type Group, type P, type SymbolKind, newTable, resizeTable, setTableCell, expandLabel, contractLabel, spliceTable, sizeTable, fitTable, clearTable, pairMap, clearMap, scaleSettings, scaleSizes, transformParts, medianBond, fitSizes, scaleAt, stereocentres, setEnhanced, markDirections, tiltAtoms, turnAboutBond, flattenAtoms, hingeOf, carryDepth, groupsOf, groupSelection, ungroupSelection, duplicateSelection, extractSelection, insertMol, inRow, wholeIntegral, wholeGroups, groupTargets, selectedGroups, outermost, outerGroups, pivotOf,
+  toFront, addChain, chainPoints, chainThrough, snake, clickBond, keyBond, dragBond, addGroupAt, farBond, jumpHot, keepHot, walkHot, type Hot, keyElement, placeCentres, pickAtoms, nextGroup,
 } from "./edit";
 import { snapBoxes, snapMove, type Guide } from "./snap";
 import { clean3d, MOST_3D } from "./clean3d";
 import { arrowTrace, kept, lobesOf, nearTrace, shapeTrace } from "./hit";
 import { store, type Store } from "./store";
 import { loadSettings, RULER_UNITS, saveSettings, SETTINGS_KEY } from "./settings";
-import { Menu, menuWidth } from "./Menu";
+import { ContextMenu, Menu, menuWidth } from "./Menu";
 import { ACTIONS, actionFor, controlTakes, feedbackChord, keyOf, keymap, label as keyLabel, menuRuns, native, platformLabel, registerMenu, textEntry, textKey, toAccelerator } from "./keys";
 import { Actions, ActionsMenu, actionItems, FontPick, SearchGlyph, type Context } from "./Actions";
 import { onTop, reorder } from "./order";
@@ -51,6 +51,9 @@ import { fromCdxml, parseXml, toCdxml, type CdxmlOptions } from "./cdxml";
 import { isDrawingText, lostText, readCdx, readOct, writeCdx, writeOct } from "./oct";
 import { BASE64_MAGIC, fromBase64, hexToBase64, toBase64, xmlToCdx } from "./cdx";
 import { About } from "./About";
+import { WhatsNew } from "./WhatsNew";
+import { notesFor } from "./releases";
+import { version } from "../package.json";
 import { Home, NameBox, type RecentEntry, type RecoveredEntry, type OpenWindow } from "./Home";
 import { useHomeLibrary } from "./homeLibrary";
 import { call as homeCall, HOME_API } from "./homeApi";
@@ -59,9 +62,10 @@ import { Feedback } from "./Feedback";
 import { ExportButton, ExportDialog } from "./ExportDialog";
 import { FeedbackLink } from "./FeedbackLink";
 import { createPortal, flushSync } from "react-dom";
-import { copyToClipboard, exportFile, MDL, readClipboard, standaloneSvg, UI, withMargin, type ExportFormat } from "./export";
+import { CARRY_CDXML, copyToClipboard, exportFile, MDL, pictureAs, readClipboard, standaloneSvg, UI, type ExportFormat } from "./export";
 import { FULL, kindOf, MAX_PICTURE, pictureBytes, pictureMol, readPicture } from "./picture";
 import { formatAmount, formulaWeight, keyColumns, parseAmount, solve, type Field } from "./stoich";
+import { FIELDS as DETAILS, detailsLayout, detailsOf, experimentPage, experimentsCsv, markupCaption, markupRuns, newExperiment, newGrids, templateOf, withDetails, type Details, type ExperimentEntry } from "./experiment";
 import { logS, properties as calculate } from "./props";
 import type { Graph } from "./naming";
 import { CommandPalette, type Command } from "./CommandPalette";
@@ -70,15 +74,15 @@ import { cleanUpReaction, cleanUpReactions, findReaction, gapFor, layoutRow, rea
 import { alignByMap, clearScheme, interpret, mapScheme, rolesOf, type Part, type Role, type RoleStep } from "./interpret";
 import { SEARCHES, searchNow, searchQuery } from "./search";
 import { moduleOf, SettingsWindow, type ModuleId } from "./SettingsWindow";
-import { addStop, angleAbout, breakAt, isSide, joinCycles, layoutCycles, onStep, orderAround, removeStop, sideAt as sidePlace, sideFor, sideReach, spreadCycle, stepAt, textOn, type Cycle, type CycleLayout, type CycleText } from "./cycle";
+import { addBranch, addSide, addStop, angleAbout, attachBeside, branchFor, branchHeads, branchOf, breakAt, clearAt, cycleAtoms, dragEnd, dragMeet, dropOnCycle, followArcs, isSide, labelEnd, layoutCycles, orderAround, pullBranch, removeEnd, removeStop, resizeCycle, setBranch, setEnd, setEnds, setStep, sideChoices, sideFor, spreadCycle, stepAt, stepFor, structureMeet, swapBranch, textOn, withEnd, type Cycle, type CycleBranch, type CycleLayout, type CycleText } from "./cycle";
 import { LIBRARY, libraryItem, type LibraryItem } from "./library";
 import { BracketGlyph, BRACKETS, bracketSpec, ElementGlyph, ORBITAL_GRID, OrbitalGlyph, orbitalName, orbitalSpec, SHAPE_EXTRA, SHAPE_GRID, shapeName, shapeSpec } from "./elements";
 import {
-  ArrowGlyph, arrowName, arrowVariant, BondGlyph, BONDS, ChainGlyph, CYCLES, ELLIPSES, HOLD_MS, Palette, pickHead, RingGlyph, RINGS, SELECTS, STRAIGHT, SymbolGlyph, SYMBOLS, TemplateGlyph,
+  ArrowGlyph, arrowName, arrowVariant, BondGlyph, BONDS, ChainGlyph, CYCLES, ELLIPSES, HOLD_MS, Palette, pickHead, RingGlyph, RINGS, SELECTS, SideGlyph, STRAIGHT, SymbolGlyph, SYMBOLS, TemplateGlyph,
   type ArrowPick, type BondKind, type RingKind, type SelectKind, type Tool,
 } from "./tools";
 import { arrowPath, arrowShapes, bendPoint, blockOutline, curved, ellipseArrow, headBarb, headSize, sizeOf, sizedHead, turnPx, scaleOf, fitArrows, HIGHLIGHT, SHADE, inShape, inDrawn, shapeBounds, turns, tlcLayout, spotPath, tableLayout, linesOf, TABLE_LINES, TABLE_PAD, curveBox, headsOf, takesHeads, isBracket, isLine, isOrbital, markAt, straightArrow, shapeInk, SWEEPS, sweepBend, sweepOf, isNumber, labelTurn, placeCaptions, render, renderParts, type Arrow, type ArrowKind, type Atom, type Bond, type Box, type Drawing, type PartCache, type Caption, type CurvePoint, type Head, type HeadShape, type CurveFill, type Mol, type Placed, type Shape, type ShapeKind, type Spot, type TableLine, type CellAlign, polymerLabelsAt, type AtomQuery, type BracketUsage, type Polymer, type Grid, ASCENT, DESCENT } from "./render";
-import { dragCursor, rotateCursor, selectCursor } from "./cursor";
+import { cursorColour, dragCursor, drawCursors, type Cursors } from "./cursor";
 import { CURSORS, handlePoint, isCorner, percentOf, resizeBy, sideAt, SIDES, type Box as RBox, type Side } from "./resize";
 import { abbreviationOf, cleanOwnName, loadNames, mergeOwnNames, nameToSmiles, nameToAtoms, namesStarting, ownName, ownNamesFile, readOwnNamesFile, renameOwnName, setOwnNames, suggestName, knownName, looksLikeSmiles, withOwnName, withoutOwnName, type OwnName } from "./names";
 import { isTemplateFile, readTemplateFile, writeTemplateFile } from "./ctp";
@@ -110,6 +114,8 @@ import { Exit, reduced, timing, tween } from "./motion";
 import { between, MOST_GLIDE, moving } from "./glide";
 import { Tooltips } from "./Tooltip";
 import { failure, fileName, type NoticeKind } from "./notice";
+import { history, type History } from "./history";
+import { logError } from "./crashlog";
 import "./editor.css";
 
 
@@ -128,20 +134,6 @@ let pageSheet: CSSStyleSheet | undefined;
 // In the app, copy and paste go through the app (src-tauri/src/clipboard.rs), with the types ChemDraw and Office use
 // on each system (REL-3, CH-1). In a browser (dev only), the page uses the browser's clipboard.
 const NATIVE_CLIP = TAURI;
-
-// Undo history: every edit pushes a new Mol; undo and redo move along the list.
-// merge: edits with the same key one after another (a slider being dragged) make one step.
-type History = { stack: Mol[]; at: number; merge?: string };
-type Action = { type: "set"; mol: Mol; merge?: string } | { type: "undo" } | { type: "redo" } | { type: "reset"; h: History };
-function history(h: History, a: Action): History {
-  // A drawing of its own with its own steps (a template opened to edit), or the drawing set aside for it, back.
-  if (a.type === "reset") return a.h;
-  if (a.type === "undo") return { ...h, at: Math.max(0, h.at - 1), merge: undefined };
-  if (a.type === "redo") return { ...h, at: Math.min(h.stack.length - 1, h.at + 1), merge: undefined };
-  if (a.mol === h.stack[h.at]) return h;
-  if (a.merge && a.merge === h.merge && h.at === h.stack.length - 1 && h.at > 0) return { stack: [...h.stack.slice(0, h.at), a.mol], at: h.at, merge: a.merge };
-  return { stack: [...h.stack.slice(0, h.at + 1), a.mol], at: h.at + 1, merge: a.merge };
-}
 
 const L = STYLE.bond; // px per bond length at 100%
 // The largest structure the canvas for screen readers names (access.ts): naming a larger one could hold up the window.
@@ -165,17 +157,24 @@ const paperOf = (d: DocStyle, systemDark: boolean) => {
   const paper = d.background === "system" ? (systemDark ? "dark" : "white") : own ? (darkColour(own) ? "dark" : "white") : d.background;
   return { own, paper, dark: paper === "dark" || paper === "blueprint" };
 };
+// The page colour a raster export can put behind the drawing: the drawing's own light colour. Exports draw in black
+// ink, so a dark page has none.
+const pageColour = (d: DocStyle) => (d.background.startsWith("#") && !darkColour(d.background) ? d.background : undefined);
 
 // A line, arc or orbital drawn the way arrows are: its kind, its bend for one sweep (signed by the drag), its style.
 type Make = { kind: "line" | "arc" | "orbital" | "cut"; bend?: number; style?: Arrow["style"]; orbital?: Arrow["orbital"] };
 // A handle: an arrow's ends or middle, or a picked caption's width. head: the barb of an arrow's end head, which
 // sizes the head. add: the mark in a straight arrow's middle, which a click turns into a point (and only then does
 // the arrow bend). A pen curve's point i: its anchor (at) or one of its handles (c1 in, c2 out).
-// end, meet and tail: a cycle's reagent or product's arrow: its outer end, where it touches the arc, and its tail.
-type Corner = "from" | "to" | "bend" | "width" | "head" | "add" | "end" | "meet" | "tail" | `p${number}:${"at" | "c1" | "c2"}`;
+// meet, end:in and end:out: a cycle's side arrow: where it touches the arc, and its end coming in and going out.
+// lead, trail and bow: a cycle step's arc: its start, its end and its middle (the space after and before its
+// intermediates, and how far it bows).
+type Corner = "from" | "to" | "bend" | "width" | "head" | "add" | "meet" | "end:in" | "end:out" | "lead" | "trail" | "bow" | `p${number}:${"at" | "c1" | "c2"}`;
 // arrow: an arrow or a shape (they share ids).
-// key: the keyboard hotspot (ChemDraw's), put there by a key rather than by the pointer.
-type Hover = { atom?: number; bond?: number; caption?: number; arrow?: number; cycle?: number; step?: number; key?: true };
+// key: the keyboard hotspot (ChemDraw's), put there by a key rather than by the pointer. branch and part: a cycle's side
+// arrow, and its half coming in or going out. mark: with Select, the atom's charge, radical or lone pair (its key in
+// Atom.angles) under the pointer, which a drag moves round the atom.
+type Hover = { atom?: number; bond?: number; caption?: number; arrow?: number; cycle?: number; step?: number; branch?: number; part?: "in" | "out"; key?: true; mark?: string };
 const hitIn = (m: Mol, p: P): Hover => {
   const atom = atomAt(m, p);
   return atom !== undefined ? { atom } : { bond: bondAt(m, p) };
@@ -186,10 +185,6 @@ const atomsOf = (m: Mol, t: Hover) => (t.atom !== undefined ? [t.atom] : t.bond 
 // Text set as a formula (K2CO3 as K₂CO₃): a cycle's reagents, products, centre label and text intermediates, not its
 // steps' names.
 const asFormula = (c: Caption) => !!c.cycle && c.cycle.side !== "name";
-// Whether a reagent's or product's arrow is one with the other's on its step, and whether it passes through the cycle
-// (paired, or given a tail).
-const paired = (m: Mol, t: CycleText) => t.through !== false && !!m.captions?.some((x) => x.cycle?.cycle === t.cycle && x.cycle.step === t.step && isSide(x.cycle) && x.cycle.side !== t.side && x.cycle.through !== false);
-const passes = (m: Mol, t: CycleText) => t.through === true || paired(m, t);
 const itemsOf = (t: Hover) => [t.caption, t.arrow, t.cycle].filter((x): x is number => x !== undefined);
 
 // One pointer gesture. "working" kinds edit a copy of the drawing that commits as one undo step on release.
@@ -210,16 +205,20 @@ type Drag =
   // captions: where each moving caption starts (drawing coordinates), for captions that do not simply follow their structure.
   // base and atoms: what is moved, when it is not the drawing and the selection (Option-drag moves new copies).
   // snap: the boxes snapping uses, made at the first move (a click does not need them) and kept for the drag.
-  | { kind: "move"; from: P; working: Mol; moved: boolean; start: [number, number]; target: Hover; guides: Guide[]; point?: P; captions: Map<number, P>; arrows: Set<number>; cycles: Set<number>; snap: () => { moving: number[]; targets: number[][] } | undefined; base?: Mol; atoms?: Set<number> }
+  | { kind: "move"; from: P; working: Mol; moved: boolean; start: [number, number]; target: Hover; guides: Guide[]; point?: P; captions: Map<number, P>; arrows: Set<number>; cycles: Set<number>; snap: () => { moving: number[]; targets: number[][] } | undefined; base?: Mol; atoms?: Set<number>; skip?: boolean }
   // Drawing an arrow, and dragging one of a picked arrow's handles (an end, or the middle of a curved one).
   // corners: a Mass spec analysis line's corners so far (a key pressed during the drag adds one where the pointer is);
   // longer: the line whose end the drag started from, which it makes longer.
   | { kind: "arrow"; from: P; start: [number, number]; target: Hover; to?: P; trail?: P[]; side?: number; make?: Make; alt?: boolean; corners?: P[]; longer?: { id: number; end: "from" | "to" } }
   // Drawing a shape from corner to corner.
   | { kind: "shape"; from: P; start: [number, number]; target: Hover; to?: P }
-  // The Cycle tool: a circle drawn out from its centre, or a click on a circle.
-  | { kind: "cycle"; from: P; start: [number, number]; target: Hover; to?: P }
-  | { kind: "handle"; id: number; which: Corner; working: Mol }
+  // The Cycle tool: a circle drawn out from its centre, or a click on a circle. pull: a side arrow pulled out of a step's
+  // arc where it was pressed (meet), as it would be with the pointer where it is. shift: pressed with Shift; radius: the
+  // drawing with the circle pressed on sized out to the pointer.
+  | { kind: "cycle"; from: P; start: [number, number]; target: Hover; to?: P; pull?: { cycle: number; step: number; meet: number; made?: ReturnType<typeof pullBranch> }; shift?: boolean; radius?: Mol }
+  // step and branch: a cycle step's or side arrow's handle (id is the cycle). from and start: where it was pressed
+  // (drawing coordinates, screen).
+  | { kind: "handle"; id: number; which: Corner; working: Mol; step?: number; branch?: number; from?: P; start?: [number, number] }
   // Placing a pen point: where it was pressed, and its outgoing handle if the press was dragged.
   | { kind: "pen"; at: P; start: [number, number]; out?: P }
   // Structure Perspective: tilting atoms through 3D from where they were (base), about their centre, or turning part
@@ -228,8 +227,9 @@ type Drag =
   | { kind: "spot"; plate: number; index: number; base: Mol; from: P; size: boolean; moved: boolean; working: Mol }
   | { kind: "tlcline"; plate: number; which: "origin" | "front"; base: Mol; working: Mol }
   | { kind: "lane"; plate: number; from: number; to: number; base: Mol; working: Mol } // a lane dragged by its origin tick
-  // A mark (lone pair, radical, circled or partial charge) moved round its atom by Shift-drag, by its key (Atom.angles).
-  | { kind: "mark"; atom: number; key: string; base: Mol; working: Mol }
+  // A mark (lone pair, radical, charge) moved round its atom, by its key (Atom.angles): dragged with Select (a hold
+  // with any tool gives Select), or Shift-dragged with the Symbols tool.
+  | { kind: "mark"; atom: number; key: string; start: [number, number]; base: Mol; working: Mol }
   // Tables: a column or row border dragged with the Table tool (index 0 is the left or top edge).
   | { kind: "tableedge"; id: number; axis: "col" | "row"; index: number; base: Mol; working: Mol }
   | { kind: "tilt"; base: Mol; ids: Set<number>; centre: [number, number, number]; start: [number, number]; hinge?: [number, number]; working: Mol }
@@ -256,7 +256,7 @@ type View = { x: number; y: number; zoom: number; pinch?: boolean };
 // molfile: V2000, as ChemDraw puts it on the clipboard; mol, sdf, rxn and rdf: V3000 (or V2000 with 2000), as ChemDraw
 // 26.1 saves them.
 type PartFormat = "cdxml" | "cdx" | "oct" | "molfile" | "smiles" | "inchi" | "mol" | "mol2000" | "sdf" | "sdf2000" | "rxn" | "rxn2000" | "rdf" | "rdf2000";
-const sameHover = (a: Hover, b: Hover) => a.atom === b.atom && a.bond === b.bond && a.caption === b.caption && a.arrow === b.arrow && a.cycle === b.cycle && a.step === b.step && a.key === b.key;
+const sameHover = (a: Hover, b: Hover) => a.atom === b.atom && a.bond === b.bond && a.caption === b.caption && a.arrow === b.arrow && a.cycle === b.cycle && a.step === b.step && a.branch === b.branch && a.part === b.part && a.key === b.key && a.mark === b.mark;
 const nothing = (t: Hover) => t.atom === undefined && t.bond === undefined && t.caption === undefined && t.arrow === undefined && t.cycle === undefined;
 // Ink as SVG path data, kept with the arrow or shape it is made from, for each document style.
 const arrowInks = new WeakMap<Arrow, [unknown, string]>(), shapeInks = new WeakMap<Shape, [unknown, string]>(), outlines = new WeakMap<object, [unknown, string]>(), blockOutlines = new WeakMap<Arrow, [unknown, P[]]>();
@@ -409,6 +409,9 @@ const namedMol = (name: string): Mol | undefined => {
   namedMols.set(name, m);
   return m;
 };
+// Structures for names typed in Name to Structure or the command palette, laid out once each (structureFor), so a
+// keystroke that gives the same name again does not lay it out again.
+const typedMols = new Map<string, Mol | undefined>();
 const namedOf = (kind: string) => { const name = kindName(kind); return name ? namedMol(name) : undefined; };
 // The tools that work on an atom also work on a caption that counts as chemistry (edit.ts chemicalCaption), made an
 // atom when they press it. elementSteps names the undo step each press makes.
@@ -469,7 +472,9 @@ export const rescue: { current?: { h: History; file: FileState; home: boolean; n
 // Crash safety (REL-1): while the drawing has unsaved changes, a copy of it goes to the app's data folder
 // (src-tauri/src/recovery.rs), a second after an edit and then at most every 10 s. When the drawing is clean again
 // (saved, or replaced after Don't Save) the copy goes. Calls go one after another, so a late write never follows a clear.
-const keeper = { timer: 0, last: 0, kept: false, queue: Promise.resolve() as Promise<unknown>, write: () => {} };
+// kept is set before the write ends, so a clear always follows a write that is still under way. told: the user heard
+// that recovery failed (once for each window).
+const keeper = { timer: 0, last: 0, kept: false, told: false, queue: Promise.resolve() as Promise<unknown>, write: () => {} };
 function keep<T>(command: string, args?: Record<string, unknown>): Promise<T> {
   const run = keeper.queue.then(() => invoke<T>(command, args));
   keeper.queue = run.catch(() => {});
@@ -538,7 +543,7 @@ export default function Editor() {
   const [pop, setPop] = useState<{ n: number; x: number; y: number }>();
   // While a press may become a hold: a thin ring at the pointer fills as the hold time goes (FEEL-37).
   const [holding, setHolding] = useState<{ n: number; x: number; y: number }>();
-  const [cursor, setCursor] = useState<string>();
+  const [cursors, setCursors] = useState<Record<"black" | "white", Cursors>>();
   const [settings, setSettings] = useState(loadSettings);
   const drawingPrefs = useMemo(() => ({ fixedLengths: settings.fixedLengths, fixedAngles: settings.fixedAngles, sproutRings: settings.sproutRings, clickTriple: settings.clickTriple, pairBars: settings.pairBars,
     autoMap: settings.autoMap, stereoParens: settings.stereoParens, hideAbs: settings.hideAbs, mdlFlags: settings.mdlFlags, aromaticOnOpen: settings.aromaticOnOpen }),
@@ -586,7 +591,7 @@ export default function Editor() {
     const kind = contextOf().kind;
     if (kind !== "atom" && kind !== "bond") return selectedPart();
     const [atoms, items] = wholeIntegral(doc, new Set(fragments(doc).filter((g) => g.some((i) => selection.has(i))).flat()), picked);
-    return extractSelection(doc, atoms, items, drawnAt);
+    return extractSelection(doc, atoms, items, drawnAt, drawnAlign);
   };
   // Add in My templates or a set of the user's: the selection goes in at once. With nothing selected, the library gets
   // out of the way and the next structure clicked goes in (templatePick); Escape stops it.
@@ -705,6 +710,7 @@ export default function Editor() {
     ownNamesFor.current = settings.dictionary;
     setOwnNames(settings.dictionary);
     namedMols.clear();
+    typedMols.clear();
   }
   // Add to dictionary (right-click, the Actions panel, or Structure > Add Structure to Dictionary…): the selected
   // structure (or, with an atom or bond picked, its whole structure) is kept by a name the user gives (Dialog), with its
@@ -732,7 +738,7 @@ export default function Editor() {
       if (!picked) return;
       await ready;
       const read = readOwnNamesFile(picked[1]).flatMap((n) => {
-        try { const m = parseStructure(n.smiles); return m.atoms.length ? [{ ...n, inchi: toInchi(m) || undefined }] : []; } catch { return []; }
+        try { const m = parseStructure(n.smiles, false); return m.atoms.length ? [{ ...n, inchi: toInchi(m) || undefined }] : []; } catch { return []; }
       });
       if (!read.length) return setNotice(`There are no names in ${picked[0]}. Octet reads a SMILES file with a name after each SMILES.`);
       const merged = mergeOwnNames(settings.dictionary, read);
@@ -803,8 +809,10 @@ export default function Editor() {
   // selection's rotation handle, a table border with the Table tool (which way it drags), and a page's edge. It
   // changes as the pointer moves, so it lives in a store too.
   // join: where Shift with the Arrow tool would start an arrow joined to another (an end, or a middle point).
-  const [overs] = useState(() => store<{ selection: boolean; turn: boolean; edge?: "col" | "row"; page?: string; resize?: Side; join?: P; cross?: boolean }>({ selection: false, turn: false },
-    (a, b) => a.selection === b.selection && a.turn === b.turn && a.edge === b.edge && a.page === b.page && a.resize === b.resize && a.join?.[0] === b.join?.[0] && a.join?.[1] === b.join?.[1] && a.cross === b.cross));
+  // cycle: the cycle the Cycle tool is over, whose handles show. grab: the Cycle tool is over a structure or text, which
+  // a press moves.
+  const [overs] = useState(() => store<{ selection: boolean; turn: boolean; edge?: "col" | "row"; page?: string; resize?: Side; join?: P; cross?: boolean; cycle?: number; grab?: boolean }>({ selection: false, turn: false },
+    (a, b) => a.selection === b.selection && a.turn === b.turn && a.edge === b.edge && a.page === b.page && a.resize === b.resize && a.join?.[0] === b.join?.[0] && a.join?.[1] === b.join?.[1] && a.cross === b.cross && a.cycle === b.cycle && a.grab === b.grab));
   // Where the eraser outline is drawn (drawing coordinates), while the Eraser is in hand. It follows the pointer, so
   // it lives in a store too.
   const [brushes] = useState(() => store<P | undefined>(undefined));
@@ -825,6 +833,8 @@ export default function Editor() {
   const lastLabel = useRef<string>(undefined);
   // The bond tool's last click on an atom, and the drawing it made: a second click there soon after is a double-click.
   const lastClick = useRef<{ atom: number; time: number; after: Mol }>(undefined);
+  // The Cycle tool's last click on an arc (a break, or a step made reversible): the step, when, and the drawing it made.
+  const lastArc = useRef<{ cycle: number; step: number; time: number; after: Mol }>(undefined);
   // Select's last click on an atom or bond: a second click on it soon after is a double-click. The browser sends no
   // double-click when the first click drew the selection over what the second click presses.
   const lastPick = useRef<{ on: string; time: number }>(undefined);
@@ -899,13 +909,11 @@ export default function Editor() {
   const cellOpen = useRef(false);
   const cellInput = useRef<HTMLInputElement>(null);
   useEffect(() => { cellInput.current?.select(); }, [cell?.id, cell?.r, cell?.c]);
-  useEffect(() => { selectCursor.then(setCursor); }, []);
-  const [turnCursor, setTurnCursor] = useState<string>();
-  useEffect(() => { rotateCursor.then(setTurnCursor); }, []);
+  useEffect(() => { drawCursors().then(setCursors); }, []);
   // A drag on the canvas keeps its cursor wherever the pointer goes until it ends: the closed hand for a handle, the
-  // arrows for a resize, a turn or a table's edge, else the cursor the canvas showed at the press (not the Eraser's
-  // none, which would lose the pointer over a panel).
-  const dragShows = drag?.kind === "handle" ? "grabbing" : drag?.kind === "resize" ? CURSORS[drag.side] : drag?.kind === "turn" ? turnCursor
+  // arrows for a resize or a table's edge, else the cursor the canvas showed at the press, as the rotation arrow for a
+  // turn (not the Eraser's none, which would lose the pointer over a panel).
+  const dragShows = drag?.kind === "handle" ? "grabbing" : drag?.kind === "resize" ? CURSORS[drag.side]
     : drag?.kind === "move" ? "move" : drag?.kind === "tableedge" ? `${drag.axis}-resize` : undefined;
   useEffect(() => {
     const shows = drag && (dragShows ?? (svg.current && getComputedStyle(svg.current).cursor));
@@ -937,12 +945,21 @@ export default function Editor() {
   // Returns the drawing as it goes in the history. joinNext: the step that edits during the press under way join (a
   // caption made an atom by a bond tool, then the bond drawn from it).
   const joinNext = useRef<string>(undefined);
-  const set = (mol: Mol, keepSelection = false, merge = joinNext.current) => {
-    // A structure or text an edit moves or adds onto a catalytic cycle's circle joins the cycle (joinCycles).
-    const moved = (m: Mol) => (i: number) => { const a = doc.atoms[i]?.location, b = m.atoms[i].location; return !a || a[0] !== b[0] || a[1] !== b[1]; };
-    const movedText = (c: Caption) => { const was = doc.captions?.find((x) => x.id === c.id); return !was || was.x !== c.x || was.y !== c.y; };
+  // A structure or text an edit moves or adds onto or beside a catalytic cycle joins it (dropOnCycle). A drag shows
+  // the same before it is let go. A caption's box: its own text's, where it is now (a side arrow's text, where its end
+  // was dragged).
+  const dropBox = (c: Caption): Box => {
+    if (isSide(c.cycle)) return [c.x, c.y, c.x, c.y];
+    const size = (c.size ?? style.captionSize) / style.bond, lines = c.text.split("\n"), w = Math.max(...lines.map((t) => textWidth(t, size, c.bold, c.italic, fontStack(c.font ?? style.captionFont)))), x = c.x - (c.align === "right" ? w : c.align === "centre" ? w / 2 : 0);
+    return [x, c.y - (lines.length - 0.75) * 1.2 * size, x + w, c.y + 0.75 * size];
+  };
+  const dropped = (m: Mol, skip = false, placed = false) => (m.cycles?.length ? dropOnCycle(m, fragments(m), doc, { skip, placed, box: dropBox, bond: style.bond }) : m);
+  // drop false: ⌘ was held, so nothing joins a cycle. "placed": what the edit adds went where the pointer aimed, so it
+  // joins a cycle as a structure dragged there does.
+  const set = (mol: Mol, keepSelection = false, merge = joinNext.current, drop: boolean | "placed" = true) => {
     const fitted = placeCentres(carryDepth(doc, settings.warnings ? showWarnedHydrogens(mol) : mol));
-    const next = onTop(doc, wholeGroups(fitted.cycles?.length ? joinCycles(fitted, fragments(fitted), moved(fitted), movedText) : fitted), fragments);
+    // On an experiment page, a reaction drawn in this drawing (not one opened) gets its stoichiometry grid at once.
+    const ordered = onTop(doc, wholeGroups(dropped(fitted, !drop, drop === "placed")), fragments), next = expPage && mol.style === doc.style ? newGrids(doc, ordered) : ordered;
     dispatch({ type: "set", mol: next, merge });
     if (!keepSelection) { setSelection(new Set()); setPicked(new Set()); }
     return next;
@@ -950,10 +967,11 @@ export default function Editor() {
   // The drawings made by a scale of the whole drawing, each with how far it zoomed the view (commitScale). Undo and redo
   // of such a scale zoom back and again, so the drawing and the page look as they did.
   const zoomedBy = useRef(new WeakMap<Mol, number>());
-  // Clean up, Rotate 180°, Flip, a turn of 15° or more, Align, Distribute and Line up glide into place (FEEL-38). The
-  // drawing changes at once, as one undo step. Only the picture on screen moves to it (glide). There is no glide with
-  // reduced motion, with more than MOST_GLIDE atoms moving, or for a command that comes again before the last glide is
-  // over (a key held down). path: the way there when it is not a straight line (a turn); false: no glide.
+  // Clean up, Rotate 180°, Flip, a turn of 15° or more, Align, Distribute, Line up, and a catalytic cycle made or tidied
+  // glide into place (FEEL-38). The drawing changes at once, as one undo step. Only the picture on screen moves to it
+  // (glide). There is no glide with reduced motion, with more than MOST_GLIDE atoms moving, or for a command that comes
+  // again before the last glide is over (a key held down). path: the way there when it is not a straight line (a turn);
+  // false: no glide.
   const [glide, setGlide] = useState<{ to: Mol; mol: Mol }>();
   const glideNext = useRef<{ from: Mol; path?: (t: number) => Mol | undefined }>(undefined), glideAt = useRef(0);
   const glideTo = (mol: Mol, path?: ((t: number) => Mol) | false) => {
@@ -1007,6 +1025,7 @@ export default function Editor() {
   const homeOpen = useRef(home); // for the menu listener, which is set up once
   homeOpen.current = home;
   const [welcomed, setWelcomed] = useState(false), [recents, setRecents] = useState<RecentEntry[]>([]), [recovered, setRecovered] = useState<RecoveredEntry[]>([]);
+  const [experiments, setExperiments] = useState<ExperimentEntry[]>([]);
   // The tutorial (Coach.tsx) on a new drawing: which run it is (0 when off), what it saw done, and the tool it points at.
   const [coach, setCoach] = useState(0), [seen, setSeen] = useState<Seen>(NOTHING_SEEN), [coachTool, setCoachTool] = useState<Tool>();
   const saw = (k: keyof Seen) => { if (coach) setSeen((s) => ({ ...s, [k]: s[k] + 1 })); };
@@ -1015,13 +1034,19 @@ export default function Editor() {
   // The drawing the user has, set aside while a template is edited: what recovery keeps and what Quit asks about.
   const mainH = templateEdit?.back.h ?? h, mainFile = templateEdit?.back.file ?? file, mainDoc = mainH.stack[mainH.at], mainDirty = mainDoc !== mainFile.saved;
   const mainName = mainFile.path?.split(/[\\/]/).pop()?.replace(/\.(octet|oct|cdxml)$/i, "") ?? mainFile.name ?? "Untitled";
-  // In the app, what opens from Home opens in a window of its own, and so does New or Open in a drawing window, unless
-  // the window holds an untouched new drawing (as a Mac app reuses its empty Untitled document). The open windows,
-  // for Home's list, and to bring a drawing that is open already to the front.
+  // In the app, the first drawing opens in Home's window, as Octet's one window did. After that, what opens from Home or
+  // a drawing window opens in a window of its own, unless the window holds an untouched new drawing (as a Mac app
+  // reuses its empty Untitled document) and, for Home's window, no other drawing window is open. The open windows, for
+  // Home's list, and to bring a drawing that is open already to the front.
   const [openWindows, setOpenWindows] = useState<OpenWindow[]>([]);
   // Settings > General > Windows off: one window, with Home over the drawing, as Octet had before.
   const homeWindow = HOME_WINDOW && settings.windows, drawWindow = DRAW_WINDOW && settings.windows;
-  const elsewhere = homeWindow || (drawWindow && (!!file.path || file.name !== undefined || dirty || !!templateEdit || !!extent(doc)));
+  const holds = !!file.path || file.name !== undefined || dirty || !!templateEdit || !!extent(doc) || !!doc.spectra?.length;
+  const elsewhere = (homeWindow && (holds || openWindows.length > 0)) || (drawWindow && holds);
+  // Home over other drawings: a spectrum opens in a new window. Over no drawing, or once Home is closed, it goes in this one.
+  const hub = homeWindow && home && elsewhere;
+  const claimed = useRef(false); // Home's window took a file to open, before it holds the drawing
+  useEffect(() => { if (holds) claimed.current = false; }, [holds]);
   const inNew = (start: Start) => void invoke("open_window", { start }).catch((e) => setNotice(failure("Octet cannot open a new window.", e)));
   const openIn = (path: string | null | undefined) => {
     const there = path ? openWindows.find((w) => w.path === path) : undefined;
@@ -1063,11 +1088,18 @@ export default function Editor() {
   const structureFor = (name: string): Mol | undefined => {
     const smiles = loaded ? nameToSmiles(name) : undefined;
     if (!smiles) return undefined;
+    const key = `${name}\n${smiles}`;
+    if (typedMols.has(key)) return typedMols.get(key);
+    let m: Mol | undefined;
     try {
       // A metallocene (ferrocene) is drawn as a sandwich, not as the ions the name gives.
-      const list = nameList(name, nameToSmiles), m = list?.join(".") === smiles ? inRow(list.map((t) => sandwich(parseStructure(t)))) : sandwich(parseStructure(smiles));
-      return m.atoms.length ? m : undefined;
-    } catch { return undefined; }
+      const list = nameList(name, nameToSmiles);
+      m = list?.join(".") === smiles ? inRow(list.map((t) => sandwich(parseStructure(t)))) : sandwich(parseStructure(smiles));
+      if (!m.atoms.length) m = undefined;
+    } catch { m = undefined; }
+    if (typedMols.size >= 200) typedMols.clear();
+    typedMols.set(key, m);
+    return m;
   };
   // A structure for typed or pasted text: a chemical name first (Octet's own names, drugs and formulas too), then
   // SMILES, InChI or a MOL file when the text looks like one. Indigo reads words such as "aspirin" as query atoms,
@@ -1209,13 +1241,15 @@ export default function Editor() {
   }
   // The selection as a drawing of its own, kept while the drawing and the selection stay the same.
   const partKept = useRef<{ doc: Mol; selection: Set<number>; picked: Set<number>; part: Mol }>(undefined);
-  // Where a caption is drawn: a picked caption copied without its structure, arrow or cycle goes there as free text.
+  // Where a caption is drawn, and how it is lined up there: a picked caption copied without its structure, arrow or
+  // cycle, or left when they are deleted, goes there as free text and keeps its place.
   const drawnAt = (c: Caption) => { const q = placed.find((x) => x.id === c.id); return q && anchorOf(q); };
+  const drawnAlign = (c: Caption) => { const q = placed.find((x) => x.id === c.id); return q && ({ start: "left", middle: "centre", end: "right" } as const)[q.anchor]; };
   const selectedPart = () => {
     if (!selection.size && !picked.size) return undefined;
     const s = partKept.current;
     if (s?.doc === doc && s.selection === selection && s.picked === picked) return s.part;
-    return (partKept.current = { doc, selection, picked, part: extractSelection(doc, selection, picked, drawnAt) }).part;
+    return (partKept.current = { doc, selection, picked, part: extractSelection(doc, selection, picked, drawnAt, drawnAlign) }).part;
   };
   // Export… (⌃⌘E, and the Export button): the settings first, with the whole drawing's picture and, when something is
   // selected, the selection's. The chosen format is made when the dialog shows it. Then the Save dialog for that format.
@@ -1227,22 +1261,25 @@ export default function Editor() {
   async function exportPart(part: "all" | "selection") {
     const v = exportView, svg = v?.[part], mol = v?.parts[part], f = filePrefs;
     if (!v || !mol) return;
-    // Only what the format needs: a PDF carries the CDXML.
+    // Only what the format needs: a PDF, PNG or EMF carries the CDXML, so it opens and pastes back as the drawing.
     const make = (pf: PartFormat, ...fs: ExportFormat[]) => (fs.includes(f.format) ? formatOf(mol, pf) : undefined);
     try {
-      const path = await exportFile({ name, format: f.format, oct: make("oct", "oct"), svg: svg && withMargin(svg, f.margin), cdxml: make("cdxml", "cdxml", "pdf"), cdx: make("cdx", "cdx"), mdl: MDL.includes(f.format) ? formatOf(mol, f.format as PartFormat) : undefined, smiles: make("smiles", "smi"), inchi: make("inchi", "inchi"), dpi: f.dpi, transparent: f.background === "transparent" });
+      const pic = svg ? pictureAs(svg, f, pageColour(style)) : undefined;
+      const path = await exportFile({ name, format: f.format, oct: make("oct", "oct"), svg: pic?.svg, cdxml: make("cdxml", "cdxml", ...CARRY_CDXML), cdx: make("cdx", "cdx"), mdl: MDL.includes(f.format) ? formatOf(mol, f.format as PartFormat) : undefined, smiles: make("smiles", "smi"), inchi: make("inchi", "inchi"), dpi: f.dpi, transparent: pic?.transparent, quality: f.quality });
       if (path) { setExportView(undefined); saved(path); }
     } catch (e) {
       setNotice(failure("Octet cannot export this drawing.", e));
     }
   }
   // Quick export: the selection, or the whole drawing, straight to the Save dialog in the Quick export format (PNG
-  // at first; SVG or EMF for Office, PDF for LaTeX), with the saved settings. A PDF carries the CDXML, as Export's does.
+  // at first; SVG or EMF for Office, PDF for LaTeX), with the saved settings. A PDF, PNG or EMF carries the CDXML, as
+  // Export's does.
   async function quickExport() {
     const part = selectedPart() ?? doc, svg = pictureOf(part), f = filePrefs, format = filePrefs.quick;
     if (!svg) return setNotice("There is nothing to export.", "info");
     try {
-      const path = await exportFile({ name, format, svg: withMargin(svg, f.margin), cdxml: format === "pdf" ? formatOf(part, "cdxml") : undefined, dpi: f.dpi, transparent: f.background === "transparent" });
+      const pic = pictureAs(svg, { ...f, format }, pageColour(style));
+      const path = await exportFile({ name, format, svg: pic.svg, cdxml: CARRY_CDXML.includes(format) ? formatOf(part, "cdxml") : undefined, dpi: f.dpi, transparent: pic.transparent, quality: f.quality });
       if (path) saved(path);
     } catch (e) {
       setNotice(failure("Octet cannot export this drawing.", e));
@@ -1262,9 +1299,13 @@ export default function Editor() {
   });
   // What Octet could not hold from a ChemDraw file, said once: "Octet left out 6 annotations and 1 rotated shape."
   const sayLost = (lost: Record<string, number>) => { if (Object.keys(lost).length) setNotice(`Octet left out ${lostText(lost)}.`); };
-  // Resolves true when the drawing was saved. Over a file that had things Octet could not hold (REL-11), Save asks
-  // first: Save As keeps the original file, Replace writes over it.
-  async function save(as: boolean, replace = false): Promise<boolean> {
+  // Resolves true when the drawing was saved. Over a file another app changed since Octet opened or saved it (issue 2),
+  // Save asks first, as Mac apps do: Save Anyway writes over it, Save As keeps it. Over a file that had things Octet
+  // could not hold (REL-11), Save asks too: Save As keeps the original file, Replace writes over it. anyway: the first
+  // question was answered.
+  async function save(as: boolean, replace = false, anyway = false): Promise<boolean> {
+    if (!as && !anyway && file.path && TAURI && await invoke<boolean>("file_changed", { path: file.path }).catch(() => false))
+      return new Promise((done) => setDialog({ kind: "changed", done }));
     if (!as && !replace && file.path && file.lost) {
       const lost = file.lost;
       return new Promise((done) => setDialog({ kind: "lossy", lost, done }));
@@ -1296,9 +1337,9 @@ export default function Editor() {
     clearTimeout(keeper.timer);
     keeper.timer = 0;
     keeper.kept = false;
-    void keep("recovery_clear").catch(() => {}).then(then).catch((e) => setNotice(failure("Octet cannot do this.", e)));
+    void keep("recovery_clear").catch(keepFailed()).then(then).catch((e) => setNotice(failure("Octet cannot do this.", e)));
   }, () => { if (TAURI) invoke("quit_answer", { quit: false }).catch(() => {}); });
-  const closeWindow = () => leave(() => getCurrentWindow().destroy());
+  const closeWindow = () => leave(() => invoke("close_window"));
   // Updates (decision 0010, src-tauri/src/update.rs): a check when Octet opens, only if the user said yes to it, and
   // Check for Updates…. An update found asks before it installs, but never over another question: then it asks at the
   // next check. asked: the user chose Check for Updates, so the result shows also when there is no update or no network.
@@ -1323,11 +1364,22 @@ export default function Editor() {
   // A template open on the canvas counts too: Quit asks, and the page says to save or cancel it first.
   const unsaved = mainDirty || !!templateEdit;
   useEffect(() => { if (TAURI) invoke("set_edited", { edited: unsaved }).catch(() => {}); }, [unsaved]);
-  useEffect(() => { if (DRAW_WINDOW) invoke("window_info", { name: mainName, path: mainFile.path ?? null, edited: unsaved, picture: null }).catch(() => {}); }, [mainName, mainFile.path, unsaved]);
+  // Home's window is on the list while it holds a drawing, so the drawing is not opened again elsewhere.
+  const listed = DRAW_WINDOW || (homeWindow && holds);
+  useEffect(() => {
+    if (listed) invoke("window_info", { name: mainName, path: mainFile.path ?? null, edited: unsaved, picture: null }).catch(() => {});
+    else if (homeWindow) invoke("window_empty").catch(() => {});
+  }, [listed, mainName, mainFile.path, unsaved]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Recovery that fails goes to the crash log, and the user hears once that Octet keeps no copy (issue 2). A copy that
+  // does not clear is only logged.
+  const keepFailed = (what?: string) => (e: unknown) => {
+    logError(`Recovery: ${e instanceof Error ? e.message : String(e)}`);
+    if (what && !keeper.told) { keeper.told = true; setNotice(failure(what, e)); }
+  };
   // Recovery keeps the user's drawing: while a template is edited, the drawing set aside.
   useEffect(() => {
     if (!TAURI) return;
-    if (!mainDirty) { if (keeper.kept) { keeper.kept = false; keep("recovery_clear").catch(() => {}); } return; }
+    if (!mainDirty) { if (keeper.kept) { keeper.kept = false; keep("recovery_clear").catch(keepFailed()); } return; }
     if (!keeper.timer) keeper.timer = window.setTimeout(() => { keeper.timer = 0; keeper.last = Date.now(); keeper.write(); }, Math.max(1000, keeper.last + 10_000 - Date.now()));
   }, [mainDoc, mainDirty]);
   // The editor as last drawn: the copy the timer writes, and the error boundary's rescue. The copy is Octet's own
@@ -1338,7 +1390,7 @@ export default function Editor() {
     const contents = () => (templateEdit ? writeOct(mainDoc, readStyle(mainDoc.style ?? newStyle), cdxmlOptions()) : writeOct(doc, savedStyle(), cdxmlOptions()));
     keeper.write = () => {
       if (!mainDirty) return;
-      try { keeper.kept = true; keep("recovery_write", { name: mainName, contents: serialize(kept) }).catch(() => {}); } catch { /* kept at the next edit */ }
+      try { keeper.kept = true; keep("recovery_write", { name: mainName, contents: serialize(kept) }).catch(keepFailed("Octet cannot keep a copy of this drawing for recovery.")); } catch { /* kept at the next edit */ }
     };
     rescue.current = { h: mainH, file: mainFile, home, name: mainName, contents };
   });
@@ -1352,8 +1404,12 @@ export default function Editor() {
   // A new drawing for Quick start or a purpose (IDEA-SIZE-1): its style and page, at the middle of the window and the
   // open zoom. ⌘N starts the one picked last, as ChemDraw's New takes the stationery used last; Return on Home starts
   // Quick start.
+  // An experiment page starts with its details (Date today) and its text, from its template.
   const newDrawing = (id = settings.purpose) => elsewhere ? inNew({ new: id }) : keepWork(() => {
-    const style = styleFor(settings, id), fresh: Mol = { ...EMPTY, style };
+    const style = styleFor(settings, id), own = settings.ownPurposes.find((p) => p.id === id);
+    let template: Mol | undefined;
+    try { template = own?.start ? parse(own.start) : undefined; } catch { template = undefined; }
+    const fresh: Mol = { ...EMPTY, style, ...(purposeOf(settings, id)?.kind === "experiment" ? newExperiment(pageSize(style), style.bond, template) : {}) };
     drawingColours.current = []; set(fresh); setFile({ saved: fresh }); setGuides(freshGuides([0, 0], style)); setHome(false); setCoach(0); openView(style);
     setSettings((s) => ({ ...s, purpose: id === QUICK || purposeOf(s, id) ? id : QUICK }));
   });
@@ -1402,9 +1458,12 @@ export default function Editor() {
   });
   // A template of the user's own goes from Home, File > New For and Settings; New then starts Quick start if it started that one.
   const removePurpose = (id: string) => setSettings((s) => ({ ...s, ownPurposes: s.ownPurposes.filter((p) => p.id !== id), purpose: s.purpose === id ? QUICK : s.purpose }));
+  // A template made from an experiment page keeps its details and text (experiment.ts templateOf); one made from
+  // another template keeps that template's.
   const savePurpose = (name: string, from: DocStyle = style) => {
     const same = settings.ownPurposes.find((p) => p.name.toLowerCase() === name.toLowerCase()), id = same?.id ?? `u${Date.now().toString(36)}`;
-    const own = { id, name, kind: purposeOf(settings, from.purpose)?.kind ?? "paper", style: { ...from, purpose: id } };
+    const kind = purposeOf(settings, from.purpose)?.kind ?? "paper", start = kind !== "experiment" ? undefined : from === style ? serialize(templateOf(doc)) : settings.ownPurposes.find((p) => p.id === from.purpose)?.start;
+    const own = { id, name, kind, style: { ...from, purpose: id }, ...(start ? { start } : {}) };
     setSettings((s) => ({ ...s, ownPurposes: s.ownPurposes.some((p) => p.id === id) ? s.ownPurposes.map((p) => (p.id === id ? own : p)) : [...s.ownPurposes, own].slice(0, MAX_PURPOSES) }));
     return id;
   };
@@ -1430,16 +1489,25 @@ export default function Editor() {
     setDialog({ kind: "revert" });
   };
   const revert = () => void invoke<string>("revert_drawing", { path: file.path }).then((text) => load(file.path, text)).catch((e) => setNotice(failure("Octet cannot revert this drawing.", e)));
+  // Back in front: a drawing with no unsaved changes whose file another app changed opens again, as Mac apps do. One
+  // step to undo. With unsaved changes, Save asks before it writes over the file (issue 2). An edit made meanwhile (the
+  // click that brought the window to the front can draw) stays, and Save asks.
+  useEffect(() => {
+    if (!TAURI || !fronted || !file.path || dirty || home || templateEdit) return;
+    const at = doc;
+    void invoke<boolean>("file_changed", { path: file.path }).then((changed) => { if (changed && now.current === at) revert(); }).catch(() => {});
+  }, [fronted]); // eslint-disable-line react-hooks/exhaustive-deps
   // A drawing on the recent list or in a project on Home (only those open without the file dialog).
   const openRecent = (r: { path: string }) => openIn(r.path) ? undefined : elsewhere ? inNew({ recent: r.path }) : r.path === file.path && overDrawing ? setHome(false) : keepWork(() => void homeCall<[string, string]>("open_recent", { path: r.path }).then((picked) => load(picked[0], picked[1]))
     .catch((e) => { setNotice(failure("Octet cannot open this drawing.", e)); refreshRecents(); }));
   // A recovered drawing opens with its changes unsaved; its kept copy becomes this window's.
   const openRecovered = (r: RecoveredEntry) => elsewhere ? inNew({ recovered: r.id }) : keepWork(() => void keep<[string, string]>("recovery_open", { id: r.id }).then(([title, text]) => { keeper.kept = true; load(undefined, text, title); })
-    .catch((e) => { setNotice(failure("Octet cannot open this drawing.", e)); refreshRecents(); }));
+    .catch((e) => { keepFailed()(e); setNotice(failure("Octet cannot open this drawing.", e)); refreshRecents(); }));
   const refreshRecents = () => {
     if (!HOME_API) return;
     homeCall<RecentEntry[]>("recent_list").then(setRecents).catch(() => {});
-    homeCall<RecoveredEntry[]>("recovery_list").then(setRecovered).catch(() => {});
+    homeCall<RecoveredEntry[]>("recovery_list").then(setRecovered).catch(keepFailed("Octet cannot read the drawings it kept for recovery."));
+    homeCall<ExperimentEntry[]>("experiment_list").then(setExperiments).catch(() => {});
   };
   useEffect(() => { if (home) refreshRecents(); }, [home, fronted]); // eslint-disable-line react-hooks/exhaustive-deps
   // Home's projects and thumbnails (src/projects.ts).
@@ -1453,13 +1521,13 @@ export default function Editor() {
   }, [file]); // eslint-disable-line react-hooks/exhaustive-deps
   // When Octet was last opened, for the next "Welcome back".
   useEffect(() => { if (!DRAW_WINDOW) setSettings((s) => ({ ...s, lastSeen: Date.now() })); }, []); // eslint-disable-line react-hooks/exhaustive-deps
-  // A spectrum picked in a drawing window goes into its drawing; from Home it opens in a new window.
+  // A spectrum picked goes into the window's drawing; from Home over other drawings it opens in a new window.
   async function open() {
     try {
       const picked = await invoke<[string, string] | null>("open_drawing");
       if (!picked) return;
       if (isTemplateFile(picked[0])) return openTemplateFile(picked[0].split(/[\\/]/).pop() ?? "Templates.ctp", picked[1]);
-      if (isSpectrum(picked[1]) && !homeWindow) return openSpectrumText(picked[1], picked[0].split(/[\\/]/).pop() ?? "this file");
+      if (isSpectrum(picked[1]) && !hub) return openSpectrumText(picked[1], picked[0].split(/[\\/]/).pop() ?? "this file");
       if (openIn(picked[0])) return;
       if (elsewhere) return inNew({ picked });
       openPicked(picked);
@@ -1478,7 +1546,7 @@ export default function Editor() {
   async function takeOpened() {
     const insert = !home, into = home ? library.dropTarget.current : undefined;
     library.dropTarget.current = undefined;
-    const all = await invoke<OpenedFile[]>("take_opened", { insert, project: !!into && "project" in into });
+    const all = await invoke<OpenedFile[]>("take_opened", { insert, project: into && "project" in into });
     // Dropped on a tile on Home: a picture becomes its thumbnail, and drawings dropped on a project go in it. Neither
     // opens.
     if (into) {
@@ -1498,15 +1566,29 @@ export default function Editor() {
     // ChemDraw template files, opened or dropped anywhere: each becomes a set of templates.
     for (const f of all) if (f.text !== null && !f.error && isTemplateFile(f.name)) openTemplateFile(f.name, f.text);
     const files = all.filter((f) => !isTemplateFile(f.name) || f.error);
-    // Spectra (on the canvas or the Spectrum panel, or opened) go into the drawing; on Home, each opens in a new window.
-    if (!homeWindow) for (const f of files) if (f.text !== null && isSpectrum(f.text)) openSpectrumText(f.text, f.name);
-    const read = files.filter((f) => f.picture !== null || (f.text !== null && (homeWindow || !isSpectrum(f.text))));
+    // Home's window decides from the windows open now (Octet opened by a file starts before its list comes), and claims
+    // the first file before it waits, so files that come in two lots do not both open here.
+    let away = elsewhere;
+    if (homeWindow && !away) {
+      const list = await invoke<OpenWindow[]>("window_list").catch(() => []);
+      away = list.length > 0 || claimed.current;
+      if (!away && files.some((f) => !f.error)) claimed.current = true;
+    }
+    // Spectra (on the canvas or the Spectrum panel, or opened) go into the drawing. Opened in Home's window once a
+    // drawing is open, each opens in a new window, as drawings do.
+    const sent = (f: OpenedFile) => hub || (homeWindow && away && !f.at);
+    const spectra = files.filter((f) => f.text !== null && isSpectrum(f.text) && !sent(f));
+    const read = files.filter((f) => f.picture !== null || (f.text !== null && (sent(f) || !isSpectrum(f.text))));
+    for (const f of spectra) openSpectrumText(f.text!, f.name);
+    if (homeWindow && spectra.length) away = true; // the drawings with them open in windows of their own
     for (const f of files) if (f.error) setNotice(f.error);
     if (read.some((f) => f.text !== null && !isDrawingText(f.text))) await ready;
     const dropped = read.filter((f) => f.at && insert), opening = read.filter((f) => !(f.at && insert)), first = opening[0];
     if (dropped.length) await dropFiles(dropped);
     // Each file to open opens in a window of its own (one open already comes to the front).
-    if (elsewhere) { for (const f of opening) if (!openIn(f.path)) inNew({ files: [f] }); return; }
+    if (away) { for (const f of opening) if (!openIn(f.path)) inNew({ files: [f] }); return; }
+    // The first opens here; with windows on, each of the others opens in a window of its own.
+    if (homeWindow) for (const f of opening.slice(1)) if (!openIn(f.path)) inNew({ files: [f] });
     if (first?.picture) {
       const m = await pictureDrawing(fromBase64(first.picture), newStyle.bond, MAX_PICTURE, `Octet cannot open ${first.name}.`);
       if (m) keepWork(() => load(undefined, { ...m, style: newStyle }, first.name.replace(/\.[^.]*$/, "")));
@@ -1548,7 +1630,7 @@ export default function Editor() {
     if (!b) return;
     // The drawing as it is now: the structure engine can take seconds to start, and the user can draw meanwhile.
     const r = insertMol(now.current, add, [at[0] - (b[0] + b[2]) / 2, at[1] - (b[1] + b[3]) / 2]);
-    set(r.mol, true);
+    set(r.mol, true, undefined, "placed");
     setSelection(r.atoms);
     setPicked(r.items);
     sayLost(lost);
@@ -1718,17 +1800,18 @@ export default function Editor() {
     const level = last.arrow ? last.level : d ? (d[1] + d[3]) / 2 : last.level;
     return [last.x + (last.arrow ? reactionGap : 1.5) - f[0], level - (f[1] + f[3]) / 2];
   }
-  // Puts a new fragment in place and selects it.
+  // Puts a new fragment in place and selects it. Put at a point (where the pointer was), it joins a cycle there.
   function place(frag: Mol, base: Mol = doc, at?: P) {
     if (!frag.atoms.length) throw new Error("It has no atoms.");
+    const drop = at ? "placed" : true;
     // A query file's R-group boxes and polymer brackets, and a reaction's arrows and plus signs, come with its atoms.
     if (frag.shapes?.length || frag.arrows?.length || frag.captions?.length) {
       const r = insertMol(base, frag, landing(frag, at));
-      set(frag.arrows?.length ? laidOut(r.mol, (frag.arrows ?? []).map((a) => r.ids.get(a.id)!)) : r.mol);
+      set(frag.arrows?.length ? laidOut(r.mol, (frag.arrows ?? []).map((a) => r.ids.get(a.id)!)) : r.mol, false, undefined, drop);
       setSelection(r.atoms);
       return setPicked(r.items);
     }
-    set(merge(base, frag, landing(frag, at)));
+    set(merge(base, frag, landing(frag, at)), false, undefined, drop);
     setSelection(new Set(frag.atoms.map((_, i) => base.atoms.length + i)));
   }
   // A reaction that came in (a file or text with arrows) laid out as Clean Up Reaction lays it out, measured as it will
@@ -1864,6 +1947,7 @@ export default function Editor() {
     new_quick: () => newDrawing(QUICK),
     ...Object.fromEntries(Object.keys(PURPOSES).map((k) => [`new_${k}`, () => newDrawing(k)])),
     ...Object.fromEntries(settings.ownPurposes.map((p, k) => [`new_own_${k}`, () => newDrawing(p.id)])),
+    experiment_details: () => { if (expPage) setDialog({ kind: "details", values: detailsOf(doc.annotations) }); },
     open: () => openDrawing(),
     opened: () => void takeOpened().catch((e) => setNotice(failure("Octet cannot open this file.", e))),
     home: () => (drawWindow ? void invoke("show_home").catch(() => {}) : homeWindow && home ? undefined : templateEdit ? setNotice("Save or cancel the template first.", "info") : (setHome(true), setOverDrawing(true))),
@@ -1908,12 +1992,10 @@ export default function Editor() {
     fixed_lengths: () => setSettings((s) => ({ ...s, fixedLengths: !s.fixedLengths })),
     fixed_angles: () => setSettings((s) => ({ ...s, fixedAngles: !s.fixedAngles })),
     warnings: () => setSettings((s) => ({ ...s, warnings: !s.warnings })),
-    // Display Warnings back on for the selected atoms, the bonds between them and the picked brackets.
-    show_warnings: () => set({
-      ...doc, atoms: doc.atoms.map((a, k) => (selection.has(k) && a.ignoreWarnings ? { ...a, ignoreWarnings: undefined } : a)),
-      bonds: doc.bonds.map((b) => (b.ignoreWarnings && selection.has(b.atoms[0]) && selection.has(b.atoms[1]) ? { ...b, ignoreWarnings: undefined } : b)),
-      ...(doc.shapes ? { shapes: doc.shapes.map((x) => (x.ignoreWarnings && picked.has(x.id) ? { ...x, ignoreWarnings: undefined } : x)) } : {}),
-    }, true),
+    // Display Warnings back on for the selected atoms, the bonds between them and the picked brackets, or for the whole
+    // drawing when nothing is selected; off for the warnings marked on the selection.
+    show_warnings: () => set(showWarnings(doc, ...warnScope()), true),
+    hide_warnings: () => { const list = selectedOf(found); return list.length ? set(hideProblems(doc, list), true) : setNotice("Select an object with a warning.", "info"); },
     // Structure commands act on the selection, or on the whole drawing when nothing is selected.
     clean_up: () => {
       if (!loaded || !doc.atoms.length) return;
@@ -1921,6 +2003,10 @@ export default function Editor() {
       sayAfter(selection.size ? "Cleaned up the selection." : "Cleaned up the drawing.");
       const ids = selection.size ? selection : undefined;
       let m = cleanUp(doc, ids);
+      // A catalytic cycle picked (every one, with nothing selected) is tidied too, as Tidy the cycle does, measured after
+      // the clean-up, as a reaction is laid out again below.
+      const cycles = (doc.cycles ?? []).filter((c) => (!selection.size && !picked.size) || picked.has(c.id));
+      if (cycles.length) { const d = render(m, frame, measure, L); for (const c of cycles) m = spread(m, m.cycles!.find((x) => x.id === c.id)!, d); }
       if (fragments(doc).some((g) => g.length > MOST_CLEAN && (!ids || g.some((i) => ids.has(i))))) setNotice(`Octet cannot clean up a structure of more than ${MOST_CLEAN.toLocaleString("en-GB")} atoms.`);
       const docBox = (b?: Box): Box | undefined => b && [b[0] / L, -b[3] / L, b[2] / L, -b[1] / L];
       const inkOf = (mol: Mol) => { const d = render(mol, frame, measure, L); return (atoms: number[]) => docBox(union(atoms.filter((i) => d.ink[i]).map((i) => d.ink[i]))); };
@@ -2141,7 +2227,7 @@ export default function Editor() {
             ...(a.size || style.labelSize !== style.captionSize ? { size: a.size ?? style.labelSize } : {}), ...(a.font || style.labelFont !== style.captionFont ? { font: a.font ?? style.labelFont } : {}),
             ...(a.bold ? { bold: true } : {}), ...(a.italic ? { italic: true } : {}), ...(a.underline ? { underline: true } : {}), ...(a.colour ? { colour: a.colour } : {}) });
         }
-        if (lone.length) { m = deleteAtoms(m, new Set(lone)); setSelection(new Set()); }
+        if (lone.length) { m = deleteChosen(m, new Set(lone), new Set(), undefined, drawnAt, drawnAlign); setSelection(new Set()); }
         return set(m, true);
       }
       const caps = (doc.captions ?? []).filter((c) => picked.has(c.id));
@@ -2237,6 +2323,7 @@ export default function Editor() {
     text_sub: () => runAction("caption.sub"),
     text_super: () => runAction("caption.super"),
     text_formula: () => runAction("caption.formula"),
+    text_markup: () => markupText(),
     // Text > Font: Other Font… finds any font on the computer (the menu's own fonts are added with the font list).
     font_other: () => {
       const c = contextOf();
@@ -2363,6 +2450,14 @@ export default function Editor() {
       else await takeFiles(s.files, false);
     }).catch((e) => setNotice(failure("Octet cannot open this drawing.", e)));
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  // File > Home in a drawing window: Home over this window's drawing (src-tauri/src/windows.rs show_home).
+  useEffect(() => {
+    if (!HOME_WINDOW) return;
+    const offHome = listen("show-home", () => { if (menuRuns("home", { home: homeOpen.current, modal: modal(), typing: typing() })) commands.current.home(); });
+    // Its drawing chosen from a list: Home closes over it.
+    const offDrawing = listen("show-drawing", () => setHome(false));
+    return () => { offHome.then((f) => f()); offDrawing.then((f) => f()); };
+  }, []);
   // The open drawing windows, kept up to date.
   useEffect(() => {
     if (!TAURI) return;
@@ -2373,7 +2468,7 @@ export default function Editor() {
   // In front: the menu bar takes this window's state again (and Home reads its lists again). Left: a drawing window
   // gives Home its picture.
   const leftWindow = useRef(() => {});
-  leftWindow.current = () => { if (DRAW_WINDOW) invoke("window_info", { name: mainName, path: mainFile.path ?? null, edited: unsaved, picture: pictureOf(mainDoc) ?? "" }).catch(() => {}); };
+  leftWindow.current = () => { if (listed) invoke("window_info", { name: mainName, path: mainFile.path ?? null, edited: unsaved, picture: pictureOf(mainDoc) ?? "" }).catch(() => {}); };
   useEffect(() => {
     if (!TAURI) return;
     const off = getCurrentWindow().onFocusChanged(({ payload }) => (payload ? setFronted((n) => n + 1) : leftWindow.current()));
@@ -2425,20 +2520,29 @@ export default function Editor() {
   // that bond's left, as ChemDraw draws it. Command and Shift at the press work as on a click. A chair faces the drag.
   const ringDrop = (d: Extract<Drag, { kind: "ring" }>): Mol => {
     const r: { n: number; aromatic: boolean; chair?: 1 | 2 } = RINGS[ringKind as RingKind], origin = typeof d.from === "number" ? pos(doc, d.from) : d.from, to = d.to!;
+    // From a bond: the ring on the side dragged to, a chair the way it fits nearest the pointer.
+    if (d.target.bond !== undefined && d.target.atom === undefined) {
+      const bond = d.target.bond;
+      return r.chair ? addChair(doc, r.chair, { bond, toward: to }) : addRing(doc, r.n, r.aromatic || !!d.meta, { bond, toward: to }, { firstSingle: d.shift, circle: d.meta });
+    }
     if (r.chair) return addChair(doc, r.chair, { point: origin, turn: Math.atan2(to[1] - origin[1], to[0] - origin[0]) });
     return addRing(doc, r.n, r.aromatic || !!d.meta, { along: [origin, to], ...(typeof d.from === "number" ? { atom: d.from } : {}) }, { firstSingle: d.shift, circle: d.meta });
   };
+  // A chair dragged with ⌘ stays off a catalytic cycle, as a stamped one does (⌘ draws a plain ring delocalised).
+  const chairFree = (d: Extract<Drag, { kind: "ring" }>) => !!d.meta && !!(RINGS[ringKind as RingKind] as { chair?: 1 | 2 } | undefined)?.chair;
   const shown = useMemo(() => {
     if (exporting) return exporting;
     if (drag?.kind === "bond" && drag.to) return dragBond(doc, drag.from, drag.to, bondSpec);
     if (drag?.kind === "chain" && drag.to) return chainThrough(doc, drag.from, chainPath(drag)).mol;
-    if (drag?.kind === "ring" && drag.to) return ringDrop(drag);
-    if (drag?.kind === "move" || drag?.kind === "handle" || drag?.kind === "turn" || drag?.kind === "resize" || drag?.kind === "tilt" || drag?.kind === "spot" || drag?.kind === "tlcline" || drag?.kind === "lane" || drag?.kind === "tableedge" || drag?.kind === "mark") return placeCentres(drag.working);
+    if (drag?.kind === "ring" && drag.to) return dropped(ringDrop(drag), chairFree(drag), true);
+    if (drag?.kind === "move" || drag?.kind === "handle" || drag?.kind === "turn" || drag?.kind === "resize" || drag?.kind === "tilt" || drag?.kind === "spot" || drag?.kind === "tlcline" || drag?.kind === "lane" || drag?.kind === "tableedge" || drag?.kind === "mark") return placeCentres(dropped(drag.working, drag.kind === "move" && drag.skip));
     if (drag?.kind === "arrow" && drag.to && tool === "massspec") return msLine(drag, drag.to)[0];
     if (drag?.kind === "arrow" && drag.to && drag.make?.kind === "cut") return massCut(drag, true).mol;
     if (drag?.kind === "arrow" && drag.to) return addArrow(doc, newArrow(drag.from, drag.to, drag.side, drag.make))[0];
     if (drag?.kind === "shape" && drag.to) { const sh = shapeFrom(drag.from, drag.to); return sh ? addShape(doc, sh)[0] : doc; }
     if (drag?.kind === "cycle" && drag.to) return addCycle(doc, newCycle(drag.from, drag.to))[0];
+    if (drag?.kind === "cycle" && drag.pull?.made) return drag.pull.made.m;
+    if (drag?.kind === "cycle" && drag.radius) return drag.radius;
     if (pen || drag?.kind === "pen") {
       // The curve so far, with the point being placed (or a straight run to the pointer).
       const now = drag?.kind === "pen" ? penPoint(drag.at, drag.out) : penAt ? { at: penAt } : undefined, points = [...(pen ?? []), ...(now ? [now] : [])];
@@ -2446,7 +2550,7 @@ export default function Editor() {
     }
     if (glide?.to === doc) return glide.mol;
     return doc;
-  }, [doc, drag, pen, penAt, glide]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [doc, drag, pen, penAt, glide, exporting]); // eslint-disable-line react-hooks/exhaustive-deps
   // The space between the parts of a reaction (Clean Up Reaction, the reaction shortcut, a product pasted after an arrow).
   const reactionGap = gapFor(style.captionSize, style.bond);
   // The font lists: Octet's fonts, then any other font the drawing uses (one picked from More fonts, or a file's).
@@ -2520,10 +2624,24 @@ export default function Editor() {
     return () => q.removeEventListener("change", on);
   }, []);
   const { own, paper, dark: darkPaper } = paperOf(style, systemDark);
+  // The cursors in the colour the user chose (Settings > General > Cursor): on the canvas for its page, and in the
+  // panels (editor.css, --cursor-*) for the interface's light or dark.
+  const cursor = cursors?.[cursorColour(settings.cursor, darkPaper)];
+  useEffect(() => {
+    const ui = cursors?.[cursorColour(settings.cursor, systemDark)];
+    for (const [name, value] of Object.entries(ui ?? {})) document.documentElement.style.setProperty(`--cursor-${name}`, value);
+  }, [cursors, settings.cursor, systemDark]);
   const textInk = (c: string) => inkOn(darkPaper, c);
-  // The page outlines (mm): the page, then what the drawing's purpose needs (IDEA-SIZE-6).
+  // The page outlines (mm): the page, then what the drawing's purpose needs (IDEA-SIZE-6), unless Settings > Page edges
+  // is Page only.
   const purposeKind = purposeOf(settings, style.purpose)?.kind;
-  const pages = useMemo(() => pageOutlines(style, purposeKind), [style, purposeKind]);
+  const pages = useMemo(() => pageOutlines(style, purposeKind, settings.outlines), [style, purposeKind, settings.outlines]);
+  // An experiment page (experiment.ts): its details as a block at the top of the page. A double-click on the block
+  // opens them to edit.
+  const expPage = experimentPage(purposeKind, style.purpose, doc.annotations);
+  const details = useMemo(() => (expPage ? detailsLayout(detailsOf(doc.annotations), [pages[0][1], pages[0][2]], style.bond, style.captionSize,
+    (text, size, bold) => textWidth(text, size, bold, false, fontStack(style.captionFont))) : undefined), [expPage, doc.annotations, pages, style]);
+  const detailsAt = (p: P) => !!details && p[0] >= details.box[0] && p[0] <= details.box[2] && p[1] >= details.box[1] && p[1] <= details.box[3];
   // A new page size on the same drawing (a purpose or a scale): the outlines grow or shrink into place about the page's
   // middle. A new or opened drawing shows them at once.
   const pagesEl = useRef<SVGGElement>(null), outlineFrom = useRef<number>(undefined);
@@ -2585,9 +2703,19 @@ export default function Editor() {
   const [addingColour, setAddingColour] = useState(false); // Settings opened from a colour row's +, to add a colour
   // Object > Rotate… (⌘R) and Scale… (⌘K): the dialog open, and what is typed in it.
   const [about, setAbout] = useState(false);
+  // What's new in this version (releases.ts): once after an update, in Home's window, for someone who has used Octet
+  // before (someone new starts at the name box, which marks the notes seen), and from About.
+  const [notes, setNotes] = useState(false), ownNotes = notesFor(version);
+  useEffect(() => {
+    if (!HOME_WINDOW || !ownNotes || settings.userName === null || settings.seenNotes === version) return;
+    setNotes(true);
+    setSettings((s) => ({ ...s, seenNotes: version }));
+  }, [settings.userName, settings.seenNotes]); // eslint-disable-line react-hooks/exhaustive-deps
   // The right-click menu (ActionsMenu): where it opens, and whether a key opened it. noMenu: a Control-press on the Mac
   // that went to a resize handle (Control there turns Labels and lines over), whose right-click opens no menu.
   const [menuAt, setMenuAt] = useState<{ x: number; y: number; keyboard?: boolean }>();
+  // The Side arrow tool's question at the pointer: what to add to step `step` of a cycle, g along it (askSide).
+  const [sideAsk, setSideAsk] = useState<{ x: number; y: number; cycle: number; step: number; g: number; choices: ("in" | "out" | "both")[] }>();
   const noMenu = useRef(false);
   // The Select tool's modifiers at the last press, and the selection before it, for a click with Shift or Option.
   const pressMods = useRef<{ shift: boolean; alt: boolean; atoms: Set<number>; picks: Set<number> } | undefined>(undefined);
@@ -2601,8 +2729,9 @@ export default function Editor() {
     | { kind: "bracket"; shape: number; usage: string; label: string; count: string; order: string; mw: string; pattern: string; flip: string; flippable: boolean }
     | { kind: "rlogic"; rows: { id: number; name: string; occur: string; restH: boolean; then: string }[] }
     | { kind: "font"; font: string } | { kind: "size"; size: string } | { kind: "spacing"; mode: "auto" | "variable" | "fixed"; pt: string }
-    | { kind: "unsaved"; next: () => void; stay?: () => void } | { kind: "rf"; plate: number; index: number; value: string } | { kind: "chain"; from: number | P; atoms: string }
+    | { kind: "unsaved"; next: () => void; stay?: () => void } | { kind: "rf"; plate: number; index: number; value: string } | { kind: "details"; values: Details } | { kind: "chain"; from: number | P; atoms: string }
     | { kind: "template"; name: string; from: string } | { kind: "templateSet"; name: string; then: (set: string) => void } | { kind: "lossy"; lost: Record<string, number>; done: (saved: boolean) => void } | { kind: "revert" }
+    | { kind: "changed"; done: (saved: boolean) => void }
     | { kind: "discard"; entry: RecoveredEntry } | { kind: "crashed"; log: string } | { kind: "update"; version: string }
     | { kind: "dictionary"; name: string; smiles: string; inchi?: string }>();
   // Check Structure's dialog: the problems, the one shown, and what runs after them (a copy or export that asked).
@@ -2625,6 +2754,7 @@ export default function Editor() {
   // An arrow Octet offers after a row of starting materials (from Clean up). Tab draws it; any other change drops it.
   const [offer, setOffer] = useState<{ from: P; to: P; doc: Mol }>();
   useEffect(() => { if (offer && offer.doc !== doc) setOffer(undefined); }, [doc]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => setSideAsk(undefined), [doc]); // the Side arrow menu's cycle and step are the drawing's as it was asked
   const docOpen = settingsOpen === "document";
   // The Document window's preview: paracetamol with its compound number, drawn in the style at 125% of true size
   // (smaller if it would not fit), so a change of preset shows as a change of size. It is drawn on the page's own
@@ -2699,7 +2829,7 @@ export default function Editor() {
     let m = shown;
     const runs = writing?.runs && styled(writing.runs) && plainOf(writing.runs) ? writing.runs : undefined;
     if (writing?.id !== undefined) m = updateCaption(m, writing.id, { text: writing.value || " ", ...writing.style, runs });
-    else if (writing) m = { ...m, captions: [...(m.captions ?? []), { id: DRAFT, text: writing.value || " ", x: writing.at?.[0] ?? 0, y: writing.at?.[1] ?? 0, under: writing.under, on: writing.on, cycle: writing.cycle, ...writing.style, runs }] };
+    else if (writing) m = labelEnd({ ...m, captions: [...(m.captions ?? []), { id: DRAFT, text: writing.value || " ", x: writing.at?.[0] ?? 0, y: writing.at?.[1] ?? 0, under: writing.under, on: writing.on, cycle: writing.cycle, ...writing.style, runs }] }, DRAFT);
     // A line's width: each run in its own font, size and style (rich text), or the caption's own.
     const width = (t: string, c: Caption, j = 0) => {
       const px = (c.size ?? style.captionSize) * pt;
@@ -2813,12 +2943,38 @@ export default function Editor() {
   // The cycle arc (or side arrow) under a point.
   // A thicker line (an object's scale) is as easy to hit as it is wide.
   const cycleAt = (p: P) => cycleArrows.find((a) => nearTrace([p[0] * L, -p[1] * L], arrowTrace(a, L), 5 / views.get().zoom + frame.line * 2 * scaleOf(a)));
-  // Which step of a cycle was last pressed: reagents and products go on that step.
-  const [cycleStep, setCycleStep] = useState(0);
+  // Which step of which cycle was last pressed, right-clicked or had a handle under the pointer: actions go on that step.
+  const [cycleStep, setCycleStep] = useState<{ cycle: number; step: number }>();
+  // A cycle's step picked on its own (a second click on a picked cycle's arc, with Select), and the step a press on a
+  // picked cycle's arc would pick if it is a click.
+  const [stepPick, setStepPick] = useState<{ cycle: number; step: number }>();
+  const stepAgain = useRef<number>(undefined);
+  // A cycle's side arrow picked on its own (a click on it).
+  const [branchPick, setBranchPick] = useState<{ cycle: number; branch: number }>();
+  // Only a step or a side arrow of a cycle is picked: Delete and Cut take that alone, and Copy has nothing to copy.
+  const partPick = !selection.size && picked.size === 1 && !!((branchPick && picked.has(branchPick.cycle)) || (stepPick && picked.has(stepPick.cycle)));
+  // The step an action on a cycle acts on: the picked one, else the one last pressed or right-clicked, else its longest
+  // drawn step with no side arrow.
+  const stepHere = (c: Cycle) => {
+    const n = Math.max(c.nodes.length, 1), own = stepPick?.cycle === c.id ? stepPick : cycleStep?.cycle === c.id ? cycleStep : undefined;
+    if (own) return Math.min(own.step, n - 1);
+    const free = cycleLayout.spans.filter((s) => s.cycle === c.id && !c.branches?.some((b) => b.step === s.step));
+    return free.reduce<(typeof free)[number] | undefined>((x, s) => (!x || s.to - s.from > x.to - x.from ? s : x), undefined)?.step ?? 0;
+  };
+  // A cycle with all it is made of: its intermediates and its side arrows' structures (atoms), and all its text.
+  const cycleParts = (c: Cycle): [number[], number[]] => [cycleAtoms(c), (doc.captions ?? []).filter((t) => t.cycle?.cycle === c.id).map((t) => t.id)];
+  // The one cycle picked on its own: with its text, no atoms and nothing else.
+  const loneCycle = () => { const cs = selection.size ? [] : (doc.cycles ?? []).filter((c) => picked.has(c.id)); return cs.length === 1 && [...picked].every((x) => x === cs[0].id || doc.captions?.some((t) => t.id === x && t.cycle?.cycle === cs[0].id)) ? cs[0].id : undefined; };
+  useEffect(() => {
+    if (stepPick && !(picked.size === 1 && picked.has(stepPick.cycle))) setStepPick(undefined);
+    if (branchPick && !(picked.size === 1 && picked.has(branchPick.cycle) && doc.cycles?.find((c) => c.id === branchPick.cycle)?.branches?.some((b) => b.id === branchPick.branch))) setBranchPick(undefined);
+  }, [picked, doc]); // eslint-disable-line react-hooks/exhaustive-deps
   // The arrow under a point (drawing coordinates), within a few px of its line.
   // A block arrow is hit anywhere inside its outline too.
   const arrowAt = (p: P) => [...arrows].reverse().find((a) => !isOrbital(a) && (nearTrace([p[0] * L, -p[1] * L], arrowTrace(a, L), 5 / views.get().zoom + frame.line * 2 * scaleOf(a))
     || (a.kind === "block" && inPolygon([p[0] * L, -p[1] * L], kept(blockOutlines, a, frame, () => blockOutline(a, frame, L))))))?.id;
+  // The arrow with an end at a point, within a mark's reach (markNear).
+  const arrowEndAt = (p: P) => [...arrows].reverse().find((a) => !isOrbital(a) && [a.from, a.to].some((q) => Math.hypot(q[0] - p[0], q[1] - p[1]) < 0.2))?.id;
   // The orbital whose lobes a point is in.
   const orbitalAt = (p: P) => [...arrows].reverse().find((a) => isOrbital(a) && lobesOf(a, L).some((l) => inPolygon([p[0] * L, -p[1] * L], l.path)))?.id;
   // The shape whose line is under a point; with the Select tool, also a highlight the point is inside.
@@ -3061,6 +3217,13 @@ export default function Editor() {
   };
   // Atoms come first, then captions, then bonds.
   const hit = (p: P): Hover => {
+    // With Select, a charge, radical or lone pair beside an atom comes first: a drag moves it round the atom. On a
+    // selected atom a press moves the selection (Shift-drag still moves the mark).
+    const mark = tool === "select" && selectKind !== "perspective" ? markNear(drawing.electrons, doc, p, L) : undefined;
+    // A curved arrow that starts or ends on those electrons (electronAt puts its end there) comes before them.
+    const end = mark && arrowEndAt(p);
+    if (end !== undefined) return { arrow: end };
+    if (mark && !selection.has(mark.atom)) return mark;
     // With Select, a filled shape or highlight brought to the front (order.ts) covers what is under it, so a click
     // there picks it unless what is under is in front of it too.
     const cover = tool === "select" ? (shown.shapes ?? []).filter((sh) => (sh.order ?? 0) > 0 && (sh.kind === "highlight" || sh.fill) && inDrawn(sh, p))
@@ -3079,7 +3242,7 @@ export default function Editor() {
     const arrow = arrowAt(p) ?? shapeAt(p);
     if (arrow !== undefined) return { arrow };
     const arc = cycleAt(p);
-    if (arc) return { cycle: arc.cycle, step: arc.step };
+    if (arc) return { cycle: arc.cycle, step: arc.step, ...(arc.branch !== undefined ? { branch: arc.branch, part: arc.part } : {}) };
     const inside = t.bond === undefined ? (tool === "select" ? highlightAt(p) ?? plateAt(p)?.id : undefined) ?? (tool === "select" || tool === "orbital" ? orbitalAt(p) : undefined) : undefined;
     return inside !== undefined ? { arrow: inside } : t;
   };
@@ -3163,6 +3326,16 @@ export default function Editor() {
     tabRow.current = { ...row, k };
     openWriting({ value: "", at: [row.x[k], at[1]], style: { ...(row.style[k] ?? w.style) } });
   }
+  // Tab in a side arrow's text: the text is kept and the text at its other end opens (that end is added if missing).
+  function tabSide(): boolean {
+    const w = writing, t = w && (w.cycle ?? doc.captions?.find((c) => c.id === w.id)?.cycle), c = t && doc.cycles?.find((x) => x.id === t.cycle);
+    if (!w || !t || !c || !isSide(t)) return false;
+    const branch = branchFor(c, t), other = t.side === "in" ? "out" : "in", there = doc.captions?.find((x) => x.cycle?.cycle === c.id && x.cycle.branch === branch && x.cycle.side === other);
+    commitWriting();
+    if (there) openWriting({ id: there.id, value: there.text, runs: runsOf(there).map((x) => ({ ...x })), version: 0, style: {} });
+    else openWriting({ value: "", cycle: { cycle: c.id, step: t.step, side: other, branch }, style: { ...textStyle } });
+    return true;
+  }
   function commitWriting() {
     const w = writing;
     if (!writingOpen.current) return;
@@ -3174,15 +3347,25 @@ export default function Editor() {
     // all the text has becomes the caption's own (shareColour), so it is kept as a colour picked for the whole caption.
     const own = "colour" in w.style ? w.style.colour : doc.captions?.find((c) => c.id === w.id)?.colour;
     const { colour, runs } = shareColour(w.runs && styled(w.runs) ? edited(w.runs, text) : undefined, own, style.colour), st = colour !== own ? { ...w.style, colour } : w.style;
+    // On an experiment page, the markup typed becomes rich text as a step of its own, so Undo gives the text as typed.
+    const marked = (m: Mol, id: number) => {
+      const c = expPage ? m.captions?.find((x) => x.id === id) : undefined, next = c && markupCaption(c);
+      if (next) dispatch({ type: "set", mol: { ...m, captions: m.captions!.map((x) => (x.id === id ? next : x)) } });
+    };
     if (w.id !== undefined) {
       const old = doc.captions?.find((c) => c.id === w.id);
       if (!text) return set(deleteGraphics(doc, new Set([w.id])));
-      if (old && (text !== old.text || Object.keys(st).length || JSON.stringify(runs) !== JSON.stringify(old.runs))) set(updateCaption(doc, w.id, { text, ...st, runs }));
+      if (old && (text !== old.text || Object.keys(st).length || JSON.stringify(runs) !== JSON.stringify(old.runs))) {
+        // A caption that already held markup kept as typed (an escape, or Undo of the change) is not changed again.
+        const m = set(updateCaption(doc, w.id, { text, ...st, runs }));
+        if (!(expPage && markupCaption(old))) marked(m, w.id);
+      }
       return setPicked(new Set([w.id]));
     }
-    if (!text) return;
+    // A side arrow's end written with nothing stays there, bare.
+    if (!text) { const sb = w.cycle && isSide(w.cycle) ? branchOf(doc, w.cycle) : undefined, part = w.cycle?.side as "in" | "out"; return sb && !sb.b[part] ? void set(withEnd(doc, sb.c.id, sb.b.id, part)) : undefined; }
     const [mol, id] = addCaption(doc, { text, x: w.at?.[0] ?? 0, y: w.at?.[1] ?? 0, ...(w.under ? { under: w.under } : {}), ...(w.on ? { on: w.on } : {}), ...(w.cycle ? { cycle: w.cycle } : {}), ...st, ...(runs ? { runs } : {}) });
-    set(mol);
+    marked(set(labelEnd(mol, id)), id);
     setPicked(new Set([id]));
   }
   // A text style on the characters selected in the caption box (with nothing selected, on the next characters
@@ -3222,6 +3405,16 @@ export default function Editor() {
     }
     set({ ...doc, captions: doc.captions?.map((c) => { if (!picked.has(c.id)) return c; const next = apply(runsOf(c), 0, c.text.length); return { ...c, runs: styled(next) ? next : undefined }; }) }, true);
   }
+  // Apply Markup: the markup in the text being typed (or in each picked caption) becomes rich text (experiment.ts):
+  // *italic*, **bold**, \textit{…}, $^{13}$C and the rest. Undo gives the text as it was typed.
+  function markupText() {
+    if (writing) {
+      const runs = markupRuns(writing.runs ?? [{ text: writing.value }]), value = plainOf(runs);
+      return setWriting({ ...writing, value, runs, version: (writing.version ?? 0) + 1, caret: [value.length, value.length] });
+    }
+    if (!doc.captions?.some((c) => picked.has(c.id) && markupCaption(c))) return;
+    set({ ...doc, captions: doc.captions.map((c) => (picked.has(c.id) ? markupCaption(c) ?? c : c)) }, true);
+  }
   // Applies a style change to the caption being typed, or to every picked caption.
   function restyle(change: (c: Partial<Caption>) => Partial<Caption>) {
     if (writing) {
@@ -3246,6 +3439,11 @@ export default function Editor() {
     const shiftCurve = (x: Arrow): Arrow => (arrowIds.has(x.id) && x.curve ? { ...shift(x), curve: { ...x.curve, points: x.curve.points.map((q) => ({ at: [q.at[0] + d[0], q.at[1] + d[1]], ...(q.c1 ? { c1: [q.c1[0] + d[0], q.c1[1] + d[1]] as P } : {}), ...(q.c2 ? { c2: [q.c2[0] + d[0], q.c2[1] + d[1]] as P } : {}) })) } } : shift(x));
     if (arrowIds.size) m = { ...m, arrows: m.arrows?.map(shiftCurve), shapes: m.shapes?.map(shift) };
     if (!captions.size) return m;
+    // A side arrow's text: its end goes where it is dragged, and the text follows its end.
+    for (const [id, from] of captions) {
+      const t = m.captions?.find((x) => x.id === id)?.cycle, sb = t && branchOf(m, t);
+      if (sb) m = dragEnd(m, cycleLayout, sb.c.id, sb.b.id, t!.side as "in" | "out", [(from[0] + d[0]) * L, -(from[1] + d[1]) * L], L).m;
+    }
     return {
       ...m,
       captions: m.captions?.map((c) => {
@@ -3253,108 +3451,206 @@ export default function Editor() {
         if (!from) return c;
         // A cycle's reagent or product stays on its cycle: its arrow's outer end (from) goes where it is dragged. A
         // step's name goes along its step the same way; an intermediate written as text stays one.
+        if (isSide(c.cycle)) return { ...c, x: from[0] + d[0], y: from[1] + d[1] };
         if (c.cycle?.side === "node") return { ...c, x: from[0] + d[0], y: from[1] + d[1] };
-        if (onStep(c.cycle)) {
+        if (c.cycle?.side === "name") {
           const f = doc.cycles?.find((y) => y.id === c.cycle!.cycle)?.scale ?? 1, to = sideFor(cycleLayout, c.cycle!, [(from[0] + d[0]) * L, -(from[1] + d[1]) * L], L, f);
           return to ? { ...c, cycle: { ...c.cycle!, ...to } } : c;
         }
+        // A centre label stays the cycle's while it is well inside the circle (off, in bond lengths at its scale);
+        // further out it is free text.
+        const own = c.cycle?.side === "centre" ? doc.cycles?.find((y) => y.id === c.cycle!.cycle) : undefined, f = own?.scale ?? 1, o = c.cycle?.off ?? [0, 0];
+        const off: [number, number] = [Math.round((o[0] + d[0] / f) * 1000) / 1000, Math.round((o[1] + d[1] / f) * 1000) / 1000];
+        if (own && Math.hypot(...off) * f <= 0.8 * own.radius && Math.hypot(...off) <= 50) return { ...c, cycle: { ...c.cycle!, off } };
         const { under: _u, on: _o, cycle: _c, placed: _p, ...free } = c;
         return { ...free, x: from[0] + d[0], y: from[1] + d[1] };
       }),
     };
   }
   // Catalytic cycles: make one from the selected structures, tidy it, turn it the other way, label it, or ungroup it.
+  // Tidy a cycle (Tidy the cycle, Make a cycle, Clean Up): breaks go round evenly with the intermediates, and its side
+  // arrows' structures go with their arcs. A circle with no structures or text on it stays as it is. An intermediate's
+  // ink is its structure's in d (m drawn), or its text's.
+  const spread = (m: Mol, c: Cycle, d: Pick<typeof drawing, "ink"> = drawing) => {
+    if (!c.nodes.some((n, i) => n.length || textOn(m, c, i))) return m;
+    const ink = (atoms: number[], i: number) => { const t = atoms.length ? undefined : textOn(m, c, i); return t ? placed.find((x) => x.id === t.id)?.box : union(atoms.filter((k) => d.ink[k]).map((k) => d.ink[k])); };
+    const { shifts, radius } = spreadCycle(c, L, ink), even = c.nodes.map((_, i) => Math.PI / 2 - ((c.clockwise ? 1 : -1) * 2 * Math.PI * i) / c.nodes.length);
+    m = followArcs(m, c, even, radius);
+    c.nodes.forEach((n, i) => {
+      m = moveAtoms(m, new Set(n), shifts[i]);
+      const t = n.length ? undefined : textOn(m, c, i);
+      if (t) m = updateCaption(m, t.id, { x: t.x + shifts[i][0], y: t.y + shifts[i][1] });
+    });
+    return { ...m, cycles: m.cycles?.map((x) => (x.id === c.id ? { ...x, radius, at: even } : x)) };
+  };
   function cycleAction(what: string) {
-    // A picked reagent or product: make it the other, put it inside or outside the circle, or back where Octet puts it.
-    if (what.startsWith("side.")) {
-      const change = (t: CycleText): CycleText => {
-        // The text stays where it is (a placed one), and its arrow turns round.
-        if (what === "side.swap") return { ...t, side: t.side === "in" ? "out" : "in" };
-        // Inside, the end stays no nearer the middle than a fifth of the radius.
-        if (what === "side.through") return { ...t, through: !passes(doc, t), tail: undefined };
-        if (what === "side.inside") { const r = doc.cycles?.find((y) => y.id === t.cycle)?.radius ?? 3; return { ...t, reach: sideReach(t) > 0 ? -Math.min(sideReach(t), 0.8 * r) : -sideReach(t) }; }
-        const { at: _a, reach: _r, meet: _m, tail: _t, ...rest } = t;
-        return rest;
-      };
-      return set({ ...doc, captions: doc.captions?.map((c) => (picked.has(c.id) && (what === "side.reset" ? onStep(c.cycle) : isSide(c.cycle)) ? { ...c, cycle: change(c.cycle!) } : c)) }, true);
+    // A picked side arrow, or the one whose text is picked: the ends it has, turned round, inside or outside the circle,
+    // its heads, back where Octet puts it, or taken off. A picked step's name goes back where Octet puts it.
+    if (what.startsWith("side.") && what !== "side.add") {
+      let m = doc;
+      const mine = new Map<string, { c: number; b: number }>();
+      if (branchPick && picked.has(branchPick.cycle)) mine.set(`${branchPick.cycle}:${branchPick.branch}`, { c: branchPick.cycle, b: branchPick.branch });
+      for (const cap of doc.captions ?? []) {
+        if (!picked.has(cap.id) || !cap.cycle) continue;
+        if (cap.cycle.side === "name" && what === "side.reset") { const { at: _a, reach: _r, ...rest } = cap.cycle; m = updateCaption(m, cap.id, { cycle: rest }); continue; }
+        const sb = isSide(cap.cycle) ? branchOf(doc, cap.cycle) : undefined;
+        if (sb) mine.set(`${sb.c.id}:${sb.b.id}`, { c: sb.c.id, b: sb.b.id });
+      }
+      for (const { c, b: id } of mine.values()) {
+        const cy = m.cycles?.find((x) => x.id === c), b = cy?.branches?.find((x) => x.id === id);
+        if (!cy || !b) continue;
+        // A structure alone turned round, or put back, meets the arc where a structure dropped there would.
+        const lone = (b.in ?? b.out)!, solo = !(b.in && b.out) && lone.atoms?.length ? lone.atoms : undefined, again = (x: Mol, part: "in" | "out") => { const at = solo && structureMeet(x, cy, solo, part); return at ? setBranch(x, c, id, at) : x; };
+        if (what === "side.swap") m = again(swapBranch(m, c, id), b.in ? "out" : "in");
+        if (what === "side.remove") m = removeEnd(removeEnd(m, c, id, "in"), c, id, "out");
+        if (what.startsWith("side.ends.")) m = setEnds(m, c, id, what.slice(10) as "both" | "in" | "out");
+        // Inside, an end stays no nearer the middle than a fifth of the radius.
+        // A structure end stays where its structure is.
+        if (what === "side.inside") { const inside = insideOf(b); for (const part of ["in", "out"] as const) { const r = b[part]?.reach ?? 1.1; if (b[part] && !b[part]!.atoms?.length && r < 0 === inside) m = setEnd(m, c, id, part, { reach: r > 0 ? -Math.min(r, 0.8 * cy.radius) : -r }); } }
+        if (what === "side.reset") m = again(setBranch(m, c, id, { meet: undefined, ...(b.in ? { in: b.in.atoms ? { atoms: b.in.atoms } : {} } : {}), ...(b.out ? { out: b.out.atoms ? { atoms: b.out.atoms } : {} } : {}) }), b.in ? "in" : "out");
+        // A head at the arrow's start or end: the one it has already takes it off, as with an arrow.
+        if (what.startsWith("side.start.") || what.startsWith("side.end.")) {
+          const h = branchHeads(b), k = what.startsWith("side.start.") ? 0 : 1, v = what.split(".").pop() as Head, heads: [Head, Head] = k ? [h[0], h[1] === v ? "none" : v] : [h[0] === v ? "none" : v, h[1]];
+          m = setBranch(m, c, id, { heads: heads[0] === "none" && heads[1] === (b.out ? "full" : "none") ? undefined : heads });
+        }
+      }
+      return set(m, true);
     }
     // The clear space round each intermediate, in tenths of a point.
     if (what.startsWith("gap.")) {
       const g = Number(what.slice(4)) / 10;
       return set({ ...doc, cycles: doc.cycles?.map((c) => (picked.has(c.id) ? { ...c, gap: g } : c)) }, true, `cycle-gap-${[...picked].join()}`);
     }
-    // An intermediate's ink: its structure's, or its text's.
-    const ink = (c: Cycle) => (atoms: number[], i: number) => { const t = atoms.length ? undefined : textOn(doc, c, i); return t ? placed.find((x) => x.id === t.id)?.box : inkOf(atoms); };
-    // Breaks go round evenly with the intermediates. A circle with no structures or text on it stays as it is.
-    const spread = (m: Mol, c: Cycle) => {
-      if (!c.nodes.some((n, i) => n.length || textOn(m, c, i))) return m;
-      const { shifts, radius } = spreadCycle(c, L, ink(c)), even = c.nodes.map((_, i) => Math.PI / 2 - ((c.clockwise ? 1 : -1) * 2 * Math.PI * i) / c.nodes.length);
-      c.nodes.forEach((n, i) => {
-        m = moveAtoms(m, new Set(n), shifts[i]);
-        const t = n.length ? undefined : textOn(m, c, i);
-        if (t) m = updateCaption(m, t.id, { x: t.x + shifts[i][0], y: t.y + shifts[i][1] });
-      });
-      return { ...m, cycles: m.cycles?.map((x) => (x.id === c.id ? { ...x, radius, ...(x.at ? { at: even } : {}) } : x)) };
-    };
     if (what === "make") {
       const groups = fragments(doc).filter((g) => g.some((i) => selection.has(i)));
       if (groups.length < 2) return;
       const items = groups.map((atoms) => { const b = inkOf(atoms)!; return { atoms, middle: [(b[0] + b[2]) / 2, (b[1] + b[3]) / 2] as P }; });
       const middle: P = [items.reduce((s, x) => s + x.middle[0], 0) / items.length, items.reduce((s, x) => s + x.middle[1], 0) / items.length];
-      const [m, id] = addCycle(doc, { centre: [middle[0] / L, -middle[1] / L], radius: 3, clockwise: true, nodes: orderAround(middle, items) });
-      set(spread(m, m.cycles!.find((c) => c.id === id)!));
+      const [m, id] = addCycle(doc, { centre: [middle[0] / L, -middle[1] / L], radius: 3, clockwise: true, nodes: orderAround(middle, items), at: [] });
+      glideTo(spread(m, m.cycles!.find((c) => c.id === id)!));
       return choose(groups.flat(), [id]);
     }
     const c = (doc.cycles ?? []).find((x) => picked.has(x.id));
     if (!c) return;
-    if (what === "tidy") return set(spread(doc, c), true);
+    if (what === "tidy") return glideTo(spread(doc, c));
+    // The step picked or last pressed (stepHere): reversible or forward, and a reversible one's balance (Arrow.ratio).
+    const s = stepHere(c);
+    if (what === "step.reset") return set(setStep(doc, c.id, s, { lead: undefined, trail: undefined, bow: undefined, ratio: undefined }), true);
+    if (what === "step.hide") return set(c.steps?.[s]?.hidden ? setStep(doc, c.id, s, { hidden: undefined }) : hideArc(c.id, s), true);
+    if (what === "step.show") return set(c.steps?.reduce((m, x, k) => (x?.hidden ? setStep(m, c.id, k, { hidden: undefined }) : m), doc) ?? doc, true);
+    // A new side arrow on the step, picked on its own so its handles show.
+    if (what === "side.add") {
+      const [m, branch] = addBranch(doc, c.id, s);
+      if (branch === undefined) return;
+      set(m, true);
+      setSelection(new Set());
+      setPicked(new Set([c.id]));
+      setStepPick(undefined);
+      return setBranchPick({ cycle: c.id, branch });
+    }
+    if (what === "step.reversible") return set(setStep(doc, c.id, s, { kind: c.steps?.[s]?.kind ? undefined : "equilibrium" }), true);
+    if (what.startsWith("step.balance.")) return set(setStep(doc, c.id, s, { kind: "equilibrium", ratio: what.endsWith(".forward") ? 3 : what.endsWith(".back") ? 1 / 3 : undefined }), true);
     if (what === "reverse") return set({ ...doc, cycles: doc.cycles?.map((x) => (x.id === c.id ? { ...x, clockwise: !x.clockwise } : x)) }, true);
-    if (what === "ungroup") return set(deleteGraphics(doc, new Set([c.id])));
-    if (what === "centre" || what === "in" || what === "out" || what === "name") {
+    // Remove the cycle (cycle.ungroup: its old id, so a key saved for it still works): its arrows go, and its structures
+    // and text stay where they are.
+    if (what === "remove" || what === "ungroup") return set(deleteGraphics(doc, new Set([c.id]), drawnAt, drawnAlign));
+    if (what === "name") return openName(c.id, s);
+    if (what === "centre" || what === "in" || what === "out") {
       setPicked(new Set());
       setSelection(new Set());
-      return openWriting({ value: "", cycle: { cycle: c.id, step: what === "centre" ? 0 : cycleStep, side: what }, style: { ...textStyle, ...(what === "name" ? { italic: true } : {}) } });
+      return openWriting({ value: "", cycle: { cycle: c.id, step: what === "centre" ? 0 : s, side: what }, style: { ...textStyle } });
     }
   }
-  // A structure as a cycle's reagent or product (src/cycle.ts, sides), or taken off when it is that already.
-  function sideStructure(atom: number, side: "in" | "out") {
-    const atoms = fragments(doc).find((g) => g.includes(atom)) ?? [atom], b = inkOf(atoms), cycles = doc.cycles ?? [];
-    if (!cycles.length || !b) return setNotice("Draw a catalytic cycle first.", "info");
-    if (cycles.some((c) => c.nodes.some((n) => n.some((i) => atoms.includes(i))))) return setNotice("This structure is an intermediate of the cycle.", "info");
-    const mid: P = [(b[0] + b[2]) / 2 / L, -(b[1] + b[3]) / 2 / L], far = (c: Cycle) => Math.abs(Math.hypot(mid[0] - c.centre[0], mid[1] - c.centre[1]) - c.radius);
-    const near = cycles.reduce((p, q) => (far(q) < far(p) ? q : p)), was = cycles.flatMap((c) => c.sides ?? []).find((x) => x.atoms.includes(atom));
-    const off = (c: Cycle): Cycle => { const sides = (c.sides ?? []).filter((x) => !x.atoms.some((i) => atoms.includes(i))); const { sides: _, ...rest } = c; return sides.length ? { ...rest, sides } : rest; };
-    set({ ...doc, cycles: cycles.map((c) => { const k = off(c); return c.id === near.id && was?.side !== side ? { ...k, sides: [...(k.sides ?? []), { atoms, side }] } : k; }) }, true);
+  // A side arrow pulled out of a cycle's arc (pullBranch), let go: on a structure, the structure labels its end; on free
+  // text, the text does; elsewhere its text is written there (none leaves the end bare). Let go near the arc, nothing.
+  function releasePull(id: number, step: number, made?: ReturnType<typeof pullBranch>) {
+    if (!made) return;
+    const { branch, part } = made, h = pointer.current ? hit(pointer.current) : {}, atom = h.atom ?? (h.bond !== undefined ? doc.bonds[h.bond]?.atoms[0] : undefined), c = made.m.cycles?.find((x) => x.id === id);
+    const atoms = atom !== undefined ? fragments(doc).find((g) => g.includes(atom)) : undefined, cycle: CycleText = { cycle: id, step, side: part, branch };
+    if (c && atoms && !c.nodes.some((n) => n.some((i) => atoms.includes(i)))) {
+      // A structure labels one end at a time: one it labelled before is bare now.
+      let m = made.m;
+      for (const b of c.branches ?? []) for (const x of ["in", "out"] as const) if ((b.id !== branch || x !== part) && b[x]?.atoms?.some((i) => atoms.includes(i))) m = setEnd(m, id, b.id, x, { atoms: undefined });
+      return set(setEnd(m, id, branch, part, { atoms, along: undefined, reach: undefined }), true);
+    }
+    const text = h.caption !== undefined ? doc.captions?.find((x) => x.id === h.caption && !x.under && !x.on && !x.cycle) : undefined;
+    if (text) return set(updateCaption(made.m, text.id, { cycle }), true);
+    set(made.m);
+    openWriting({ value: "", cycle, style: { ...textStyle } });
+  }
+  // A step's name opened for typing: the name it has, or a new one.
+  function openName(id: number, step: number) {
+    const there = doc.captions?.find((x) => x.cycle?.cycle === id && x.cycle.step === step && x.cycle.side === "name");
+    setSelection(new Set());
+    setPicked(new Set());
+    if (there) return openWriting({ id: there.id, value: there.text, runs: runsOf(there).map((x) => ({ ...x })), version: 0, style: {} });
+    return openWriting({ value: "", cycle: { cycle: id, step, side: "name" }, style: { ...textStyle, italic: true } });
   }
   // The Cycle tool. A new cycle drawn from its centre out to a point, turning clockwise, with no nodes yet.
   function newCycle(centre: P, to: P): Omit<Cycle, "id"> {
     return { centre, radius: Math.max(0.5, Math.hypot(to[0] - centre[0], to[1] - centre[1])), clockwise: true, nodes: [], at: [] };
   }
-  // The cycle whose circle passes within a few px of a point.
-  const circleAt = (p: P) => (doc.cycles ?? []).find((c) => Math.abs(Math.hypot(p[0] - c.centre[0], p[1] - c.centre[1]) - c.radius) * L * views.get().zoom < 8);
-  // A drag draws a circle, and structures already on it join it. A click on a circle breaks it there (or joins it up
-  // again at a break); a click away from any circle draws one three bond lengths across. Reagent in, Product out and
-  // Step name: a click on a step of a circle adds that text there, or edits the text already there. Reagent in or
-  // Product out on a structure makes the structure that, on the nearest cycle; a second click takes it off again.
-  function releaseCycle(from: P, to?: P) {
-    const c = circleAt(from);
-    const h = !c && (cycleChoice === "in" || cycleChoice === "out") ? hit(from) : {}, atom = h.atom ?? (h.bond !== undefined ? doc.bonds[h.bond]?.atoms[0] : undefined);
-    if (atom !== undefined) return sideStructure(atom, cycleChoice as "in" | "out");
-    if (cycleChoice !== "circle") {
-      if (!c) return setNotice("Click a catalytic cycle's circle.", "info");
-      const side = cycleChoice as "in" | "out" | "name", step = stepAt(doc, c, angleAbout(c, from)), there = doc.captions?.find((x) => x.cycle?.cycle === c.id && x.cycle.step === step && x.cycle.side === side);
-      setSelection(new Set());
-      setPicked(new Set());
-      if (there) return openWriting({ id: there.id, value: there.text, runs: runsOf(there).map((x) => ({ ...x })), version: 0, style: {} });
-      return openWriting({ value: "", cycle: { cycle: c.id, step, side }, style: { ...textStyle, ...(side === "name" ? { italic: true } : {}) } });
+  // The cycles laid out afresh for another drawing with the same structures and text (resplice).
+  const relay = (m: Mol) => layoutCycles(m, L, pt, (atoms) => union(atoms.filter((i) => drawing.ink[i]).map((i) => drawing.ink[i])), (id) => placed.find((x) => x.id === id)?.box);
+  // A step's arc hidden (the Eraser, Delete, Hide the arc): the last arc showing takes its cycle with it.
+  const hideArc = (id: number, step: number) => cycleLayout.spans.some((s) => s.cycle === id && s.step !== step && s.to > s.from && !doc.cycles?.find((c) => c.id === id)?.steps?.[s.step]?.hidden) ? setStep(doc, id, step, { hidden: true }) : deleteGraphics(doc, new Set([id]), drawnAt, drawnAlign);
+  // The cycle whose circle passes within a few px (px) of a point: the nearest, where two do.
+  const circleAt = (p: P, px = 8) => {
+    const d = (c: Cycle) => Math.abs(Math.hypot(p[0] - c.centre[0], p[1] - c.centre[1]) - c.radius) * L * views.get().zoom;
+    return (doc.cycles ?? []).filter((c) => d(c) < px).sort((a, b) => d(a) - d(b))[0];
+  };
+  // A hidden step under a point: within a few px of where its arc would run.
+  const hiddenAt = (p: P) => cycleLayout.spans.find((s) => {
+    if (!doc.cycles?.find((c) => c.id === s.cycle)?.steps?.[s.step]?.hidden || s.to <= s.from) return false;
+    const q: P = [p[0] * L, -p[1] * L], t = (((Math.sign(s.sw) || s.dir) * (Math.atan2(q[1] - s.O[1], q[0] - s.O[0]) - s.p0)) % (2 * Math.PI) + 2 * Math.PI) % (2 * Math.PI);
+    return t <= Math.abs(s.sw) && Math.abs(Math.hypot(q[0] - s.O[0], q[1] - s.O[1]) - s.Rs) * views.get().zoom < 8;
+  });
+  // A drag draws a circle, and structures already on it join it; a drag from a circle pulls a side arrow out of it
+  // (releasePull). A click on a circle breaks it there (or joins it up again at a break); a click away from any circle
+  // draws one three bond lengths across. Step name: a click on a step of a circle adds its name there, or edits the
+  // name already there. Reversible step: as Catalytic cycle, but a click on a circle makes the step there reversible,
+  // or forward again. Option-click goes on to its next balance: equal, forward longer, back longer. A click where a
+  // hidden step's arc was shows it again. A break never goes in an intermediate's ink or the gap round it. A double-click
+  // on an arc opens its step's name, with no break or change left by its clicks. Side arrow: as Catalytic cycle, but a
+  // click on or near a circle asks what to add to the step there (askSide).
+  function releaseCycle(from: P, to?: P, screen?: [number, number]) {
+    if (cycleChoice === "side" && !to) return askSide(from, screen);
+    const c = circleAt(from), hid = !to && cycleChoice !== "name" ? hiddenAt(from) : undefined, was = lastArc.current;
+    lastArc.current = undefined;
+    // The second click of a double-click on an arc takes the first one's change back and opens the step's name.
+    if (!to && was && (c?.id ?? hid?.cycle) === was.cycle && was.after === doc && performance.now() - was.time < DOUBLE_MS) { undo(); return openName(was.cycle, was.step); }
+    const s = c && stepAt(doc, c, angleAbout(c, from)), clicked = (m: Mol, at = { cycle: c!.id, step: s! }) => { lastArc.current = { ...at, time: performance.now(), after: set(m, true) }; };
+    if (hid) return clicked(setStep(doc, hid.cycle, hid.step, { hidden: undefined }), { cycle: hid.cycle, step: hid.step });
+    if (cycleChoice === "name") return c ? openName(c.id, stepAt(doc, c, angleAbout(c, from))) : undefined;
+    if (!to && c && cycleChoice === "reversible") {
+      const st = c.steps?.[s!], r = st?.ratio ?? 1;
+      setCycleStep({ cycle: c.id, step: s! });
+      return clicked(setStep(doc, c.id, s!, pressAlt.current ? { kind: "equilibrium", ratio: st?.kind !== "equilibrium" || r === 1 ? 3 : r > 1 ? 1 / 3 : undefined } : { kind: st?.kind ? undefined : "equilibrium" }));
     }
     if (!to && c) {
       const a = angleAbout(c, from), gap = breakAt(doc, c, a, 10 / (c.radius * L * views.get().zoom));
-      return set(gap !== undefined ? removeStop(doc, c.id, gap) : addStop(doc, c.id, a, []), true);
+      if (gap === undefined && c.nodes.length && !clearAt(cycleLayout, c.id, a)) return;
+      return clicked(gap !== undefined ? removeStop(doc, c.id, gap, relay) : addStop(doc, c.id, a, [], relay));
     }
     // The new cycle is not picked, so the next clicks on its circle break it (and do not land on its frame's handles).
     const [m] = addCycle(doc, newCycle(from, to ?? [from[0] + 3, from[1]]));
-    set(joinCycles(m, fragments(m)));
+    set(dropOnCycle(m, fragments(m)));
+  }
+  // The Side arrow tool's click within 24 px of a circle: a menu at the pointer asks Reagent, Product or Reagent and
+  // product, the likely one first (sideChoices) and under the pointer, so Return or a second click takes it.
+  function askSide(from: P, screen?: [number, number]) {
+    const c = circleAt(from, 24), s = c && stepAt(doc, c, angleAbout(c, from));
+    if (!c || s === undefined || !screen) { setSelection(new Set()); setPicked(new Set()); return; }
+    const g = sideFor(cycleLayout, { cycle: c.id, step: s }, [from[0] * L, -from[1] * L], L, c.scale ?? 1)?.at ?? 0.5;
+    setSideAsk({ x: screen[0] - 24, y: screen[1] - 20, cycle: c.id, step: s, g, choices: sideChoices(c, s, g) });
+  }
+  // The answer: the end goes on (one undo step), and its text opens for typing there (none leaves the end bare). Both
+  // ends: the reagent's first.
+  function chooseSide(ask: NonNullable<typeof sideAsk>, ends: "in" | "out" | "both") {
+    const [m, branch] = addSide(doc, ask.cycle, ask.step, ask.g, ends);
+    if (branch === undefined) return;
+    set(m);
+    openWriting({ value: "", cycle: { cycle: ask.cycle, step: ask.step, side: ends === "out" ? "out" : "in", branch }, style: { ...textStyle } });
   }
   // Numbers the structures in the selection, left to right, skipping any that already have a number.
   function numberStructures() {
@@ -3545,7 +3841,8 @@ export default function Editor() {
     const cycleIds = new Set((base.cycles ?? []).filter((c) => picks.has(c.id)).map((c) => c.id));
     for (const caption of base.captions ?? []) {
       const c = placed.find((x) => x.id === (original.get(caption.id) ?? caption.id));
-      const follows = (caption.under && caption.under.every((i) => atoms.has(i))) || (caption.on && arrowIds.has(caption.on.arrow)) || (caption.cycle && cycleIds.has(caption.cycle.cycle));
+      // A cycle's text follows it, but for an intermediate written as text, which moves as a structure would.
+      const follows = (caption.under && caption.under.every((i) => atoms.has(i))) || (caption.on && arrowIds.has(caption.on.arrow)) || (caption.cycle && caption.cycle.side !== "node" && cycleIds.has(caption.cycle.cycle));
       // A cycle's reagent or product moves by its arrow's outer end, where it is at the press.
       // (A reagent's text is at its arrow's start, a product's at its end.)
       const start = cycleArrows.find((a) => a.caption === caption.id), end = cycleArrows.find((a) => a.captionEnd === caption.id);
@@ -3594,16 +3891,30 @@ export default function Editor() {
     };
     setDrag({ kind: "move", from: p, working: base, moved: false, start: screen, target: t, guides: [], captions, arrows: arrowIds, cycles: cycleIds, snap, ...(copies || alone ? { base, atoms } : {}) });
   };
-  // A press on a cycle's arrows picks the cycle with all its intermediates (and the rest of an integral group it is
+  // A press on a cycle's arrows picks the cycle with all its parts (cycleParts, and the rest of an integral group it is
   // in), and grabs them.
   function pressCycle(p: P, t: Hover, screen: [number, number], copy = false) {
     const c = doc.cycles?.find((x) => x.id === t.cycle);
     if (!c) return;
-    const [atoms, picks] = wholeIntegral(doc, new Set(c.nodes.flat()), new Set([c.id]));
-    setCycleStep(t.step ?? 0);
+    if (t.branch !== undefined) return pressBranch(p, t, screen);
+    const [own, text] = cycleParts(c), [atoms, picks] = wholeIntegral(doc, new Set(own), new Set([c.id, ...text]));
+    stepAgain.current = tool === "select" && picked.has(c.id) ? t.step : undefined;
+    if (stepAgain.current === undefined) setStepPick(undefined);
+    setBranchPick(undefined);
+    setCycleStep({ cycle: c.id, step: t.step ?? 0 });
     setSelection(atoms);
     setPicked(picks);
     startMove(p, screen, t, picks, atoms, copy);
+  }
+  // A press on a cycle's side arrow picks that side arrow on its own and grabs the end of the half pressed (a click leaves
+  // it picked).
+  function pressBranch(p: P, t: Hover, screen: [number, number]) {
+    setSelection(new Set());
+    setPicked(new Set([t.cycle!]));
+    setStepPick(undefined);
+    setBranchPick({ cycle: t.cycle!, branch: t.branch! });
+    setCycleStep({ cycle: t.cycle!, step: t.step ?? 0 });
+    setDrag({ kind: "handle", id: t.cycle!, which: `end:${t.part ?? "in"}`, branch: t.branch, working: doc, from: p, start: screen });
   }
   // A press on a caption or arrow picks it (Shift adds it), with the rest of an integral group it is in, and grabs it.
   function pressCaption(p: P, t: Hover, shift: boolean, screen: [number, number], copy = false) {
@@ -3666,9 +3977,22 @@ export default function Editor() {
     setSelection(a);
     setPicked(i);
   };
-  // What a selection area takes in: also each cycle whose intermediates it takes in, all of them.
-  const chooseArea = (atoms: Set<number>, items: number[]) =>
-    choose(atoms, [...items, ...(doc.cycles ?? []).filter((c) => c.nodes.some((n) => n.length) && c.nodes.every((n) => n.every((i) => atoms.has(i)))).map((c) => c.id)]);
+  // What a selection area (inside: whether a point is in it) takes in: also each cycle whose circle it takes in, or all
+  // of whose intermediates it does, with all its parts. A side arrow it takes in whole, with no atoms and no text but
+  // its own, is picked.
+  const chooseArea = (atoms: Set<number>, items: number[], inside: (q: P) => boolean) => {
+    const node = (c: Cycle, n: number[], j: number) => (n.length ? n.every((i) => atoms.has(i)) : items.includes(textOn(doc, c, j)?.id ?? NaN));
+    const cycles = (doc.cycles ?? []).filter((c) => Array.from({ length: 16 }, (_, k) => (k * Math.PI) / 8).every((a) => inside([c.centre[0] + c.radius * Math.cos(a), c.centre[1] + c.radius * Math.sin(a)]))
+      || (c.nodes.some((n, j) => n.length || textOn(doc, c, j)) && c.nodes.every((n, j) => node(c, n, j) || (!n.length && !textOn(doc, c, j)))));
+    // Its whole path taken in, with no atoms, and no text but its own.
+    const whole = (b: CycleLayout["branches"][number]) => cycleArrows.filter((a) => a.cycle === b.cycle && a.branch === b.branch).every((a) => arrowTrace(a, L).paths.every((q) => q.every((x) => inside([x[0] / L, -x[1] / L]))));
+    const own = (b: CycleLayout["branches"][number]) => items.every((x) => doc.captions?.some((t) => t.id === x && t.cycle?.cycle === b.cycle && t.cycle.branch === b.branch));
+    const parts = cycles.map(cycleParts), bs = cycles.length || atoms.size ? [] : cycleLayout.branches.filter((b) => whole(b) && own(b));
+    setStepPick(undefined);
+    setBranchPick(bs.length === 1 ? { cycle: bs[0].cycle, branch: bs[0].branch } : undefined);
+    if (bs.length === 1) return choose([], [bs[0].cycle]);
+    choose([...atoms, ...parts.flatMap((x) => x[0])], [...items, ...cycles.map((c) => c.id), ...parts.flatMap((x) => x[1])]);
+  };
   // A selection area: a box, or a lasso, as the Select tool is set.
   function startArea(p: P, t: Hover, base: Set<number>, picks = new Set<number>()) {
     if (selectKind === "lasso") setDrag({ kind: "lasso", points: [p], base, picks, target: t, moved: false });
@@ -3704,18 +4028,32 @@ export default function Editor() {
     const hx = c.anchor === "end" ? (w ? x - k : c.box[0]) - m : (c.anchor === "middle" ? (w ? x + k / 2 : c.box[2]) : w ? x + k : c.box[2]) + m;
     return { id: c.id, at: [hx / L, -(c.box[1] + c.box[3]) / 2 / L], c };
   };
-  // The one picked reagent's or product's arrow handles (sideHandles).
-  const sideHandles = () => {
-    const ids = [...picked], c = ids.length === 1 && !selection.size && !writing ? shown.captions?.find((x) => x.id === ids[0]) : undefined;
-    const h = c && isSide(c.cycle) ? cycleLayout.handles.get(c.id) : undefined;
-    return h && { id: c!.id, h };
+  // A cycle's side arrows' handles (where each meets the arc and its ends): every one's while the Cycle tool is over the
+  // cycle, or when the cycle is picked on its own; the picked side arrow's alone, or the one whose text is picked.
+  const branchHandles = (): CycleLayout["branches"] => {
+    if (writing || tool === "erase") return [];
+    const over = tool === "cycle" ? overs.get().cycle : undefined, alone = picked.size === 1 && !selection.size ? [...picked][0] : undefined, one = loneCycle();
+    const t = alone === undefined ? undefined : shown.captions?.find((x) => x.id === alone)?.cycle, sb = t && isSide(t) ? branchOf(shown, t) : undefined;
+    const mine = (b: CycleLayout["branches"][number]) => (sb ? b.cycle === sb.c.id && b.branch === sb.b.id : b.cycle === one && stepPick?.cycle !== one && (branchPick?.cycle !== one || b.branch === branchPick.branch));
+    return cycleLayout.branches.filter((b) => b.cycle === over || mine(b));
+  };
+  // A cycle's step handles (lead, trail and bow): every drawn step's while the Cycle tool is over the cycle, or when the
+  // cycle is picked on its own; the picked step's alone.
+  const stepHandles = (): { c: Cycle; steps: number[] } | undefined => {
+    if (writing || tool === "erase") return undefined;
+    const one = doc.cycles?.find((x) => x.id === loneCycle()), id = tool === "cycle" ? overs.get().cycle ?? one?.id : one?.id, c = doc.cycles?.find((x) => x.id === id);
+    if (!c) return undefined;
+    const pick = c === one && stepPick?.cycle === c.id ? stepPick.step : undefined;
+    if (c === one && branchPick?.cycle === c.id && overs.get().cycle !== c.id) return undefined;
+    return { c, steps: cycleLayout.spans.filter((s) => s.cycle === c.id && s.to > s.from && !c.steps?.[s.step]?.hidden && (pick === undefined || s.step === pick)).map((s) => s.step) };
   };
   // The handle of the one picked arrow under a point: its ends, and the middle of a curved one.
-  const handleAt = (p: P): { id: number; which: Corner } | undefined => {
+  const handleAt = (p: P): { id: number; which: Corner; step?: number; branch?: number } | undefined => {
     const ids = [...picked], a = ids.length === 1 && !selection.size ? arrows.find((x) => x.id === ids[0]) : undefined;
     const near = (q: [number, number]) => Math.hypot(p[0] - q[0], p[1] - q[1]) * L * views.get().zoom < 8;
-    const side = sideHandles();
-    if (side) for (const which of ["meet", "tail", "end"] as const) { const q = side.h[which]; if (q && near(q)) return { id: side.id, which }; }
+    for (const b of branchHandles()) for (const which of ["meet", "end:in", "end:out"] as const) { const q = which === "meet" ? b.T : b[which === "end:in" ? "in" : "out"]; if (q && near(q)) return { id: b.cycle, which, branch: b.branch }; }
+    const sh = stepHandles();
+    if (sh) for (const which of ["lead", "trail", "bow"] as const) for (const s of cycleLayout.spans) if (s.cycle === sh.c.id && sh.steps.includes(s.step) && near(s[which])) return { id: sh.c.id, which, step: s.step };
     const wh = widthHandle();
     if (wh && near(wh.at)) return { id: wh.id, which: "width" };
     // A picked pen curve's anchors, then their handles; a fragmentation line's corners and ends.
@@ -3810,11 +4148,15 @@ export default function Editor() {
     dropOver.current = el;
   };
   // Right-click (Control-click on the Mac): what is under the pointer is selected, unless it is selected already, and
-  // the Actions menu opens there. On a TLC plate the plate is picked, with the spot under the pointer.
+  // the Actions menu opens there. On a TLC plate the plate is picked, with the spot under the pointer. On a cycle's arc,
+  // the cycle is picked, and its actions go on that step; on the arc of a cycle picked already, the step is picked (as
+  // a second click picks it); on a side arrow, the side arrow.
   function onContextMenu(e: React.MouseEvent<SVGSVGElement>) {
     e.preventDefault();
     if (noMenu.current || drag || writing) { noMenu.current = false; return; }
-    const p = toDoc(e.clientX, e.clientY), t = hit(p), free = t.atom === undefined && t.bond === undefined && t.caption === undefined && t.cycle === undefined;
+    // On a warning's red mark, its atom, bond or brackets, as ChemDraw's right-click on the red box.
+    const p = toDoc(e.clientX, e.clientY), under = hit(p), mark = Object.values(under).every((v) => v === undefined) ? problemAt(shown, found, p) : undefined;
+    const t: Hover = mark ? (mark.shape !== undefined ? { arrow: mark.shape } : { atom: mark.atom, bond: mark.bond }) : under, free = t.atom === undefined && t.bond === undefined && t.caption === undefined && t.cycle === undefined;
     const plate = free && (t.arrow === undefined || doc.shapes?.some((x) => x.id === t.arrow && x.kind === "tlc")) ? plateAt(p) : undefined;
     if (plate) {
       const k = spotHit(plate, p);
@@ -3824,9 +4166,15 @@ export default function Editor() {
       setLanePick({ plate: plate.id, lane: laneOf(plate, p) });
     } else {
       const found: Hover = free && t.arrow === undefined ? { arrow: highlightAt(p) ?? orbitalAt(p) } : t;
-      const atoms = atomsOf(doc, found), items = itemsOf(found), cycle = doc.cycles?.find((c) => c.id === found.cycle);
+      const atoms = atomsOf(doc, found), items = itemsOf(found), cycle = doc.cycles?.find((c) => c.id === found.cycle), [own, text] = cycle ? cycleParts(cycle) : [[], []];
       const on = atoms.length || items.length ? atoms.every((i) => selection.has(i)) && items.every((x) => picked.has(x)) : selection.size > 0 && onSelection(doc, selection, p);
-      if (!on) choose([...atoms, ...(cycle?.nodes.flat() ?? [])], items);
+      if (cycle) setCycleStep({ cycle: cycle.id, step: found.step ?? 0 });
+      if (cycle && (found.branch !== undefined || (on && found.step !== undefined))) {
+        setSelection(new Set());
+        setPicked(new Set([cycle.id]));
+        setStepPick(found.branch === undefined ? { cycle: cycle.id, step: found.step! } : undefined);
+        setBranchPick(found.branch !== undefined ? { cycle: cycle.id, branch: found.branch } : undefined);
+      } else if (!on) choose([...atoms, ...own], [...items, ...text]);
     }
     setMenuAt({ x: e.clientX, y: e.clientY });
   }
@@ -3849,7 +4197,7 @@ export default function Editor() {
       if (!part) return;
       setTemplatePick(undefined);
       setHover({});
-      return addPart(extractSelection(doc, ...part, drawnAt), templatePick.set, templatePick.tool);
+      return addPart(extractSelection(doc, ...part, drawnAt, drawnAlign), templatePick.set, templatePick.tool);
     }
     // On the Mac a Control-click is the right-click (onContextMenu): the press does nothing more, but on a resize handle.
     if (MAC && e.ctrlKey) {
@@ -3869,10 +4217,14 @@ export default function Editor() {
     // Shift with the Arrow tool over an arrow's end, or its middle point, starts a new arrow joined there.
     const join = tool === "arrow" && e.shiftKey ? joinAt(p) : undefined;
     if (join) { setSelection(new Set()); setPicked(new Set()); overs.set({ ...overs.get(), join: undefined }); return setDrag({ kind: "arrow", from: join, start: screen, target: {} }); }
-    // Shift-drag on a mark with Select or the Symbols tool moves it round its atom, as in ChemDraw.
-    const mark = e.shiftKey && (tool === "select" || tool === "symbol") ? drawing.electrons.filter((x) => x.key && Math.hypot(x.at[0] / L - p[0], -x.at[1] / L - p[1]) < 0.2).sort((x, y) => Math.hypot(x.at[0] / L - p[0], -x.at[1] / L - p[1]) - Math.hypot(y.at[0] / L - p[0], -y.at[1] / L - p[1]))[0] : undefined;
-    if (mark) return setDrag({ kind: "mark", atom: mark.atom, key: mark.key!, base: doc, working: doc });
+    // A drag on a mark with Select (Shift-drag with the Symbols tool) moves it round its atom, as in ChemDraw. On a
+    // selected atom a press moves the selection, and a Shift-drag moves the mark.
+    // A picked object's handle comes before a mark under it (a curved arrow's tail on a lone pair).
     const handle = tool !== "erase" ? handleAt(p) : undefined;
+    const mark = handle && handle.which !== "add" ? undefined : t.mark !== undefined ? { atom: t.atom!, mark: t.mark } : ((tool === "select" && selectKind !== "perspective") || (e.shiftKey && tool === "symbol")) && arrowEndAt(p) === undefined ? markNear(drawing.electrons, doc, p, L) : undefined;
+    if (mark && tool === "select") pressMods.current = { shift: e.shiftKey, alt: e.altKey, atoms: selection, picks: picked };
+    if (mark && t.mark === undefined && tool === "select" && !e.shiftKey) return startMove(p, screen, { atom: mark.atom }, picked, selection, e.altKey);
+    if (mark) return setDrag({ kind: "mark", atom: mark.atom, key: mark.mark, start: screen, base: doc, working: doc });
     // The middle mark: a press moves the arrow as usual; a click (no move) gives it its point.
     addPoint.current = handle?.which === "add" ? handle.id : undefined;
     // With Edit curve, Option-click takes an anchor out (a curve keeps two).
@@ -3880,7 +4232,7 @@ export default function Editor() {
       const a = doc.arrows?.find((x) => x.id === handle.id);
       return a?.curve && a.curve.points.length > 2 ? set(updateArrow(doc, a.id, withCurve(removeCurvePoint(a.curve, Number(handle.which.slice(1, -3))))), true) : undefined;
     }
-    if (handle && handle.which !== "add") return setDrag({ kind: "handle", ...handle, working: doc });
+    if (handle && handle.which !== "add") return setDrag({ kind: "handle", ...handle, working: doc, from: p, start: screen });
     // Option-drag on the centre mark moves the centre the selection turns about (it snaps to atoms).
     if (tool !== "erase" && e.altKey && onCentreMark(p)) {
       if (tool === "select") pressMods.current = { shift: e.shiftKey, alt: true, atoms: selection, picks: picked };
@@ -3933,7 +4285,17 @@ export default function Editor() {
     // With something selected, a press on it (or inside it) grabs it, whatever tool is in hand. So does a press
     // on a caption, except with the Text tool, which edits it.
     if (tool !== "erase" && selection.size && onSelection(doc, selection, p)) return startMove(p, screen, t);
-    if (tool === "cycle") { setDrag({ kind: "cycle", from: p, start: screen, target: t }); return startHold(p, t, screen); }
+    // The Cycle tool moves a structure (whole) or text as Select does, so it can go on to a cycle or off it. Side arrow:
+    // a click (no drag) on a free structure or text beside a step makes it that step's reagent or product (click).
+    if (tool === "cycle" && t.caption !== undefined) return pressCaption(p, t, false, screen);
+    if (tool === "cycle" && (t.atom !== undefined || t.bond !== undefined)) {
+      const [atoms, picks] = wholeIntegral(doc, new Set(fragments(doc).find((g) => g.includes(t.atom ?? doc.bonds[t.bond!].atoms[0]))), new Set());
+      setSelection(atoms);
+      setPicked(picks);
+      return startMove(p, screen, t, picks, atoms);
+    }
+    if (tool === "cycle" && t.branch !== undefined) return pressBranch(p, t, screen);
+    if (tool === "cycle") { setDrag({ kind: "cycle", from: p, start: screen, target: t, shift: e.shiftKey }); return startHold(p, t, screen); }
     if (tool !== "erase" && tool !== "text" && t.cycle !== undefined) return pressCycle(p, t, screen);
     // A tool that works on an atom (bond, chain, ring, template, symbol), pressed on a caption that counts as chemistry
     // (Bi, Rh, OMe), makes it that atom and goes on from it, as one undo step. ChemDraw joins bonds to a caption it
@@ -4013,6 +4375,9 @@ export default function Editor() {
       setSpring(tool);
       setTool("select");
       setPop((old) => ({ n: (old?.n ?? 0) + 1, x: screen[0], y: screen[1] }));
+      // On a mark, Select moves the mark, as a press with Select does.
+      const mark = markNear(drawing.electrons, doc, p, L);
+      if (mark && !selection.has(mark.atom)) { pressMods.current = undefined; return setDrag({ kind: "mark", atom: mark.atom, key: mark.mark, start: screen, base: doc, working: doc }); }
       const ids = atomsOf(doc, t);
       if (ids.length && ids.every((i) => selection.has(i))) return startMove(p, screen, t);
       setSelection(new Set());
@@ -4036,11 +4401,16 @@ export default function Editor() {
     if (tool === "erase") setBrush(p);
     if (pen && !drag) setPenAt(p);
     if (!drag) {
-      const t = hit(p);
+      const t = hit(p), h = tool === "cycle" || picked.size ? handleAt(p) : undefined;
+      // A cycle's handle under the pointer: actions go on its step.
+      const hs = h?.step ?? (h?.branch !== undefined ? doc.cycles?.find((c) => c.id === h.id)?.branches?.find((b) => b.id === h.branch)?.step : undefined);
+      if (h && hs !== undefined && (cycleStep?.cycle !== h.id || cycleStep.step !== hs)) setCycleStep({ cycle: h.id, step: hs });
       overs.set({
         selection: tool !== "erase" && selection.size > 0 && onSelection(doc, selection, p), turn: tool !== "erase" && onTurnHandle(p), edge: tool === "table" ? tableEdge(p)?.axis : undefined, resize: resizeAt(p),
         page: edgePage(p, t)?.[0], cross: onCrosshair(p, t),
         join: tool === "arrow" && e.shiftKey ? joinAt(p) : undefined,
+        cycle: tool === "cycle" ? t.cycle ?? circleAt(p)?.id ?? (h?.id === overs.get().cycle ? overs.get().cycle : undefined) : undefined,
+        grab: tool === "cycle" && (t.atom !== undefined || t.bond !== undefined || t.caption !== undefined),
       });
       // While the keyboard's focus is on the canvas (CanvasAccess), the pointer does not take the keys: VoiceOver can move
       // it to follow its cursor, and the keys act on the hotspot or the selection. A click gives the keys back to it.
@@ -4104,10 +4474,11 @@ export default function Editor() {
         return setDrag({ ...drag, to: p });
       case "ring": {
         // The ring's first bond follows the pointer, as the bond tool's does (on to an atom there, if any). A chair
-        // faces the drag, across the page or up and down.
+        // faces the drag, across the page or up and down. From a bond, the pointer picks the ring's side (and a
+        // chair's fit); ChemDraw does nothing there.
         if (!drag.to && Math.hypot(e.clientX - drag.start[0], e.clientY - drag.start[1]) < 4) return;
         stopHold();
-        if (drag.target.bond !== undefined && drag.target.atom === undefined) return; // dragging from a bond does nothing
+        if (drag.target.bond !== undefined && drag.target.atom === undefined) return setDrag({ ...drag, to: p });
         const origin = typeof drag.from === "number" ? pos(doc, drag.from) : drag.from, onto = hitAt(p).atom;
         if ((RINGS[ringKind as RingKind] as { chair?: number } | undefined)?.chair) { const a = Math.round(Math.atan2(p[1] - origin[1], p[0] - origin[0]) / (Math.PI / 2)) * (Math.PI / 2); return setDrag({ ...drag, to: [origin[0] + Math.cos(a), origin[1] + Math.sin(a)] }); }
         return setDrag({ ...drag, to: onto !== undefined && onto !== drag.from ? pos(doc, onto) : fixedEnd(origin, p, e.altKey, typeof drag.from === "number" ? scaleAt(doc, drag.from) : 1) });
@@ -4138,10 +4509,10 @@ export default function Editor() {
           : i === 0 ? { heights: t.heights.map((h) => (h * Math.max(0.1, p[1] - t.y0)) / (t.y1 - t.y0)), y1: Math.max(p[1], t.y0 + 0.1) } : { heights: t.heights.map((h, r) => (r === i - 1 ? t.row(r) - p[1] : h)) };
         return setDrag({ ...drag, working: updateShape(drag.base, drag.id, sizeTable(sh, size, cellWidth(sh), style.captionSize)) });
       }
-      case "mark": {
-        const a = drag.base.atoms[drag.atom], deg = Math.round((Math.atan2(p[1] - a.location[1], p[0] - a.location[0]) * 180) / Math.PI);
-        return setDrag({ ...drag, working: { ...drag.base, atoms: drag.base.atoms.map((x, i) => (i === drag.atom ? { ...x, angles: { ...x.angles, [drag.key]: deg } } : x)) } });
-      }
+      case "mark":
+        // In 15° steps while Fixed Angles is on, free when it is off or Option is held (as a dragged bond).
+        if (drag.working === drag.base && Math.hypot(e.clientX - drag.start[0], e.clientY - drag.start[1]) < 4) return;
+        return setDrag({ ...drag, working: moveMark(drag.base, drag.atom, drag.key, p, settings.fixedAngles && !e.altKey) });
       case "lane": {
         // The lane goes where the pointer is among the lanes, its spots with it.
         const sh = drag.base.shapes?.find((x) => x.id === drag.plate);
@@ -4197,9 +4568,19 @@ export default function Editor() {
         return setDrag({ ...drag, size, anchor, lines, working: drag.whole && lines && size[0] === size[1] ? doc : scaledParts(doc, drag.atoms, drag.items, size, anchor, lines, drag.middles) });
       }
       case "cycle": {
-        if (cycleChoice !== "circle" || (!drag.to && Math.hypot(e.clientX - drag.start[0], e.clientY - drag.start[1]) < 4)) return;
+        if (cycleChoice === "name" || (!drag.to && !drag.pull && !drag.radius && Math.hypot(e.clientX - drag.start[0], e.clientY - drag.start[1]) < 4)) return;
         stopHold();
-        return setDrag({ ...drag, to: p });
+        // A radius snaps to half a bond length (at the cycle's scale); Option frees it.
+        const snap = (r: number, f = 1) => (e.altKey ? r : Math.max(0.5 * f, Math.round(r / (0.5 * f)) * 0.5 * f));
+        // Pressed on a circle: a side arrow comes out of the arc there, coming in or going out the way the pointer goes.
+        // With Shift, the circle is sized out to the pointer about its centre.
+        const c = drag.pull ? undefined : drag.target.cycle !== undefined && drag.target.branch === undefined ? doc.cycles?.find((x) => x.id === drag.target.cycle) : circleAt(drag.from);
+        if (c && drag.shift && !drag.to) return setDrag({ ...drag, radius: resizeCycle(doc, c.id, snap(Math.hypot(p[0] - c.centre[0], p[1] - c.centre[1]), c.scale ?? 1)) });
+        const step = c && (drag.target.cycle === c.id && drag.target.step !== undefined ? drag.target.step : stepAt(doc, c, angleAbout(c, drag.from)));
+        const pull = drag.pull ?? (c && step !== undefined ? { cycle: c.id, step, meet: sideFor(cycleLayout, { cycle: c.id, step }, [drag.from[0] * L, -drag.from[1] * L], L, c.scale ?? 1)?.at ?? 0.5 } : undefined);
+        if (pull) return setDrag({ ...drag, pull: { ...pull, made: pullBranch(doc, cycleLayout, pull.cycle, pull.step, pull.meet, [p[0] * L, -p[1] * L], L) } });
+        const r = Math.hypot(p[0] - drag.from[0], p[1] - drag.from[1]), k = r ? snap(r) / r : 0;
+        return setDrag({ ...drag, to: [drag.from[0] + (p[0] - drag.from[0]) * k, drag.from[1] + (p[1] - drag.from[1]) * k] });
       }
       case "shape": {
         if (!drag.to && Math.hypot(e.clientX - drag.start[0], e.clientY - drag.start[1]) < 4) return;
@@ -4217,19 +4598,28 @@ export default function Editor() {
           const longest = Math.max(...(doc.captions?.find((c) => c.id === cap.id)?.text.split("\n") ?? []).map((t) => textWidth(t, cap.size, cap.bold, cap.italic, fontStack(cap.font ?? style.captionFont)))) / L;
           return setDrag({ ...drag, working: updateCaption(doc, cap.id, { width: d >= longest ? undefined : Math.max(0.5, d) }) });
         }
-        // A reagent's or product's arrow: its outer end goes where it is dragged, as its text does. Where it touches the
-        // arc slides along the step; pulled well off the circle it becomes a tail (a lone arrow's), and the text stays
-        // where it is. A tail dragged back onto the circle goes.
-        const side = drag.which === "end" || drag.which === "meet" || drag.which === "tail" ? doc.captions?.find((x) => x.id === drag.id) : undefined;
-        if (side?.cycle) {
-          const t = side.cycle, cy = doc.cycles?.find((y) => y.id === t.cycle), f = cy?.scale ?? 1, q = cy && sideFor(cycleLayout, t, [p[0] * L, -p[1] * L], L, f);
-          if (!q) return;
-          const off = Math.abs(Math.hypot(p[0] - cy.centre[0], p[1] - cy.centre[1]) - cy.radius) / f, two = paired(doc, t);
-          const change: Partial<CycleText> = drag.which === "end" ? q
-            : drag.which === "meet" ? (off < 0.6 || two ? { meet: q.at } : { through: true, tail: [q.at, q.reach], at: t.at ?? sidePlace(t) })
-            : off < 0.4 ? { through: undefined, tail: undefined, meet: undefined } : { tail: [q.at, q.reach] };
-          const partner = (x: Caption) => drag.which === "meet" && two && x.cycle?.cycle === t.cycle && x.cycle.step === t.step && isSide(x.cycle) && x.cycle.side !== t.side;
-          return setDrag({ ...drag, working: { ...doc, captions: doc.captions?.map((x) => (x.id === side.id || partner(x) ? { ...x, cycle: { ...x.cycle!, ...(x.id === side.id ? change : { meet: q.at }) } } : x)) } });
+        // A cycle's side arrow, once the pointer has moved: its end goes where it is dragged (dragEnd: past where the arrow
+        // meets the arc, a lone end turns round), with its text, or its structure moves; where it meets the arc slides
+        // along the arc (dragMeet), or pulled well off it gives a one-ended arrow its other end there.
+        const br = drag.branch !== undefined ? doc.cycles?.find((x) => x.id === drag.id)?.branches?.find((x) => x.id === drag.branch) : undefined;
+        if (br) {
+          if (drag.working === doc && drag.start && Math.hypot(e.clientX - drag.start[0], e.clientY - drag.start[1]) < 4) return;
+          const q: P = [p[0] * L, -p[1] * L], part = drag.which === "end:out" ? "out" : "in", atoms = drag.which !== "meet" ? br[part]?.atoms : undefined;
+          if (atoms?.length && drag.from) return setDrag({ ...drag, working: moveAtoms(doc, new Set(atoms), [p[0] - drag.from[0], p[1] - drag.from[1]]) });
+          if (drag.which === "meet") return setDrag({ ...drag, working: dragMeet(doc, cycleLayout, drag.id, br.id, q, L) });
+          const moved = dragEnd(doc, cycleLayout, drag.id, br.id, part, q, L);
+          return setDrag({ ...drag, working: moved.m });
+        }
+        // A step's lead, trail or bow (stepFor), live once the pointer has moved. Shift gives the node's other side the
+        // same space; Option on a reversible step's lead or trail sets its balance instead.
+        const cy = drag.step !== undefined ? doc.cycles?.find((x) => x.id === drag.id) : undefined;
+        if (cy) {
+          if (drag.working === doc && drag.start && Math.hypot(e.clientX - drag.start[0], e.clientY - drag.start[1]) < 4) return;
+          const which = drag.which as "lead" | "trail" | "bow", s = drag.step!, n = Math.max(cy.nodes.length, 1), ratio = e.altKey && which !== "bow" && cy.steps?.[s]?.kind === "equilibrium";
+          const change = stepFor(cycleLayout, cy, s, which, [p[0] * L, -p[1] * L], L, pt, (which === "bow" ? 6 : 4) / views.get().zoom, ratio);
+          if (!change) return;
+          const working = setStep(doc, cy.id, s, change);
+          return setDrag({ ...drag, working: !e.shiftKey || ratio || which === "bow" ? working : which === "lead" ? setStep(working, cy.id, (s - 1 + n) % n, { trail: change.lead }) : setStep(working, cy.id, (s + 1) % n, { lead: change.trail }) });
         }
         const a = doc.arrows?.find((x) => x.id === drag.id);
         if (!a) return;
@@ -4295,12 +4685,13 @@ export default function Editor() {
       case "box": {
         // Smart: atoms the box only just missed (all their neighbours are in it) come along too.
         const [lo, hi] = [[Math.min(drag.from[0], p[0]), Math.min(drag.from[1], p[1])], [Math.max(drag.from[0], p[0]), Math.max(drag.from[1], p[1])]];
-        chooseArea(complete(doc, new Set([...drag.base, ...atomsIn(doc, drag.from, p)])), [...drag.picks, ...captionsWhere(([x, y]) => x >= lo[0] && x <= hi[0] && y >= lo[1] && y <= hi[1], [[lo[0], lo[1]], [hi[0], lo[1]], [hi[0], hi[1]], [lo[0], hi[1]]])]);
+        const within = ([x, y]: P) => x >= lo[0] && x <= hi[0] && y >= lo[1] && y <= hi[1];
+        chooseArea(complete(doc, new Set([...drag.base, ...atomsIn(doc, drag.from, p)])), [...drag.picks, ...captionsWhere(within, [[lo[0], lo[1]], [hi[0], lo[1]], [hi[0], hi[1]], [lo[0], hi[1]]])], within);
         return setDrag({ ...drag, to: p, moved: true });
       }
       case "lasso": {
         const points = [...drag.points, p];
-        chooseArea(complete(doc, new Set([...drag.base, ...atomsInPolygon(doc, points)])), [...drag.picks, ...captionsWhere((q) => inPolygon(q, points), points)]);
+        chooseArea(complete(doc, new Set([...drag.base, ...atomsInPolygon(doc, points)])), [...drag.picks, ...captionsWhere((q) => inPolygon(q, points), points)], (q) => inPolygon(q, points));
         return setDrag({ ...drag, points, moved: true });
       }
       case "move": {
@@ -4329,7 +4720,8 @@ export default function Editor() {
           const free = (axis: "x" | "y") => !snapped.guides.some((g) => (g.gap ? (g.axis === "x" ? "y" : "x") : g.axis) === axis);
           snapped.d = [snapped.d[0] + (free("x") ? nudge[0] ?? 0 : 0), snapped.d[1] + (free("y") ? nudge[1] ?? 0 : 0)];
         }
-        return setDrag({ ...drag, working: moveAll(base, snapped.d, drag.captions, drag.arrows, drag.cycles, moving), moved: true, guides: snapped.guides, point: snapped.point });
+        // ⌘ (Ctrl) also keeps what moves off any catalytic cycle.
+        return setDrag({ ...drag, working: moveAll(base, snapped.d, drag.captions, drag.arrows, drag.cycles, moving), moved: true, guides: snapped.guides, point: snapped.point, skip: e.metaKey || e.ctrlKey });
       }
     }
   }
@@ -4394,7 +4786,7 @@ export default function Editor() {
     if (id === "atom.number") return numberAtoms(atoms), true;
     if (id === "atom.newlabel") { labelOpen.current = true; return setEditing({ atom: atoms[0], value: "", all: atoms, blank: true, pending: ownStyle(doc.atoms[atoms[0]]) }), true; }
     if (id === "atom.sproutlabel") return sproutLabel(atoms), true;
-    if (kind === "bond" && arg in BONDS) return each((m, k) => setBondSpec(m, k, BONDS[arg as BondKind].spec), bonds), true;
+    if (kind === "bond" && arg in BONDS) return each((m, k) => keyBond(m, k, BONDS[arg as BondKind].spec), bonds), true;
     if (kind === "bond" && (arg === "left" || arg === "centre" || arg === "right")) return each((m, k) => (m.bonds[k].type === 2 ? setPosition(m, k, arg) : m), bonds), true;
     if (id === "bond.front") return set(toFront(doc, new Set(atoms)), true), true;
     return false;
@@ -4411,12 +4803,15 @@ export default function Editor() {
   }
   // The Eraser's click and Delete with nothing selected: the atom, bond or object under the pointer goes, or the
   // whole of the (outermost) integral group it is part of (as with ChemDraw's eraser).
+  // A cycle's side arrow loses the end under the pointer (with its text); an arc is hidden (the last one takes the cycle).
   function removeAt(t: Hover) {
-    const g = outermost(groupsOf(doc, new Set(atomsOf(doc, t)), new Set(itemsOf(t))).filter((x) => x.integral));
-    if (g) return set(deleteGraphics(deleteAtoms(doc, new Set(g.atoms)), new Set(g.items)));
-    if (t.atom !== undefined) return set(deleteAtom(doc, t.atom));
-    if (t.caption !== undefined || t.arrow !== undefined || t.cycle !== undefined) return set(deleteGraphics(doc, new Set(itemsOf(t))));
-    if (t.bond !== undefined) return set(deleteBond(doc, t.bond));
+    const c = doc.cycles?.find((x) => x.id === t.cycle), g = outermost(groupsOf(doc, new Set(atomsOf(doc, t)), new Set(itemsOf(t))).filter((x) => x.integral));
+    if (g) return set(deleteChosen(doc, new Set(g.atoms), new Set(g.items), undefined, drawnAt, drawnAlign));
+    if (c && t.branch !== undefined) return set(removeEnd(doc, c.id, t.branch, t.part ?? "in"));
+    if (c && t.step !== undefined) return set(hideArc(c.id, t.step));
+    if (t.atom !== undefined) return set(deleteChosen(doc, new Set([t.atom]), new Set(), undefined, drawnAt, drawnAlign));
+    if (t.caption !== undefined || t.arrow !== undefined || t.cycle !== undefined) return set(deleteChosen(doc, new Set(), new Set(itemsOf(t)), undefined, drawnAt, drawnAlign));
+    if (t.bond !== undefined) return set(deleteChosen(doc, new Set(), new Set(), new Set([t.bond]), drawnAt, drawnAlign));
   }
   function run(id: string) {
     const [kind, arg] = id.split(".");
@@ -4458,7 +4853,7 @@ export default function Editor() {
     // to the ring's far bond, so the next key carries on from there.
     if (kind === "group" && atom !== undefined) { const [mol, hot] = addGroupAt(doc, atom, arg as Group); return keyEdit(mol, { atom: hot }, { atom }); }
     if (kind === "bond" && bond !== undefined) {
-      if (arg in BONDS) return set(setBondSpec(doc, bond, BONDS[arg as BondKind].spec));
+      if (arg in BONDS) return set(keyBond(doc, bond, BONDS[arg as BondKind].spec, hover.key ? undefined : pointer.current));
       if (arg === "left" || arg === "centre" || arg === "right" || arg === "auto") return set(setPosition(doc, bond, arg === "auto" ? undefined : arg));
       // ChemDraw's f: the bond goes to the front, so where it crosses another bond, the other one has the gap.
       if (arg === "front") {
@@ -4511,7 +4906,11 @@ export default function Editor() {
       return set(tiltAtoms(doc, selection, centre, arg === "left" ? -12 : arg === "right" ? 12 : 0, arg === "up" ? -12 : arg === "down" ? 12 : 0), true);
     }
     if (id === "edit.delete") {
-      if (selection.size || picked.size) return set(deleteGraphics(deleteAtoms(doc, selection), picked));
+      // A cycle's side arrow picked goes with its text (its structures stay); a step picked loses its arc.
+      const alone = !selection.size && picked.size === 1;
+      if (alone && branchPick && picked.has(branchPick.cycle)) return cycleAction("side.remove");
+      if (alone && stepPick && picked.has(stepPick.cycle)) return set(hideArc(stepPick.cycle, stepPick.step), true);
+      if (selection.size || picked.size) return set(deleteChosen(doc, selection, picked, undefined, drawnAt, drawnAlign));
       // A picked stoichiometry grid cell: the grid goes, as the panel's Delete removes it.
       if (gridPick) { runAction("grid.remove"); return; }
       // As in ChemDraw: the first Delete on a labelled atom removes the label; the next removes the atom. Deleting
@@ -4519,7 +4918,7 @@ export default function Editor() {
       const integral = atom !== undefined && groupsOf(doc, new Set([atom]), new Set()).some((g) => g.integral);
       if (atom !== undefined && !integral && (doc.atoms[atom].label !== "C" || doc.atoms[atom].text || doc.atoms[atom].shown)) return set(setElement(doc, atom, "C"));
       if (atom !== undefined && !integral && hover.key) {
-        const mol = deleteAtom(doc, atom), back = neighbours(doc, atom).map((j) => atomAt(mol, pos(doc, j), 1e-6)).find((j) => j !== undefined);
+        const mol = deleteChosen(doc, new Set([atom]), new Set(), undefined, drawnAt, drawnAlign), back = neighbours(doc, atom).map((j) => atomAt(mol, pos(doc, j), 1e-6)).find((j) => j !== undefined);
         return keyEdit(mol, back === undefined ? undefined : { atom: back }, { atom });
       }
       // A double (or triple) bond under the pointer loses a line; a single bond goes.
@@ -4535,7 +4934,7 @@ export default function Editor() {
   const nameCache = useRef(new Map<string, { name?: string; bare?: string; mol: Mol }>());
   // A name's structure is drawn as Octet draws SMILES before its InChI is taken, so it counts hydrogens as the
   // drawing does (the P of PPh3 bonded to Pd has none).
-  const inchiOf = (s: Mol | string) => { try { return toInchi(typeof s === "string" ? parseStructure(s) : s); } catch { return undefined; } };
+  const inchiOf = (s: Mol | string) => { try { return toInchi(typeof s === "string" ? parseStructure(s, false) : s); } catch { return undefined; } };
   // The checked name (bare), the name shown (with its abbreviation) and the structure named.
   const namedPart = (g: number[], base = doc) => {
     const part = subset(base, new Set(g)), key = serialize(part);
@@ -4818,6 +5217,8 @@ export default function Editor() {
     if (context.kind === "grid") return { value: doc.grids?.find((g) => g.arrow === gridPick?.arrow)?.colour ?? "#000000" };
     // A bond alone takes its own colour (the colour action sets the bond only), so its row shows the bond's.
     if (context.kind === "bond") return { value: doc.bonds.find((b) => selection.has(b.atoms[0]) && selection.has(b.atoms[1]))?.colour ?? "#000000" };
+    // A cycle's side arrow picked: its own colour, else its cycle's.
+    if (context.kind === "cycle" && context.side && branchPick) { const c = doc.cycles?.find((x) => x.id === branchPick.cycle); return { value: c?.branches?.find((b) => b.id === branchPick.branch)?.colour ?? c?.colour ?? "#000000" }; }
     const first = [...selection][0], thing = lineOf([...(doc.arrows ?? []), ...(doc.cycles ?? []), ...(doc.shapes ?? []), ...(doc.captions ?? [])].filter((x) => picked.has(x.id)));
     return { value: (first !== undefined ? doc.atoms[first]?.colour : thing?.colour) ?? "#000000" };
   };
@@ -4825,13 +5226,19 @@ export default function Editor() {
   // selected structure, on a picked arrow or in a picked cycle goes with it, and so do a picked cycle's intermediates.
   const mixOf = () => {
     if (!picked.size) return { kinds: selection.size ? 1 : 0, count: 0, atoms: selection.size > 0, lines: false };
-    const cycles = (doc.cycles ?? []).filter((c) => picked.has(c.id)), inCycle = new Set(cycles.flatMap((c) => c.nodes.flat()));
+    const cycles = (doc.cycles ?? []).filter((c) => picked.has(c.id)), inCycle = new Set(cycles.flatMap(cycleAtoms));
     const arrowIds = new Set((doc.arrows ?? []).filter((a) => picked.has(a.id)).map((a) => a.id)), shapes = (doc.shapes ?? []).filter((x) => picked.has(x.id)).length;
     const captions = (doc.captions ?? []).filter((c) => picked.has(c.id) && !c.under?.some((i) => selection.has(i)) && !(c.on && arrowIds.has(c.on.arrow)) && !(c.cycle && cycles.some((y) => y.id === c.cycle!.cycle))).length;
     const structures = fragments(doc).filter((g) => g.some((i) => selection.has(i) && !inCycle.has(i))).length;
     const counts = [structures, captions, arrowIds.size, shapes, cycles.length];
     return { kinds: counts.filter(Boolean).length, count: counts.reduce((a, b) => a + b, 0), atoms: structures > 0, lines: !structures && !captions };
   };
+  // A cycle's side arrow, as the Actions panel shows it: its ends, inside the circle, moved from where Octet puts it, and
+  // its heads.
+  // inside: whether its first end that is not a structure is inside the circle (undefined: all its ends are structures).
+  const insideOf = (b: CycleBranch) => { const e = [b.in, b.out].find((x) => x && !x.atoms?.length); return e && (e.reach ?? 1.1) < 0; };
+  const sideOf = (b: CycleBranch) => ({ ends: b.in && b.out ? "both" as const : b.in ? "in" as const : "out" as const, inside: insideOf(b),
+    moved: b.meet !== undefined || [b.in, b.out].some((e) => e?.along !== undefined || e?.reach !== undefined), start: branchHeads(b)[0], end: branchHeads(b)[1] });
   // The line width an arrow, shape or cycle is drawn with, at its scale: its own, a table's rules', or the document's
   // (a filled pen curve's outline is a hairline unless set; curveFill).
   const widthOf = (x: Arrow | Shape | Cycle) => (("table" in x && x.table ? x.table.weight : x.width) ?? ("curve" in x && x.curve?.closed && x.fill ? 0.05 : style.line)) * scaleOf(x);
@@ -4844,17 +5251,20 @@ export default function Editor() {
   // or MeOH too, each item of a list such as "NaBH4, MeOH" on its own, their molar mass from the formula or the
   // abbreviation. The row names on the left, the amounts worked out from what was typed (stoich.ts). Typed values show
   // bold, worked-out ones plain, as ChemDraw's grid does. Hidden rows and columns are left out.
-  const gridViews = useMemo(() => (loaded && (!exporting || exporting === doc) ? doc.grids ?? [] : []).flatMap((g) => {
-    const r = reactionOf(g.arrow);
-    if (!r) return [];
-    const steps = interpret(doc, r, captionBox);
+  // One grid for each reaction (an experiment page gives each new arrow one). On an experiment page every row shows.
+  // While a part is being exported (a selection), its own grids, read from the part as it is drawn then.
+  const gridViews = useMemo(() => { const m = exporting ?? doc; const seen = new Set<number>(); return (loaded ? m.grids ?? [] : []).flatMap((g) => {
+    const r = findReaction(m, g.arrow, arrows, inkBox, captionBox);
+    if (!r || seen.has(r.arrows[0])) return [];
+    seen.add(r.arrows[0]);
+    const steps = interpret(m, r, captionBox);
     if (!steps.length) return [];
     const parts: { product: boolean; what: string; formula: string; mw: number; x: number; low: number }[] = [];
     // conditions: only text with a molar mass makes a column ("0 °C" and "2 h" do not).
     const add = (p: Part, product: boolean, conditions = false) => {
       const x = (p.box[0] + p.box[2]) / 2, low = p.box[1];
-      if (p.kind === "structure") { const a = analyse(pickAtoms(doc, p.atoms))?.[0]; parts.push({ product, what: a?.formula ?? "?", formula: a?.formula ?? "", mw: a?.weight ?? 0, x, low }); return; }
-      const text = doc.captions?.find((c) => c.id === p.id)?.text ?? "", items = conditions ? text.split(/[,;\n]/).map((t) => t.trim()).filter(Boolean) : [text.trim()];
+      if (p.kind === "structure") { const a = analyse(pickAtoms(m, p.atoms))?.[0]; parts.push({ product, what: a?.formula ?? "?", formula: a?.formula ?? "", mw: a?.weight ?? 0, x, low }); return; }
+      const text = m.captions?.find((c) => c.id === p.id)?.text ?? "", items = conditions ? text.split(/[,;\n]/).map((t) => t.trim()).filter(Boolean) : [text.trim()];
       items.forEach((item, k) => {
         const plain = item.replace(/^\d+\s+(?=\S)/, ""), weight = formulaWeight(plain), smiles = weight === undefined ? labelSmiles(plain) : undefined, read = smiles ? smilesWeight(smiles) : undefined;
         if (conditions && !weight && !read) return;
@@ -4868,21 +5278,29 @@ export default function Editor() {
     const keyed = keyColumns(parts, g.typed, g.limiting), all = keyed.cols, hidden = g.hidden ?? {};
     const solved = solve(all, keyed.limiting), limiting = keyed.limiting ?? all.find((c) => !c.product)?.key;
     // The grid takes its arrow's scale (decision 0007). Columns stand under what they are, a column's width apart.
-    const f = scaleOf(doc.arrows?.find((a) => a.id === g.arrow) ?? {}), width = 3.4 * f;
+    const f = scaleOf(m.arrows?.find((a) => a.id === g.arrow) ?? {}), width = 3.4 * f;
     const cols = all.filter((c) => !hidden.cols?.includes(c.key)).sort((p, q) => p.x - q.x).map((c) => ({ ...c }));
     cols.forEach((c, k) => { if (k && c.x < cols[k - 1].x + width) c.x = cols[k - 1].x + width; });
     if (!cols.length) return [];
     const used = (fd: Field) => cols.some((c) => c.typed[fd] !== undefined), products = cols.some((c) => c.product);
-    const rows = GRID_ROWS.filter((row) => !hidden.rows?.includes(row.id) && (row.product ? products : row.shown ? row.shown.some(used) : true));
+    const rows = GRID_ROWS.filter((row) => !hidden.rows?.includes(row.id) && (row.product ? products : row.shown && !expPage ? row.shown.some(used) : true));
     // Below the components and the numbers under them.
-    const under = (doc.captions ?? []).filter((c) => c.under?.some((i) => r.atoms.includes(i))).map((c) => placed.find((p) => p.id === c.id)).filter(Boolean).map((p) => -p!.box[3] / L);
+    const under = (m.captions ?? []).filter((c) => c.under?.some((i) => r.atoms.includes(i))).map((c) => placed.find((p) => p.id === c.id)).filter(Boolean).map((p) => -p!.box[3] / L);
     const top = Math.min(...cols.map((c) => c.low), ...under) - 0.9 * f, rh = (style.captionSize * pt * 0.9 * 1.6 * f) / L;
     // The row names end a little before the first column; the rules start at the longest name.
     const left = Math.min(...cols.map((c) => c.x)) - width / 2 - 0.3 * f, size = style.captionSize * pt * 0.9 * f;
     const names = Math.max(...rows.map((row) => formulaWidth(row.name, size, false, false, fontStack(style.captionFont)) / L));
     return [{ arrow: g.arrow, all, cols, rows, solved, limiting, top, rh, left, width, start: left - names - 0.2 * f, f, colour: g.colour, hiding: !!(hidden.rows?.length || hidden.cols?.length) }];
-  }), [loaded, doc, drawing, placed, exporting]); // eslint-disable-line react-hooks/exhaustive-deps
+  }); }, [loaded, doc, drawing, placed, exporting, expPage]); // eslint-disable-line react-hooks/exhaustive-deps
   type GridView = (typeof gridViews)[number];
+  // Opened or saved: an experiment page's details, with its first product's yield, go to Home's Experiments list, and
+  // a drawing that is no longer one leaves it. The yield follows when the chemistry has loaded.
+  useEffect(() => {
+    if (!TAURI || !file.path) return;
+    const saved = file.saved, details = detailsOf(saved.annotations), v = gridViews[0], product = v?.all.find((c) => c.product), y = product && v.solved[product.key]?.yield;
+    const page = experimentPage(purposeOf(settings, saved.style?.purpose)?.kind, saved.style?.purpose, saved.annotations) && Object.keys(details).length > 0;
+    invoke("experiment_note", { path: file.path, experiment: page ? { details, ...(y !== undefined && y >= 0 && y <= 100 ? { yield: y } : {}) } : null }).catch(() => {});
+  }, [file, loaded]); // eslint-disable-line react-hooks/exhaustive-deps
   // A cell's text, and whether it was typed.
   const gridText = (v: GridView, c: GridView["cols"][number], row: (typeof GRID_ROWS)[number]): { text: string; typed?: boolean } => {
     const s = v.solved[c.key];
@@ -4958,7 +5376,13 @@ export default function Editor() {
     // A cycle picked (with its intermediates), when it is all that is picked.
     const mix = mixOf();
     const pickedCycle = (doc.cycles ?? []).find((c) => picked.has(c.id));
-    if (pickedCycle && mix.kinds === 1) return { kind: "cycle", clockwise: pickedCycle.clockwise, steps: pickedCycle.nodes.length, centre: !!doc.captions?.some((c) => c.cycle?.cycle === pickedCycle.id && c.cycle.side === "centre"), width: widthOf(pickedCycle), gap: pickedCycle.gap ?? 6 };
+    if (pickedCycle && mix.kinds === 1) {
+      const s = stepHere(pickedCycle), step = pickedCycle.steps?.[s], r = step?.ratio ?? 1;
+      return { kind: "cycle", clockwise: pickedCycle.clockwise, steps: pickedCycle.nodes.length, centre: !!doc.captions?.some((c) => c.cycle?.cycle === pickedCycle.id && c.cycle.side === "centre"), width: widthOf(pickedCycle), gap: pickedCycle.gap ?? 6,
+        step: stepPick?.cycle === pickedCycle.id && picked.size === 1 && !selection.size, reversible: step?.kind === "equilibrium", balance: r > 1 ? "forward" : r < 1 ? "back" : "equal",
+        shaped: [step?.lead, step?.trail, step?.bow, step?.ratio].some((x) => x !== undefined), hidden: !!step?.hidden, arcs: !!pickedCycle.steps?.some((x) => x?.hidden), named: !!doc.captions?.some((x) => x.cycle?.cycle === pickedCycle.id && x.cycle.step === s && x.cycle.side === "name"),
+        ...(branchPick?.cycle === pickedCycle.id && picked.size === 1 && !selection.size ? (() => { const b = pickedCycle.branches?.find((x) => x.id === branchPick.branch); return b ? { side: sideOf(b) } : {}; })() : {}) };
+    }
     // Different kinds of thing picked together (an arrow and a box, a caption and an atom, everything): what applies to
     // all of them. Lines picked together (arrows, shapes and cycles only) share one line width.
     const lined = mix.lines ? lineOf([...(doc.arrows ?? []), ...(doc.shapes ?? []), ...(doc.cycles ?? [])].filter((x) => picked.has(x.id))) : undefined;
@@ -5006,7 +5430,7 @@ export default function Editor() {
       if (c) {
         const p = placed.find((x) => x.id === c.id), w = whole(c);
         return { kind: "caption", mode: "picked", colour: w.colour ?? style.colour, convertible: cs.length === 1 && namesLoaded && !!(nameToSmiles(c.text) || looksLikeSmiles(c.text) || suggestName(c.text, false)), count: cs.length, bold: !!w.bold, italic: !!w.italic, underline: !!w.underline, size: w.size ?? style.captionSize, align: c.align ?? "centre", attached: !!c.under, attachable: !c.under && !!p && !!structureAbove(anchorOf(p), 4) , font: w.font ?? style.captionFont, fonts: fontList, labelable: cs.some(labelable),
-          ...(cs.length === 1 && isSide(c.cycle) ? { cycleSide: { side: c.cycle!.side as "in" | "out", moved: ["at", "reach", "meet", "tail"].some((k) => c.cycle![k as keyof CycleText] !== undefined), inside: sideReach(c.cycle!) < 0, through: passes(doc, c.cycle!) } } : {}),
+          ...(cs.length === 1 && isSide(c.cycle) && branchOf(doc, c.cycle!) ? { cycleSide: sideOf(branchOf(doc, c.cycle!)!.b) } : {}),
           ...(cs.length === 1 && c.cycle?.side === "name" ? { cycleName: { moved: c.cycle.at !== undefined || c.cycle.reach !== undefined } } : {}),
           // Their Interpret chemically, while the document's is on: whether each one that reads as chemistry has it on.
           ...(style.interpret && cs.some(labelable) ? { chemical: cs.filter(labelable).every((x) => x.chemical !== false) } : {}) };
@@ -5372,12 +5796,12 @@ export default function Editor() {
     const at = new Map<string, { x: number; y: number; r: number; w?: number; h?: number; text: string[] }>();
     for (const p of found) {
       let mark: { key: string; x: number; y: number; r: number; w?: number; h?: number } | undefined;
-      if (p.atom !== undefined && shown.atoms[p.atom]) { const [x, y] = pos(shown, p.atom); mark = { key: `a${p.atom}`, x: x * L, y: -y * L, r: 0.42 * L }; }
+      if (p.atom !== undefined && shown.atoms[p.atom]) { const [x, y] = pos(shown, p.atom); mark = { key: `a${p.atom}`, x: x * L, y: -y * L, r: MARK.atom * L }; }
       else if (p.bond !== undefined && shown.bonds[p.bond]) {
         const [q, r] = shown.bonds[p.bond].atoms.map((i) => pos(shown, i));
-        mark = { key: `b${p.bond}`, x: ((q[0] + r[0]) / 2) * L, y: (-(q[1] + r[1]) / 2) * L, r: 0.5 * L };
+        mark = { key: `b${p.bond}`, x: ((q[0] + r[0]) / 2) * L, y: (-(q[1] + r[1]) / 2) * L, r: MARK.bond * L };
       } else if (p.shape !== undefined) {
-        const sh = shown.shapes?.find((x) => x.id === p.shape), pad = 0.15;
+        const sh = shown.shapes?.find((x) => x.id === p.shape), pad = MARK.pad;
         if (sh) mark = { key: `s${p.shape}`, x: (Math.min(sh.from[0], sh.to[0]) - pad) * L, y: -(Math.max(sh.from[1], sh.to[1]) + pad) * L, r: 0.2 * L, w: (Math.abs(sh.to[0] - sh.from[0]) + 2 * pad) * L, h: (Math.abs(sh.to[1] - sh.from[1]) + 2 * pad) * L };
       } else if (p.caption !== undefined) {
         // A box round the caption, as ChemDraw marks a caption with a bad valence.
@@ -5404,10 +5828,10 @@ export default function Editor() {
   // Settings > Warnings > Check structure when copying or exporting: the selection's problems (or the drawing's)
   // first, then the copy or export.
   const checkFirst = (then: () => void) => (settings.checkCopy ? checkThen(selection.size || picked.size ? subsetProblems() : allProblems(), then) : then());
-  // Whether a selected atom, a bond between selected atoms or picked brackets have their warnings hidden (for Show
-  // warnings).
-  const hiddenHere = () => [...selection].some((i) => doc.atoms[i]?.ignoreWarnings) || doc.bonds.some((b) => b.ignoreWarnings && selection.has(b.atoms[0]) && selection.has(b.atoms[1]))
-    || !!doc.shapes?.some((x) => x.ignoreWarnings && picked.has(x.id));
+  // Whether a selected atom, a bond between selected atoms or picked brackets (with nothing selected, anything in the
+  // drawing) have their warnings hidden (for Show warnings).
+  const warnScope = (): [Set<number>?, Set<number>?] => (selection.size || picked.size ? [selection, picked] : []);
+  const hiddenHere = () => hiddenWarnings(doc, ...warnScope());
   function showProblem(p: Problem) {
     if (p.atom !== undefined) { setSelection(new Set([p.atom])); setPicked(new Set()); }
     else if (p.bond !== undefined && doc.bonds[p.bond]) { setSelection(new Set(doc.bonds[p.bond].atoms)); setPicked(new Set()); }
@@ -5696,6 +6120,7 @@ export default function Editor() {
     align_left: ["Flush left", `⇧${MOD}L`, <TextAlignLeft size={18} />], align_centre: ["Centre text", `⇧${MOD}C`, <TextAlignCenter size={18} />], align_right: ["Flush right", `⇧${MOD}R`, <TextAlignRight size={18} />],
     align_justify: ["Justified", `⇧${MOD}J`, <TextAlignJustify size={18} />], align_above: ["Stacked above", "", <CaretLineUp size={18} />], align_auto: ["Automatic label alignment", `⇧${MOD}M`, <Sparkle size={18} />],
     interpret: ["Interpret chemically", "", <GraphIcon size={18} />], make_element: ["Make element", "", <TextTSlash size={18} />],
+    text_markup: ["Apply markup", "", <MarkdownLogo size={18} />], ...(expPage ? { experiment_details: ["Experiment details…", "", <Notebook size={18} />] } as Record<string, [string, string, React.ReactNode]> : {}),
     font_other: ["Other font…", "", <TextAa size={18} />], size_other: ["Other size…", "", <ArrowsVertical size={18} />], line_spacing: ["Line spacing…", "", <Paragraph size={18} />],
     bring_front: ["Bring to front", `${MOD}[`, <StackSimple size={18} />], send_back: ["Send to back", `${MOD}]`, <Stack size={18} />],
     ...(settings.onlineSearch ? {
@@ -5806,7 +6231,8 @@ export default function Editor() {
       setGridPick(undefined);
       if (what === "hide.row") return changeGrid(arrow, (g) => ({ hidden: { ...g.hidden, rows: [...(g.hidden?.rows ?? []), row] } }));
       if (what === "hide.col") return changeGrid(arrow, (g) => ({ hidden: { ...g.hidden, cols: [...(g.hidden?.cols ?? []), key] } }));
-      if (what === "remove") return set({ ...doc, grids: doc.grids?.filter((g) => g.arrow !== arrow) }, true);
+      // Every grid of the reaction goes (an experiment page gives each of its arrows one), as Analyse Stoichiometry takes it off.
+      if (what === "remove") { const r = reactionOf(arrow)?.arrows ?? [arrow]; return set({ ...doc, grids: doc.grids?.filter((g) => !r.includes(g.arrow)) }, true); }
     }
     if (command === "delete" && context.kind === "grid") return runAction("grid.remove");
     if (command.startsWith("colour.")) {
@@ -5816,6 +6242,7 @@ export default function Editor() {
       if (context.kind === "grid" && gridPick) return changeGrid(gridPick.arrow, () => ({ colour: ink }));
       if (context.kind === "caption" && context.mode !== "picked") return runAction(`caption.colour.${hex}`);
       if (context.kind === "spot" && spotPick) return set(editSpot(doc, spotPick.plate, spotPick.index, () => ({ colour: ink })), true);
+      if (context.kind === "cycle" && context.side && branchPick) return set(setBranch(doc, branchPick.cycle, branchPick.branch, { colour: ink }), true);
       const pick = <T extends { id: number; colour?: string }>(x: T): T => (picked.has(x.id) ? { ...x, colour: ink } : x);
       return set({
         ...doc,
@@ -5851,17 +6278,20 @@ export default function Editor() {
     if (command.startsWith("show:") || command.startsWith("hide_warning:")) {
       const what = command.slice(command.indexOf(":") + 1), n = Number(what.slice(1)), on = what[0];
       if (command.startsWith("show:")) return showProblem(on === "b" ? { type: "misc", message: "", bond: n } : on === "s" ? { type: "misc", message: "", shape: n } : on === "c" ? { type: "misc", message: "", caption: n } : { type: "misc", message: "", atom: on === "a" ? n : Number(what) });
-      if (on === "c") return doc.captions?.some((c) => c.id === n) && set({ ...doc, captions: doc.captions.map((c) => (c.id === n ? { ...c, chemical: false as const } : c)) }, true);
-      if (on === "b") return doc.bonds[n] && set({ ...doc, bonds: doc.bonds.map((b, k) => (k === n ? { ...b, ignoreWarnings: true as const } : b)) }, true);
-      if (on === "s") return doc.shapes?.some((x) => x.id === n) && set({ ...doc, shapes: doc.shapes.map((x) => (x.id === n ? { ...x, ignoreWarnings: true as const } : x)) }, true);
+      if (on === "c") return doc.captions?.some((c) => c.id === n) && set(hideProblems(doc, [{ caption: n }]), true);
+      if (on === "b") return doc.bonds[n] && set(hideProblems(doc, [{ bond: n }]), true);
+      if (on === "s") return doc.shapes?.some((x) => x.id === n) && set(hideProblems(doc, [{ shape: n }]), true);
       const i = on === "a" ? n : Number(what);
-      return doc.atoms[i] && set({ ...doc, atoms: doc.atoms.map((a, k) => (k === i ? { ...a, ignoreWarnings: true as const } : a)) }, true);
+      return doc.atoms[i] && set(hideProblems(doc, [{ atom: i }]), true);
     }
     // A wedge or hash drawn the wrong way round: its ends swapped.
     if (command.startsWith("flip_bond:")) { const k = Number(command.slice(10)); return doc.bonds[k] && set(flipBond(doc, k), true); }
     if (command.startsWith("align.")) return glideTo(alignFragments(doc, selection, command.slice(6) as "row" | "column" | "spread-row"));
     if (command === "delete" && context.kind === "spot") return runAction("spot.delete");
-    if (command === "delete") return selection.size || picked.size ? set(deleteGraphics(deleteAtoms(doc, selection), picked)) : undefined;
+    // A cycle's side arrow picked goes with its text (its structures stay); a step picked loses its arc.
+    if (command === "delete" && context.kind === "cycle" && context.side) return cycleAction("side.remove");
+    if (command === "delete" && context.kind === "cycle" && context.step && stepPick) return set(hideArc(stepPick.cycle, stepPick.step), true);
+    if (command === "delete") return selection.size || picked.size ? set(deleteChosen(doc, selection, picked, undefined, drawnAt, drawnAlign)) : undefined;
     if (command === "number") return numberStructures();
     // Atom mapping (Map Reaction Atoms): every step of the picked reaction, numbered by Indigo, with one numbering
     // through the scheme and Rxn marks on the bonds the reaction changes (interpret.ts); or every number cleared.
@@ -6129,7 +6559,8 @@ export default function Editor() {
     }
     if (context.kind === "bond") {
       const bi = doc.bonds.findIndex((b) => selection.has(b.atoms[0]) && selection.has(b.atoms[1])), arg = command.split(".")[1];
-      if (arg in BONDS) return set(setBondSpec(doc, bi, BONDS[arg as BondKind].spec), true);
+      // A style chip does what its key does (keyBond): Wedge on a wedge turns it round.
+      if (arg in BONDS) return set(keyBond(doc, bi, BONDS[arg as BondKind].spec), true);
       const ring = arg.startsWith("ring") ? RINGS[arg.slice(4) as RingKind] : arg === "benzene" ? RINGS.benzene : undefined;
       if (ring) return set(addRing(doc, ring.n, ring.aromatic, { bond: bi }));
       if (arg === "left" || arg === "centre" || arg === "right" || arg === "auto") return set(setPosition(doc, bi, arg === "auto" ? undefined : arg), true);
@@ -6175,10 +6606,10 @@ export default function Editor() {
     // Option-click takes it out. Either way from the selection as it was before the press.
     const mods = pressMods.current;
     pressMods.current = undefined;
-    // An integral group goes in or out whole, and a cycle with its intermediates (as a click picks them).
+    // An integral group goes in or out whole, and a cycle with all its parts (as a click picks them).
     if (tool === "select" && mods && (mods.shift || mods.alt)) {
-      const cycle = doc.cycles?.find((c) => c.id === t.cycle);
-      const [ids, items] = wholeIntegral(doc, new Set([...atomsOf(doc, t), ...(cycle?.nodes.flat() ?? [])]), new Set(itemsOf(t)));
+      const cycle = doc.cycles?.find((c) => c.id === t.cycle), [own, text] = cycle ? cycleParts(cycle) : [[], []];
+      const [ids, items] = wholeIntegral(doc, new Set([...atomsOf(doc, t), ...own]), new Set([...itemsOf(t), ...text]));
       const all = [...ids].every((i) => mods.atoms.has(i)) && [...items].every((x) => mods.picks.has(x)), out = mods.alt || all;
       const atoms = new Set(mods.atoms), picks = new Set(mods.picks);
       for (const i of ids) if (out) atoms.delete(i); else atoms.add(i);
@@ -6202,12 +6633,26 @@ export default function Editor() {
       const gc = Object.values(t).every((v) => v === undefined) ? gridCellAt(at) : undefined;
       if (gc) { choose([], []); return setGridPick({ arrow: gc.arrow, key: gc.key, row: gc.row }); }
       setGridPick(undefined);
-      if (t.cycle !== undefined) return;
+      // A second click on a picked cycle's arc picks that step on its own.
+      if (t.cycle !== undefined) {
+        if (stepAgain.current === undefined) return;
+        setSelection(new Set());
+        setPicked(new Set([t.cycle]));
+        return setStepPick({ cycle: t.cycle, step: stepAgain.current });
+      }
       const on = t.atom !== undefined ? `atom ${t.atom}` : t.bond !== undefined ? `bond ${t.bond}` : undefined, was = lastPick.current, now = performance.now();
       lastPick.current = on === undefined ? undefined : { on, time: now };
       if (on !== undefined && was?.on === on && now - was.time < DOUBLE_MS) { lastPick.current = undefined; return pickWhole(t); }
       if (groupsOf(doc, new Set(atomsOf(doc, t)), new Set(itemsOf(t))).length) return; // the press picked the group, or the part picked before
       return choose(atomsOf(doc, t), itemsOf(t));
+    }
+    // Side arrow: a click on a structure or free text beside a step makes it that step's reagent or product
+    // (attachBeside). One that is already a cycle's, or not beside a step, was only picked.
+    if (tool === "cycle" && cycleChoice === "side" && (t.atom !== undefined || t.bond !== undefined || t.caption !== undefined)) {
+      const atom = t.atom ?? (t.bond !== undefined ? doc.bonds[t.bond].atoms[0] : undefined), atoms = atom !== undefined ? fragments(doc).find((g) => g.includes(atom)) : undefined;
+      const free = atoms ? !doc.cycles?.some((c) => cycleAtoms(c).some((i) => atoms.includes(i))) : doc.captions?.some((x) => x.id === t.caption && !x.cycle && !x.under && !x.on);
+      const m = free ? attachBeside(doc, atoms ? { atoms } : { text: t.caption }, { box: dropBox, bond: style.bond }) : doc;
+      return m !== doc ? void set(m) : undefined;
     }
     if ((t.caption !== undefined || t.cycle !== undefined) && tool !== "text") return; // a caption or cycle was picked, not drawn on
     if (tool === "table" && tableAt(at)) return openCell(tableAt(at)!, at);
@@ -6276,18 +6721,21 @@ export default function Editor() {
     if (tool === "template") {
       const mol = templateMol(templateVariant);
       // The point goes too: a template with no bonds or no atoms (a lamp, a flask) goes where the click was.
-      return mol ? set(addTemplate(doc, mol, { ...(t.bond !== undefined ? { bond: t.bond } : t.atom !== undefined ? { atom: t.atom } : {}), point: at })) : undefined;
+      // Stamped beside a catalytic cycle, it joins it (⌘ keeps it free).
+      return mol ? set(addTemplate(doc, mol, { ...(t.bond !== undefined ? { bond: t.bond } : t.atom !== undefined ? { atom: t.atom } : {}), point: at }), false, undefined, !more.meta && "placed") : undefined;
     }
     if (tool === "ring") {
       const custom = templates.find((x) => templateKind(x.id) === ringKind)?.mol ?? libraryItem(ringKind)?.mol ?? namedOf(ringKind);
-      if (custom) return set(addTemplate(doc, custom, { ...(t.bond !== undefined ? { bond: t.bond } : t.atom !== undefined ? { atom: t.atom } : {}), point: at }));
+      // A ring stamped beside a catalytic cycle joins it. ⌘ keeps a chair or a library ring free, as with a template; on
+      // a plain ring ⌘ draws it delocalised, so that one joins (only near an arc, never in the middle of the cycle).
+      if (custom) return set(addTemplate(doc, custom, { ...(t.bond !== undefined ? { bond: t.bond } : t.atom !== undefined ? { atom: t.atom } : {}), point: at }), false, undefined, !more.meta && "placed");
       const r: { n: number; aromatic: boolean; chair?: 1 | 2 } = RINGS[ringKind as RingKind];
-      if (r.chair) return set(addChair(doc, r.chair, t.bond !== undefined ? { bond: t.bond } : { point: at }));
+      if (r.chair) return set(addChair(doc, r.chair, t.bond !== undefined ? { bond: t.bond } : { point: at }), false, undefined, !more.meta && "placed");
       // As in ChemDraw: a click on an atom makes a spiro ring, and Option-click sprouts the ring on a new bond (the
       // other way round with Sprout rings on a click in Settings). Command draws the ring delocalised, with a circle;
       // Shift makes its first bond single.
       const sproutIt = t.atom !== undefined && alt !== settings.sproutRings;
-      return set(addRing(doc, r.n, r.aromatic || !!more.meta, t.bond !== undefined ? { bond: t.bond } : t.atom !== undefined ? { atom: t.atom } : { point: at }, { sprout: sproutIt, firstSingle: more.shift, circle: more.meta }));
+      return set(addRing(doc, r.n, r.aromatic || !!more.meta, t.bond !== undefined ? { bond: t.bond } : t.atom !== undefined ? { atom: t.atom } : { point: at }, { sprout: sproutIt, firstSingle: more.shift, circle: more.meta }), false, undefined, "placed");
     }
     if (tool === "text") {
       // Option-click repeats the last label typed, as in ChemDraw.
@@ -6328,7 +6776,7 @@ export default function Editor() {
     // A selection let go on a template set (or the Ring or Template tool) goes into it and stays where it was. Copies an
     // Option-drag made are not kept.
     if (drag.kind === "move" && drag.moved && over?.dataset.dropSet) {
-      const part = extractSelection(drag.base ?? doc, drag.atoms ?? selection, picked, drawnAt);
+      const part = extractSelection(drag.base ?? doc, drag.atoms ?? selection, picked, drawnAt, drawnAlign);
       if (drag.base && drag.base !== doc) { setSelection(new Set()); setPicked(new Set()); }
       return addPart(part, over.dataset.dropSet, over.dataset.dropTool === "template" ? "template" : "ring");
     }
@@ -6376,7 +6824,8 @@ export default function Editor() {
         return setPicked(new Set([id]));
       }
       case "cycle":
-        return releaseCycle(drag.from, drag.to);
+        if (drag.radius) return set(drag.radius, true);
+        return drag.pull ? releasePull(drag.pull.cycle, drag.pull.step, drag.pull.made) : releaseCycle(drag.from, drag.to, drag.start);
       case "shape": {
         // Too small to be a shape is a click. A circle needs only a radius; anything else both a width and a height.
         const round = tool === "shape" && "circle" in shapePick && shapePick.circle;
@@ -6394,6 +6843,10 @@ export default function Editor() {
         return;
       }
       case "handle":
+        // A click on a step's handle does nothing.
+        if (drag.step !== undefined && drag.working === doc) return;
+        // A click on a side arrow or its handle picks the side arrow.
+        if (drag.branch !== undefined && drag.working === doc) { setSelection(new Set()); setPicked(new Set([drag.id])); setStepPick(undefined); return setBranchPick({ cycle: drag.id, branch: drag.branch }); }
         return set(drag.working, true);
       case "tilt":
         return set(drag.working, true);
@@ -6403,9 +6856,19 @@ export default function Editor() {
       case "lane":
         setLanePick({ plate: drag.plate, lane: drag.to });
         return drag.working !== drag.base ? set(drag.working, true) : undefined;
+      case "mark":
+        // A click on a mark with Select picks its atom, as a click beside it does (Shift or Option adds it or takes
+        // it out, as a click on the atom does).
+        if (drag.working === drag.base && tool === "select") {
+          if (pressMods.current?.shift || pressMods.current?.alt) return click({ atom: drag.atom }, pos(doc, drag.atom));
+          const [atoms, picks] = withGroups(new Set([drag.atom]), new Set());
+          setSelection(atoms);
+          setPicked(picks);
+        }
+        pressMods.current = undefined;
+        return drag.working !== drag.base ? set(drag.working, true) : undefined;
       case "tlcline":
       case "tableedge":
-      case "mark":
         return drag.working !== drag.base ? set(drag.working, true) : undefined;
       case "pen":
         setPenAt(drag.at);
@@ -6437,11 +6900,11 @@ export default function Editor() {
       case "click":
         return click(drag.target, drag.at, drag.alt);
       case "ring":
-        return drag.to ? set(ringDrop(drag)) : click(drag.target, drag.at, drag.alt, { meta: drag.meta, shift: drag.shift });
+        return drag.to ? set(ringDrop(drag), false, undefined, !chairFree(drag) && "placed") : click(drag.target, drag.at, drag.alt, { meta: drag.meta, shift: drag.shift });
       case "erase": {
         // A click removes the atom, bond or object under the pointer; a rub removes everything it marked.
         const t = drag.target;
-        if (drag.moved) return set(deleteGraphics(erase(doc, drag.bonds, drag.atoms), drag.captions));
+        if (drag.moved) return set(deleteChosen(doc, drag.atoms, drag.captions, drag.bonds, drawnAt, drawnAlign));
         return removeAt(t);
       }
       case "box":
@@ -6460,7 +6923,7 @@ export default function Editor() {
         saw("move");
         // An atom dropped exactly on another joins it. Joining renumbers atoms, so the selection clears then.
         const { mol, joined } = joinOverlaps(drag.working, drag.atoms ?? selection);
-        return set(mol, !joined);
+        return set(mol, !joined, undefined, !drag.skip);
       }
     }
   }
@@ -6757,6 +7220,7 @@ export default function Editor() {
         setNotice("Copied.", "done");
         return Promise.resolve(true);
       }
+      if (partPick) return Promise.resolve(false);
       // Everything selected (or the whole drawing) in Octet's own form, for pasting back with arrows, text and shapes,
       // with this drawing's style, so a paste into a drawing of another size keeps text in proportion (fitSizes); and
       // in the forms other programs read: those switched on in Settings > Import and export > Copy (REL-19, CH-8).
@@ -6775,11 +7239,11 @@ export default function Editor() {
       saw("copy");
       const page = !selection.size && !picked.size, on = settings.files.clipboard, octetJson = serialize({ ...part, style });
       // In the app: as ChemDraw copies, for Word, PowerPoint and Keynote (a picture at true size: on the Mac a vector
-      // PDF with the structure hidden in it, so it pastes back as a structure), then CDX, CDXML, a molfile and SMILES,
-      // then Octet's own form. The CDXML goes in the PDF too.
+      // PDF, on Windows an EMF and on Linux a PNG, each with the structure hidden in it, so it pastes back as a
+      // structure), then CDX, CDXML, a molfile and SMILES, then Octet's own form. The CDXML goes in the picture too.
       if (NATIVE_CLIP) {
         const ask = (yes: boolean, f: PartFormat) => (yes ? formatOf(part, f) : undefined);
-        return copyToClipboard({ svg: on.pdf ? pictureOf(part) : undefined, cdxml: ask(on.cdxml || (MAC && on.pdf), "cdxml"), cdxmlType: on.cdxml, cdx: ask(on.cdx, "cdx"), molfile: ask(on.mol, "molfile"), smiles: ask(on.smiles, "smiles"), octetJson })
+        return copyToClipboard({ dpi: settings.files.dpi, svg: on.pdf ? pictureOf(part) : undefined, cdxml: ask(on.cdxml || on.pdf, "cdxml"), cdxmlType: on.cdxml, cdx: ask(on.cdx, "cdx"), molfile: ask(on.mol, "molfile"), smiles: ask(on.smiles, "smiles"), octetJson })
           .then(() => { ackCopy(page); return true; }, (err) => { setNotice(failure("Octet cannot copy this.", err)); return false; });
       }
       // A browser (dev only): its own clipboard, with Octet's form and SMILES (or the text) as text. After Check Structure
@@ -6791,10 +7255,13 @@ export default function Editor() {
       ackCopy(page);
       return Promise.resolve(true);
     };
-    // Cut: copy, then delete what was selected, once the copy is on the clipboard and if the drawing has not changed.
+    // Cut: copy, then delete what was copied (an arrow's conditions too), once the copy is on the clipboard and if the
+    // drawing has not changed.
     const onCut = (e: ClipboardEvent) => {
       if (typing() || home || modal() || (!selection.size && !picked.size)) return;
-      const before = doc, gone = deleteGraphics(deleteAtoms(doc, selection), picked);
+      if (partPick) return run("edit.delete");
+      const taken = new Set([...picked, ...(selectedPart()?.captions ?? []).map((c) => c.id)]);
+      const before = doc, gone = deleteGraphics(deleteAtoms(doc, selection), taken, drawnAt, drawnAlign);
       void onCopy(e).then((copied) => { if (copied && now.current === before) set(gone); });
     };
     addEventListener("keydown", onKey);
@@ -6828,6 +7295,11 @@ export default function Editor() {
     const b = drawing.label[i], pad = 0.16 * L;
     if (b) return <rect key={key} className={cls} x={b[0] - pad} y={b[1] - pad} width={b[2] - b[0] + 2 * pad} height={b[3] - b[1] + 2 * pad} rx={Math.min(0.32 * L, (b[3] - b[1]) / 2 + pad)} />;
     return <circle key={key} className={cls} cx={pos(shown, i)[0] * L} cy={-pos(shown, i)[1] * L} r={0.32 * L} />;
+  };
+  // A charge, radical or lone pair under the pointer with Select: a ring round it.
+  const markRing = (i: number, key: string) => {
+    const e = drawing.electrons.find((x) => x.atom === i && x.key === key);
+    return e ? <circle key="h" className="mark" cx={e.at[0]} cy={e.at[1]} r={0.22 * L} /> : null;
   };
   const bondMark = (i: number, key: string, cls: string) => {
     const [a, b] = shown.bonds[i].atoms.map((k) => pos(shown, k));
@@ -6870,7 +7342,8 @@ export default function Editor() {
     ...shown.bonds.flatMap((b, i) => (selection.has(b.atoms[0]) && selection.has(b.atoms[1]) && !shown.atoms[b.atoms[0]].hidden && !shown.atoms[b.atoms[1]].hidden ? [bondMark(i, `sb${i}`, "")] : [])),
     ...[...selection].filter((i) => i < shown.atoms.length && !shown.atoms[i].hidden).map((i) => atomMark(i, `sa${i}`, "")),
     ...[...picked].map((id) => captionMark(id, `sc${id}`, "") ?? arrowMark(id, `sr${id}`, "")),
-    ...cycleArrows.filter((a) => picked.has(a.cycle)).map((a) => <polyline key={`sy${a.id}`} className="arrow-mark" points={arrowTrace(a, L).paths[0].map((q) => q.join(",")).join(" ")} strokeWidth={0.36 * L} />),
+    // A picked cycle's arrows; of a picked step or side arrow, its own alone.
+    ...cycleArrows.filter((a) => picked.has(a.cycle) && (branchPick?.cycle !== a.cycle || a.branch === branchPick.branch) && (stepPick?.cycle !== a.cycle || (a.branch === undefined && a.step === stepPick.step))).map((a) => <polyline key={`sy${a.id}`} className="arrow-mark" points={arrowTrace(a, L).paths[0].map((q) => q.join(",")).join(" ")} strokeWidth={0.36 * L} />),
   ];
   // With Select or the Eraser, over any part of an integral group the mark covers all of it, as a click picks or
   // removes all of it (ChemDraw highlights the outermost integral group too). Each group's members, worked out once
@@ -6928,6 +7401,7 @@ export default function Editor() {
   // The mark on what is under the pointer, drawn by Live as the pointer moves.
   const hoveredMark = (hover: Hover, whole = drag ? undefined : integralAt(hover), pick = templatePick && !drag ? pickOf(hover) : undefined) => drag ? null
     : pick ? partMark(...pick)
+    : hover.mark !== undefined ? markRing(hover.atom!, hover.mark)
     : whole ? wholeMark(whole)
     // The Reaction Atom-Atom Map tool on a mapped atom: its partners (the atoms with its number) ringed too.
     : tool === "map" && hover.atom !== undefined && shown.atoms[hover.atom]?.map ? (
@@ -6941,7 +7415,8 @@ export default function Editor() {
     : hover.atom !== undefined && shown.atoms[hover.atom] ? atomMark(hover.atom, "h", "mark")
     : hover.caption !== undefined && !picked.has(hover.caption) ? captionMark(hover.caption, "h", "mark")
     : hover.arrow !== undefined && !picked.has(hover.arrow) ? arrowMark(hover.arrow, "h", "mark")
-    : hover.cycle !== undefined && !picked.has(hover.cycle) ? <g key="h">{cycleArrows.filter((a) => a.cycle === hover.cycle).map((a) => <polyline key={a.id} className="arrow-mark mark" points={arrowTrace(a, L).paths[0].map((q) => q.join(",")).join(" ")} strokeWidth={0.36 * L} />)}</g>
+    // Over a cycle's side arrow, that side arrow (the half the Eraser would take); over an arc with the Eraser, that arc.
+    : hover.cycle !== undefined && !picked.has(hover.cycle) ? <g key="h">{cycleArrows.filter((a) => a.cycle === hover.cycle && (hover.branch !== undefined ? a.branch === hover.branch && (tool !== "erase" || a.part === hover.part) : tool !== "erase" || (a.branch === undefined && a.step === hover.step))).map((a) => <polyline key={a.id} className="arrow-mark mark" points={arrowTrace(a, L).paths[0].map((q) => q.join(",")).join(" ")} strokeWidth={0.36 * L} />)}</g>
     : hover.bond !== undefined && shown.bonds[hover.bond] ? bondMark(hover.bond, "h", "mark") : null;
   const box = drag?.kind === "box" && drag.moved ? (
     <rect
@@ -7242,7 +7717,7 @@ export default function Editor() {
   // The selection's marks, and the mark on what is under the pointer (Live: a pointer move draws only that again).
   const marks = (
     <>
-      {/* One group with one opacity, so overlapping marks don't stack up darker. */}
+      {/* One group, blended into the page as one, so overlapping marks don't stack up darker. */}
       <g key={copied?.page === false ? `copied${copied.n}` : undefined} className={copied?.page === false ? "selection-marks copied" : "selection-marks"}>{selected}</g>
       {gridPickMark()}
       {groupFrames}
@@ -7257,8 +7732,9 @@ export default function Editor() {
   );
   const ink = useMemo(() => (
     <>
+      {structureInk.map(([id, key, path, move, first]) => { const [colour, alpha] = key.split("|"); return <path key={`s${id}`} className={first >= settling ? "settle" : undefined} d={path} transform={move} fill={colour ? textInk(colour) : "var(--ink)"} fillOpacity={Number(alpha) < 1 ? Number(alpha) : undefined} />; })}
       {drawing.beads.length > 0 && (
-        // Polymer beads: spheres lit from the top left.
+        // Polymer beads: spheres lit from the top left, over the bond they end.
         <>
           <defs>
             <radialGradient id="bead" cx="0.36" cy="0.32" r="0.72">
@@ -7269,7 +7745,6 @@ export default function Editor() {
           {drawing.beads.map((b, i) => <circle key={`bd${i}`} cx={b.at[0]} cy={b.at[1]} r={b.r} fill="url(#bead)" />)}
         </>
       )}
-      {structureInk.map(([id, key, path, move, first]) => { const [colour, alpha] = key.split("|"); return <path key={`s${id}`} className={first >= settling ? "settle" : undefined} d={path} transform={move} fill={colour ? textInk(colour) : "var(--ink)"} fillOpacity={Number(alpha) < 1 ? Number(alpha) : undefined} />; })}
       {arrowInk.map(([colour, d]) => <path key={`a${colour}`} d={d} fill={colour ? textInk(colour) : "var(--ink)"} />)}
     </>
   ), [drawing.beads, structureInk, arrowInk, darkPaper, style, pt, settling]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -7317,10 +7792,10 @@ export default function Editor() {
   }, [shown, frame, darkPaper, draggedSpot, spotPick, laneMark?.plate, laneMark?.lane, style, pt, cell?.id, cell?.r, cell?.c, drawing, labelTexts, placed, arrows, cycleArrows, writing?.id, reagents]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
-    <div className={guides.rulers && !home ? "editor with-rulers" : "editor"}>
+    <div className={guides.rulers && !home ? "editor with-rulers" : "editor"} data-select={settings.selectColour}>
       {/* The canvas draws again as the view, or what the pointer is over, changes. The drawing's layers in it are made
           by the editor (under, marks, ink and over), so React passes over them. */}
-      <Live store={views}>{(view) => <Live store={overs}>{({ selection: overSelection, turn: overTurn, edge: edgeHover, page: pageHover, resize: overResize, join: overJoin, cross: overCross }) => (
+      <Live store={views}>{(view) => <Live store={overs}>{({ selection: overSelection, turn: overTurn, edge: edgeHover, page: pageHover, resize: overResize, join: overJoin, cross: overCross, grab: overGrab }) => (
       <svg
         ref={svg}
         className={`canvas paper-${paper}${view.pinch ? " pinch" : ""}`}
@@ -7328,7 +7803,8 @@ export default function Editor() {
         data-tool={tool}
         style={{
           ...((overCross && !drag) || drag?.kind === "crosshair" ? { cursor: "move" } : pageHover && !drag ? { cursor: "zoom-in" } : (overResize && !drag) || drag?.kind === "resize" ? { cursor: CURSORS[drag?.kind === "resize" ? drag.side : overResize!] }
-            : (overTurn && !drag) || drag?.kind === "turn" ? { cursor: turnCursor ?? "grab" } : overSelection || drag?.kind === "move" ? { cursor: "move" } : tool === "select" && cursor ? { cursor } : {}),
+            : (overTurn && !drag) || drag?.kind === "turn" ? { cursor: cursor?.turn ?? "grab" } : overSelection || drag?.kind === "move" ? { cursor: "move" } : overGrab && !drag ? { cursor: "grab" } : {}),
+          ...Object.fromEntries(Object.entries(cursor ?? {}).map(([name, value]) => [`--cursor-${name}`, value])),
           ...((edgeHover && !drag) || drag?.kind === "tableedge" ? { cursor: (drag?.kind === "tableedge" ? drag.axis : edgeHover) === "col" ? "col-resize" : "row-resize" } : {}),
           ...(templatePick ? { cursor: "copy" } : {}),
           ...(darkPaper ? { "--ink": "#FFFFFF" } : {}),
@@ -7348,6 +7824,14 @@ export default function Editor() {
           // A double-click on a resize handle opens Scale…, and on the rotation handle Rotate…, as in ChemDraw.
           if (resizeAt(toDoc(e.clientX, e.clientY))) return commands.current.scale_dialog?.();
           if (tool !== "erase" && onTurnHandle(toDoc(e.clientX, e.clientY))) return commands.current.rotate_dialog?.();
+          // A double-click on a cycle step's handle puts its space or bow back; on a side arrow's, where it meets the arc
+          // or that end.
+          const stepHandle = tool !== "erase" ? handleAt(toDoc(e.clientX, e.clientY)) : undefined;
+          if (stepHandle?.step !== undefined) return doc.cycles?.find((c) => c.id === stepHandle.id)?.steps?.[stepHandle.step]?.[stepHandle.which as "lead" | "trail" | "bow"] === undefined ? undefined : set(setStep(doc, stepHandle.id, stepHandle.step, { [stepHandle.which]: undefined }), true);
+          if (stepHandle?.branch !== undefined) return set(stepHandle.which === "meet" ? setBranch(doc, stepHandle.id, stepHandle.branch, { meet: undefined }) : setEnd(doc, stepHandle.id, stepHandle.branch, stepHandle.which === "end:out" ? "out" : "in", { along: undefined, reach: undefined }), true);
+          // With the Cycle tool, a double-click on an arc opens its step's name.
+          const arc = tool === "cycle" ? hit(toDoc(e.clientX, e.clientY)) : undefined;
+          if (arc?.cycle !== undefined && arc.branch === undefined && arc.step !== undefined) return writingOpen.current ? undefined : openName(arc.cycle, arc.step);
           // With Select, a double-click on part of a group picks that part alone, to move it within the group (an
           // integral group stays whole). A double-click on a part already picked goes on (a caption's text opens).
           if (tool === "select") {
@@ -7374,6 +7858,8 @@ export default function Editor() {
           // Double-click a table to type in the cell.
           const table = tool !== "erase" ? tableAt(toDoc(e.clientX, e.clientY)) : undefined;
           if (table) return openCell(table, toDoc(e.clientX, e.clientY));
+          // Double-click an experiment's details with Select to edit them (a click with a drawing tool there draws).
+          if (tool === "select" && t.atom === undefined && t.bond === undefined && t.caption === undefined && t.arrow === undefined && detailsAt(toDoc(e.clientX, e.clientY))) return setDialog({ kind: "details", values: detailsOf(doc.annotations) });
           // Double-click a reaction arrow to pick the whole reaction: structures, plus signs, arrows and their text.
           const a = t.arrow !== undefined ? arrows.find((x) => x.id === t.arrow) : undefined;
           if (a && !curved(a) && !isLine(a) && tool !== "erase") {
@@ -7408,6 +7894,13 @@ export default function Editor() {
           </g>
           {/* The drawing and its marks, without the page, so the Spectrum panel can show the structure beside its spectrum. */}
           <g id="world">
+          {/* An experiment's details at the top of its page: part of the page as it prints and exports, not of a part copied. */}
+          {details && (!exporting || exporting === doc) && (
+            <g className="details" fill="var(--ink)">
+              {details.texts.map((x, k) => <text key={k} x={x.x * L} y={-x.y * L} style={{ font: `${x.bold ? "bold " : ""}${x.size * pt}px ${fontStack(style.captionFont)}` }}>{x.text}</text>)}
+              <line x1={details.rule[0] * L} x2={details.rule[1] * L} y1={-details.rule[2] * L} y2={-details.rule[2] * L} stroke="var(--ink)" strokeWidth={style.line * pt} />
+            </g>
+          )}
           {/* The whole drawing scaled in proportion is shown scaled as it is, as nothing in it changes but its size. */}
           <g transform={drag?.kind === "resize" && drag.whole && drag.lines && drag.size[0] === drag.size[1] && drag.size[0] !== 1
             ? `translate(${drag.anchor[0] * L * (1 - drag.size[0])} ${-drag.anchor[1] * L * (1 - drag.size[0])}) scale(${drag.size[0]})` : undefined}>
@@ -7475,8 +7968,6 @@ export default function Editor() {
                 </g>
               );
             }
-            const side = drag?.kind === "move" || (drag?.kind === "handle" && !["end", "meet", "tail"].includes(drag.which)) ? undefined : sideHandles();
-            if (side) return [side.h.end, side.h.meet, side.h.tail].flatMap((q, i) => (q ? [<circle key={`cs${i}`} className="handle" cx={q[0] * L} cy={-q[1] * L} r={4 / view.zoom} vectorEffect="non-scaling-stroke" />] : []));
             if ((!a || a.kind === "curve") && !wh) return null;
             const barb = !wh && a ? headBarb(a, frame, L) : undefined;
             const points = wh ? [wh.at] : [a!.from, a!.to, ...(curved(a!) || a!.point ? [bendPoint(a!)] : []), ...(barb ? [[barb[0] / L, -barb[1] / L] as P] : [])];
@@ -7486,6 +7977,23 @@ export default function Editor() {
                 {!wh && a && pointable(a) && !a.point && (() => { const m = bendPoint(a); return <circle className="handle add" cx={m[0] * L} cy={-m[1] * L} r={3 / view.zoom} vectorEffect="non-scaling-stroke" />; })()}
               </>
             );
+          })()}
+          {(drag && drag.kind !== "handle" ? [] : branchHandles()).flatMap((b) => (["meet", "end:in", "end:out"] as const).flatMap((which) => {
+            // A cycle's side arrows' handles (branchHandles): where each meets the arc, and its ends. The one being dragged
+            // is hidden.
+            const q = which === "meet" ? b.T : b[which === "end:in" ? "in" : "out"];
+            return q && !(drag?.kind === "handle" && drag.branch === b.branch && drag.id === b.cycle && drag.which === which) ? [<circle key={`cb${b.cycle}:${b.branch}${which}`} className="handle" cx={q[0] * L} cy={-q[1] * L} r={4 / view.zoom} vectorEffect="non-scaling-stroke" />] : [];
+          }))}
+          {(() => {
+            // A cycle's step handles (stepHandles): each arc's start, end and middle. The one being dragged is hidden;
+            // a dragged start or end shows its space beside it.
+            const sh = drag && drag.kind !== "handle" ? undefined : stepHandles(), on = drag?.kind === "handle" && drag.step !== undefined ? drag : undefined;
+            return sh && cycleLayout.spans.filter((s) => s.cycle === sh.c.id && sh.steps.includes(s.step)).flatMap((s) => (["lead", "trail", "bow"] as const).map((which) => {
+              const q = s[which], key = `st${s.step}${which}`;
+              if (on?.step !== s.step || on.which !== which) return <circle key={key} className="handle" cx={q[0] * L} cy={-q[1] * L} r={4 / view.zoom} vectorEffect="non-scaling-stroke" />;
+              const v = which === "bow" ? undefined : on.working.cycles?.find((x) => x.id === on.id)?.steps?.[s.step]?.[which] ?? 0;
+              return v === undefined ? null : <text key={key} className="turn-angle" x={q[0] * L} y={-q[1] * L - 10 / view.zoom} textAnchor="middle" style={{ fontSize: 11 / view.zoom }}>{`${v} pt`}</text>;
+            }));
           })()}
           {overJoin && !drag && (
             // Where a joined arrow would start: a small square, as ChemDraw marks it.
@@ -7734,7 +8242,8 @@ export default function Editor() {
               }
               // Return reaches here only when it does not make a new line (Settings: Option-Return for a new line).
               if (e.key === "Enter" && !e.shiftKey && !e.altKey) { e.preventDefault(); commitWriting(); }
-              if (e.key === "Tab" && !e.shiftKey && writing.at && writing.id === undefined) { e.preventDefault(); tabCaption(); }
+              if (e.key === "Tab" && !e.shiftKey && tabSide()) e.preventDefault();
+              else if (e.key === "Tab" && !e.shiftKey && writing.at && writing.id === undefined) { e.preventDefault(); tabCaption(); }
               if (e.key === "Escape") { e.preventDefault(); commitWriting(); } // Escape keeps the text, as a click elsewhere does
               // ChemDraw's text keys. The text box takes them first (in the app too: the web view gets the keystroke before
               // the Text menu does), and marks them so the same command from the menu does not run twice.
@@ -7872,6 +8381,10 @@ export default function Editor() {
           onOnlineSearch={(onlineSearch) => setSettings((s) => ({ ...s, onlineSearch }))}
           rulerUnit={settings.rulerUnit}
           onRulerUnit={(rulerUnit) => setSettings((s) => ({ ...s, rulerUnit }))}
+          selectColour={settings.selectColour}
+          onSelectColour={(selectColour) => setSettings((s) => ({ ...s, selectColour }))}
+          outlines={settings.outlines}
+          onOutlines={(outlines) => setSettings((s) => ({ ...s, outlines }))}
           menuKeys={menuReady ? [] : Object.values(MENU_NAMES).flatMap(([name, keys]) => (keys ? [[name, platformLabel(keys)!] as [string, string]] : []))}
           palette={settings.palette}
           onPalette={(palette) => setSettings((s) => ({ ...s, palette }))}
@@ -7883,6 +8396,7 @@ export default function Editor() {
           onWarningTypes={(warningTypes) => setSettings((s) => ({ ...s, warningTypes }))}
           checkCopy={settings.checkCopy}
           windows={settings.windows} onWindows={(windows) => setSettings((s) => ({ ...s, windows }))}
+          cursor={settings.cursor} onCursor={(cursor) => setSettings((s) => ({ ...s, cursor }))}
           onCheckCopy={(checkCopy) => setSettings((s) => ({ ...s, checkCopy }))}
           adding={addingColour}
           updates={settings.updates === true}
@@ -8069,6 +8583,10 @@ export default function Editor() {
           />
         );
       }}</Live>
+      <Exit>{sideAsk && (
+        <ContextMenu label="Side arrow" at={sideAsk} keyboard sub={() => undefined} onClose={() => setSideAsk(undefined)} onChoose={(k) => chooseSide(sideAsk, k as "in" | "out" | "both")}
+          groups={[sideAsk.choices.map((k) => ({ key: k, name: { in: "Reagent", out: "Product", both: "Reagent and product" }[k], icon: <SideGlyph ends={k} /> }))]} />
+      )}</Exit>
       <Exit>{menuAt && (() => {
         const context = panelContext ?? contextOf();
         return <ActionsMenu at={menuAt} keyboard={menuAt.keyboard} context={context} messy={untidy} hiddenWarnings={hiddenHere()} warned={selectedOf(found).length} grouping={grouping}
@@ -8084,6 +8602,15 @@ export default function Editor() {
           </label>
         </Dialog>
       )}</Exit>
+      <Exit>{dialog?.kind === "details" && (
+        // An experiment's details (experiment.ts), kept as the document's annotations.
+        <Dialog title="Experiment details" action="Save" onClose={() => setDialog(undefined)}
+          onAction={() => { const next = withDetails(doc.annotations, dialog.values); if (JSON.stringify(next) !== JSON.stringify(doc.annotations)) set({ ...doc, annotations: next }, true); setDialog(undefined); }}>
+          {DETAILS.map(([k, name]) => (
+            <label key={k} className="dialog-row"><span>{name}</span><span className="unit-field text"><input aria-label={name} value={dialog.values[k] ?? ""} maxLength={200} spellCheck={false} onChange={(e) => setDialog({ ...dialog, values: { ...dialog.values, [k]: e.target.value } })} /></span></label>
+          ))}
+        </Dialog>
+      )}</Exit>
       <Exit>{dialog?.kind === "rotate" && (
         <Dialog title="Rotate" action="Rotate" onClose={() => setDialog(undefined)}
           onAction={() => { const a = Number(dialog.angle); if (Number.isFinite(a)) rotateBy(dialog.clockwise ? -a : a); setDialog(undefined); }}>
@@ -8095,7 +8622,7 @@ export default function Editor() {
         </Dialog>
       )}</Exit>
       {(home || homeLeaving) && (homeKind.current === "name"
-        ? <NameBox leaving={!home} onDone={(userName) => { setSettings((s) => ({ ...s, userName })); setWelcomed(true); if (!settings.tutorialDone) startTutorial(); }} />
+        ? <NameBox leaving={!home} onDone={(userName) => { setSettings((s) => ({ ...s, userName, seenNotes: version })); setWelcomed(true); if (!settings.tutorialDone) startTutorial(); }} />
         : <Home leaving={!home} name={settings.userName ?? ""} first={welcomed} away={away} recents={recents} newKey={keyLabel("enter")} openKey={hint("open")}
             back={overDrawing ? { name, key: keyLabel("escape"), go: () => setHome(false) } : undefined}
             recovered={recovered} onRecovered={openRecovered} onDiscard={(entry) => setDialog({ kind: "discard", entry })}
@@ -8104,6 +8631,9 @@ export default function Editor() {
             onRemovePurpose={removePurpose}
             onCustom={settings.ownPurposes.length < MAX_PURPOSES ? () => setDialog({ kind: "template", name: "", from: purposeOf(settings, settings.purpose) ? settings.purpose : "paper" }) : undefined}
             onRemove={(r) => void homeCall("recent_remove", { path: r.path }).then(() => { refreshRecents(); void library.forget(r.path); }).catch(() => {})}
+            experiments={experiments} onRemoveExperiment={(path) => void homeCall("experiment_remove", { path }).then(refreshRecents).catch(() => {})}
+            onExportExperiments={(list) => void exportFile({ name: "Experiments", format: "csv", csv: experimentsCsv(list) })
+              .then((path) => { if (path) saved(path); }, (e) => setNotice(failure("Octet cannot export the experiments.", e)))}
             lib={library} drops={TAURI} palette={settings.palette}
             layout={settings.homeLayout} onLayout={(homeLayout) => setSettings((s) => ({ ...s, homeLayout }))} />)}
       <Exit>{coach > 0 && !home && (
@@ -8172,9 +8702,16 @@ export default function Editor() {
       )}</Exit>
       <Exit>{dialog?.kind === "lossy" && (
         <Dialog title={`Replace “${file.path ? fileName(file.path) : name}”?`} action="Save As…" onClose={() => { const d = dialog; setDialog(undefined); d.done(false); }}
-          alt={{ label: "Replace", onClick: () => { const d = dialog; setDialog(undefined); void save(false, true).then(d.done); } }}
+          alt={{ label: "Replace", onClick: () => { const d = dialog; setDialog(undefined); void save(false, true, true).then(d.done); } }}
           onAction={() => { const d = dialog; setDialog(undefined); void save(true).then(d.done); }}>
           <p className="dialog-note">Replace removes {lostText(dialog.lost)} from this file, because Octet cannot keep {Object.values(dialog.lost).reduce((a, b) => a + b, 0) > 1 ? "them" : "it"}. Save As keeps the original file.</p>
+        </Dialog>
+      )}</Exit>
+      <Exit>{dialog?.kind === "changed" && (
+        <Dialog title={`Another app changed “${file.path ? fileName(file.path) : name}”`} action="Save Anyway" onClose={() => { const d = dialog; setDialog(undefined); d.done(false); }}
+          alt={{ label: "Save As…", onClick: () => { const d = dialog; setDialog(undefined); void save(true).then(d.done); } }}
+          onAction={() => { const d = dialog; setDialog(undefined); void save(false, false, true).then(d.done); }}>
+          <p className="dialog-note">Another app changed it after you opened or saved it. If you save, you lose the changes from the other app.</p>
         </Dialog>
       )}</Exit>
       <Exit>{dialog?.kind === "revert" && (
@@ -8210,13 +8747,14 @@ export default function Editor() {
           <p className="dialog-note">Octet starts again after the update.</p>
         </Dialog>
       )}</Exit>
-      <Exit>{about && <About onClose={() => setAbout(false)} />}</Exit>
+      <Exit>{about && <About onClose={() => setAbout(false)} onWhatsNew={ownNotes && (() => setNotes(true))} />}</Exit>
+      <Exit>{notes && ownNotes && <WhatsNew release={ownNotes} onClose={() => setNotes(false)} />}</Exit>
       <Exit>{__FEEDBACK__ && feedback && <Feedback picture={feedback.picture} onClose={() => setFeedback(undefined)} onError={(e) => setNotice(failure("Octet cannot make your feedback.", e))}
         onSent={() => { setFeedback(undefined); setNotice("Your feedback is ready to send in your mail app.", "done"); }} />}</Exit>
       <FeedbackLink onOpen={() => void invoke("open_link", { name: "feedback" }).catch((e) => setNotice(failure("Octet cannot open your mail app.", e)))} />
-      <ExportButton quick={filePrefs.quick} hint={platformLabel(EXPORT_KEYS)} onQuick={() => checkFirst(() => void quickExport())} onExport={() => checkFirst(openExport)} />
+      <ExportButton quick={filePrefs.quick} selected={!!(selection.size || picked.size)} hint={platformLabel(EXPORT_KEYS)} onQuick={() => checkFirst(() => void quickExport())} onExport={() => checkFirst(openExport)} />
       <Exit>{exportView && (
-        <ExportDialog prefs={settings.files} onPrefs={(p) => setSettings((s) => ({ ...s, files: { ...s.files, ...p } }))} pictures={exportView}
+        <ExportDialog prefs={settings.files} onPrefs={(p) => setSettings((s) => ({ ...s, files: { ...s.files, ...p } }))} pictures={exportView} page={pageColour(style)}
           chemistry={(part) => {
             // The chosen format is made now, so the dialog says at once when it cannot be. The others are offered
             // when the part can have them, and made when they are chosen.
