@@ -1,5 +1,6 @@
-// Run: node src/drive.check.ts. The CI drive (scripts/drive/drive.mjs), as its dry run prints it: Home and each drawing
-// have a window of their own, so the drive moves WebDriver to the drawing's window before it looks in the drawing.
+// Run: node src/drive.check.ts. The CI drive (scripts/drive/drive.mjs), as its dry run prints it: the first drawing is
+// in Home's window and each later one has a window of its own, so the drive moves WebDriver to a drawing's window before it
+// looks in that drawing.
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -26,15 +27,15 @@ const at = (lines: string[], line: string) => {
 };
 const SWITCH = "WebDriver: POST /session/SESSION/window", NEW = "wait for a new window", FRONT = "wait for the new window in front, named Untitled";
 
-// Quick start: a new window, in front, and WebDriver moves to it before it waits for the drawing.
+// Quick start: the first drawing in Home's own window, so no new window; WebDriver keeps that window as the drawing's.
 const quick = step("Home's Quick start");
-assert.ok(at(quick, "WebDriver: GET /session/SESSION/window/handles") < at(quick, NEW));
-assert.ok(at(quick, NEW) < at(quick, FRONT) && at(quick, FRONT) < at(quick, SWITCH) && at(quick, SWITCH) < at(quick, "wait for the drawing"));
-// The command that reads the window in front runs before the wait for its name.
-const front = quick.findIndex((l) => /^\$ (powershell.*windows\.ps1.* front|python3 .*linux-menu\.py PID)$/.test(l));
-assert.ok(front > at(quick, NEW) && front < at(quick, FRONT), `no front command in:\n${quick.join("\n")}`);
-// File > New: another window, the first drawing keeps its two ethanol, and the new one has none.
+assert.ok(!quick.includes(NEW) && !quick.includes(FRONT), "Quick start waits for no new window");
+assert.ok(at(quick, "wait for the drawing") < at(quick, "WebDriver: GET /session/SESSION/window"));
+// File > New opens a new window, in front, and the command that reads the window in front runs before the wait for its name.
 const fresh = step("File > New");
+const front = fresh.findIndex((l) => /^\$ (powershell.*windows\.ps1.* front|python3 .*linux-menu\.py PID)$/.test(l));
+assert.ok(at(fresh, NEW) < at(fresh, FRONT) && front > at(fresh, NEW) && front < at(fresh, FRONT), `no front command in:\n${fresh.join("\n")}`);
+// The first drawing keeps its two ethanol, and the new one has none.
 assert.ok(at(fresh, FRONT) < at(fresh, "wait for 2 ethanol in the drawing") && at(fresh, "wait for 2 ethanol in the drawing") < at(fresh, SWITCH));
 assert.ok(at(fresh, SWITCH) < at(fresh, "wait for 0 ethanol in the drawing"));
 // File > Exit: the first drawing asks, so WebDriver moves back to it for Don't Save.

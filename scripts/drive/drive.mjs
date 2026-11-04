@@ -153,13 +153,13 @@ const steps = [
     for (const l of opened) log(`    ${l}`);
     if (!DRY && (shut.length || opened.length !== menus.length)) throw new Error(`through UI Automation: ${shut.join("; ") || `${opened.length} of ${menus.length} menus tried`}`);
   }]] : []),
-  ["Home's Quick start opens a new drawing in a window of its own, and Home stays", async () => {
+  // The first drawing opens in Home's own window (decision 0020); File > New, below, gives the next one a window.
+  ["Home's Quick start opens the first drawing in Home's own window", async () => {
     const before = await handles();
     await page("document.querySelector('main.home .home-tile.new').click()");
-    drawing = await opened(before, "Untitled");
-    if (!DRY && !(await page("return !!document.querySelector('main.home')"))) throw new Error("Home's window no longer shows Home");
-    await toWindow(drawing);
     await until("the drawing", () => page("return !document.querySelector('main.home') && !!document.querySelector('svg.canvas')"));
+    if (!DRY && (await handles()).length !== before.length) throw new Error("Quick start opened another window");
+    drawing = await wd("GET", `/session/${session}/window`);
     await sleep(5000); // the chemistry engine (WebAssembly) loads
   }],
   ["Edit > Paste pastes SMILES text from the clipboard", async () => {
