@@ -32,7 +32,7 @@ const fail = (title, message) => {
 
 // What Copy puts on each system's clipboard with Settings as they start (src-tauri/src/clipboard.rs).
 const FORMATS = WIN
-  ? ["PNG", "DeviceIndependentBitmap", "ChemDraw Interchange Format", "CDXML", "MDLCT", "SMILES", "application/x-octet+json"]
+  ? ["EnhancedMetafile", "DeviceIndependentBitmap", "ChemDraw Interchange Format", "CDXML", "MDLCT", "SMILES", "application/x-octet+json"]
   : ["image/png", "image/svg+xml", "chemical/x-cdx", "chemical/x-cdxml", "chemical/x-mdl-molfile", "chemical/x-daylight-smiles", "application/x-octet+json"];
 const SMILES = WIN ? "SMILES" : "chemical/x-daylight-smiles";
 const OCTET = "application/x-octet+json";
