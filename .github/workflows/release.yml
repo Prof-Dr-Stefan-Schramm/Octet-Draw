@@ -162,7 +162,13 @@ jobs:
           set -euo pipefail
           dmg=$(ls src-tauri/target/universal-apple-darwin/release/bundle/dmg/*.dmg | head -n 1)
           xcrun notarytool submit "$dmg" --apple-id "$APPLE_ID" --password "$APPLE_PASSWORD" --team-id "$APPLE_TEAM_ID" --wait
-          xcrun stapler staple "$dmg"
+          # Apple's ticket server (api.apple-cloudkit.com) sometimes drops the connection, so stapling is tried six
+          # times. The .dmg is notarised either way; without its ticket stapled, macOS checks it online on first open.
+          for try in 1 2 3 4 5 6; do
+            if xcrun stapler staple "$dmg"; then break; fi
+            if [ "$try" = 6 ]; then echo "::warning::Stapling failed six times; the notarised .dmg goes up without its ticket."; break; fi
+            sleep 30
+          done
           if [ "$GITHUB_EVENT_NAME" = push ]; then
             name=$(basename "$dmg" | tr ' ' '.')
             cp "$dmg" "$RUNNER_TEMP/$name"
