@@ -100,6 +100,7 @@ import { CanvasAccess, type HotItem } from "./CanvasAccess";
 setNamer(iupacName);
 setComplexNamer((m) => complexName(m, { read: nameToSmiles, atoms: nameToAtoms, inchi: toInchi, aux: toInchiAux, cip: cipOf }));
 import { addSet, addSetOf, addTo, closePalette, duplicateTemplate, freeSetName, hasContent, kindName, loadTemplates, moveTemplate, MY_SET, namedKind, newTemplate, openPalette, placeTemplate, removeSet, removeTemplate, renameSet, renameTemplate, setName, templateKind, templateToEnd, templateToStart, updateTemplate } from "./templates";
+import { expandEscapes } from "./escapes";
 import { formulaRuns } from "./labels";
 import { captionAtom, captionsToAtoms, chemicalCaption, interpretLabels, labelable, sandwich, withCaptionAtoms } from "./edit";
 import { bendOf, crossedBonds, cutEndAt, cutPoints, cutSides, cutThrough, extendCut } from "./masscut";
@@ -3342,11 +3343,16 @@ export default function Editor() {
     writingOpen.current = false;
     setWriting(undefined);
     if (!w) return;
-    const text = w.value.replace(/\s+$/, "");
+    // \delta becomes δ as the caption is kept (escapes.ts), so Greek can be typed without
+    // leaving the keyboard and is stored as the real character, never a Latin letter in a
+    // Symbol font. The runs are expanded with the text, so a style keeps the characters it
+    // was put on.
+    const written = (w.runs ?? [{ text: w.value }]).map((r) => ({ ...r, text: expandEscapes(r.text) }));
+    const text = plainOf(written).replace(/\s+$/, "");
     // Runs are kept only when some text has a style of its own; trailing space goes from them as from the text. A colour
     // all the text has becomes the caption's own (shareColour), so it is kept as a colour picked for the whole caption.
     const own = "colour" in w.style ? w.style.colour : doc.captions?.find((c) => c.id === w.id)?.colour;
-    const { colour, runs } = shareColour(w.runs && styled(w.runs) ? edited(w.runs, text) : undefined, own, style.colour), st = colour !== own ? { ...w.style, colour } : w.style;
+    const { colour, runs } = shareColour(w.runs && styled(written) ? edited(written, text) : undefined, own, style.colour), st = colour !== own ? { ...w.style, colour } : w.style;
     // On an experiment page, the markup typed becomes rich text as a step of its own, so Undo gives the text as typed.
     const marked = (m: Mol, id: number) => {
       const c = expPage ? m.captions?.find((x) => x.id === id) : undefined, next = c && markupCaption(c);
@@ -8081,7 +8087,10 @@ export default function Editor() {
         // The text as kept (each line trimmed), and its styles: what all of it has is the label's own bold, italic and
         // underline, the rest its runs (a label that is an element has no runs). A font or size chosen while typing goes
         // on all of it; a size is the size drawn, kept over the atom's scale.
-        const typed = trimLines(editing.runs ?? [{ text: editing.value }]), text = plainOf(typed), st = labelStyle(typed);
+        // \delta becomes δ as the label is kept (escapes.ts), so Greek can be typed without
+        // leaving the keyboard and is stored as the real character, never a Latin letter in
+        // a Symbol font.
+        const typed = trimLines((editing.runs ?? [{ text: editing.value }]).map((r) => ({ ...r, text: expandEscapes(r.text) }))), text = plainOf(typed), st = labelStyle(typed);
         const ownSize = (x: Atom) => { const v = Math.round(((editing.size ?? 0) / scaleOf(x)) * 100) / 100; return Math.abs(v - style.labelSize) < 0.01 ? undefined : v; };
         const dress = (m: Mol): Mol => ({ ...m, atoms: m.atoms.map((x, i) => {
           if (!ids.includes(i)) return x;
