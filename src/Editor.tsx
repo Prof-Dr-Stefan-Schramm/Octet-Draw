@@ -4263,8 +4263,18 @@ export default function Editor() {
       return setDrag({ kind: "lane", plate: lanePlate.id, from: tick, to: tick, base: doc, working: doc });
     }
     if (tool === "select") {
-      pressMods.current = { shift: e.shiftKey, alt: e.altKey, atoms: selection, picks: picked };
-      return pressSelect(p, t, e.shiftKey, screen, e.altKey);
+      // Ctrl is the selection modifier on Windows and Linux, and it means two things, as it
+      // does in Explorer and in ChemDraw for Windows: on something not already chosen it
+      // adds it, as Shift does; on the selection it drags a copy, as Option does. Which one
+      // is decided by what is under the press, not by the drag. On a Mac Ctrl is the
+      // right-click (onContextMenu), so it keeps that meaning there and nothing changes.
+      const ctrl = !MAC && e.ctrlKey, ids = ctrl ? atomsOf(doc, t) : [], its = ctrl ? itemsOf(t) : [];
+      const onChosen = ctrl && (ids.length || its.length
+        ? ids.every((i) => selection.has(i)) && its.every((x) => picked.has(x))
+        : (selection.size > 0 || picked.size > 0) && onSelection(doc, selection, p));
+      const shift = e.shiftKey || (ctrl && !onChosen), copy = e.altKey || onChosen;
+      pressMods.current = { shift, alt: copy, atoms: selection, picks: picked };
+      return pressSelect(p, t, shift, screen, copy);
     }
     // The Pen: each press places a point (drag for a smooth one); pressing the first point again closes the curve.
     if (tool === "shape" && "pen" in shapePick) {
