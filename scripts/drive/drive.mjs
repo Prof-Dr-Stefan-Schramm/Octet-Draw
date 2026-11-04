@@ -12,6 +12,8 @@ import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+const VERSION = JSON.parse(readFileSync(new URL("../../package.json", import.meta.url), "utf8")).version;
+
 const DRY = process.argv.includes("--dry");
 const WIN = process.platform === "win32";
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -137,9 +139,10 @@ const clipText = () => system.read(WIN ? "UnicodeText" : "UTF8_STRING").toString
 const steps = [
   ["Octet starts and shows Home", async () => {
     await until("the page", () => page("return document.readyState === 'complete' && !!document.querySelector('#root > *')"), 60_000);
-    // A new profile asks for a name, offers the tutorial and checks for updates: these are set, so Home shows.
+    // A new profile asks for a name, offers the tutorial and checks for updates, and someone who has a name sees the
+    // version's notes once (What's new): these are set, so Home shows.
     await page(`const k = "octet.settings", s = JSON.parse(localStorage.getItem(k) || "{}");
-      localStorage.setItem(k, JSON.stringify({ ...s, userName: "Test", tutorialDone: true, updates: false })); setTimeout(() => location.reload(), 50);`);
+      localStorage.setItem(k, JSON.stringify({ ...s, userName: "Test", tutorialDone: true, updates: false, seenNotes: arguments[0] })); setTimeout(() => location.reload(), 50);`, VERSION);
     await sleep(1000);
     await until("Home", () => page("return !!document.querySelector('main.home .home-tile.new')"), 30_000);
   }],

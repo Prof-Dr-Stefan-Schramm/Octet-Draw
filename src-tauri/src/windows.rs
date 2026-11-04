@@ -26,6 +26,9 @@ pub struct Info {
 
 #[cfg(feature = "smoke")]
 impl Info {
+    pub fn edited(&self) -> bool {
+        self.edited
+    }
     pub fn label(&self) -> &str {
         &self.label
     }

@@ -1,5 +1,6 @@
 // Smoke test of the real app (CI, `--features smoke`): Octet starts and is asked to open two drawings, as from Finder.
 // The first opens in Home's window, the second in a new drawing window, whose page starts and tells Octet its name.
+// Edit > Paste in Home's window pastes into its drawing.
 // File > New For there makes one more window, and File > Home brings Home back. Each step must answer on the main
 // thread, so a hang (as on Windows when a synchronous command made a window) fails it. Ends with 0, or 1 and the step.
 use std::sync::mpsc;
@@ -49,6 +50,12 @@ pub fn start(app: AppHandle) {
         wait("the first drawing is in Home's window, the second in the new one", 30, || {
             named(&app, "main").as_deref() == Some("one") && named(&app, "draw-").as_deref() == Some("two")
         });
+        // Edit > Paste in Home's window, which holds the first drawing, pastes into that drawing.
+        let edited = |app: &AppHandle| crate::windows::window_list(app.state()).iter().any(|i| i.label() == "main" && i.edited());
+        let _ = tauri::async_runtime::block_on(crate::clipboard::copy_to_clipboard(app.clone(), None, None, None, None, None, None, None, None, Some("CCO".into())));
+        let _ = app.emit_to("main", "menu", "paste");
+        wait("Edit > Paste pastes into the drawing in Home's window", 30, || edited(&app));
+        alive(&app, "Edit > Paste");
         let label = crate::windows::window_list(app.state()).iter().find(|i| i.label().starts_with("draw-")).unwrap().label().to_string();
         // A menu command runs in the window it is sent to, and only there: File > New For > Paper makes one window.
         let count = |app: &AppHandle| crate::windows::window_list(app.state()).len();
