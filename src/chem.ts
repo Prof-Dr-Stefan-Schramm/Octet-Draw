@@ -410,8 +410,9 @@ function tidied(first: Mol, smart: () => Mol, text: string, clean = true): Mol {
 // drawn in time, and the same on any computer.
 const REPAIR_WORK = 100000;
 // The drawing with side groups moved, where that lowers crowding: each the smaller side of a bond out of the rings (up
-// to three bonds from it), with an atom on a bond or that bond's end in it, an atom on another atom, or a label on a bond
-// or a label (by its point or its ink), turned over about its bond or turned up to 30° round the bond's other end.
+// to three bonds from it), with an atom on a bond or that bond's end in it, an atom on another atom, an atom in line
+// with its two bonds, or a label on a bond or a label (by its point or its ink), turned over about its bond or turned
+// up to 30° round the bond's other end.
 // Three times round at most.
 function flipped(m: Mol): Mol {
   const at = bondedTo(m), n = m.atoms.length;
@@ -422,6 +423,8 @@ function flipped(m: Mol): Mol {
     // The atoms on a bond, and that bond's atoms; and atoms on each other.
     const hit = new Set<number>();
     besideBonds(best, 0.15, unlabelled(best), (i, _, u, v) => hit.add(i).add(u).add(v));
+    // An atom in line with its bonds, and their other ends.
+    for (const i of linear(best, at)) hit.add(i), at[i].forEach((j) => hit.add(j));
     if (now < 1000) for (const [i, u, v] of overLabels(best, ink)) { hit.add(i).add(u); if (v >= 0) hit.add(v); }
     best.atoms.forEach((a, i) => best.atoms.forEach((c, j) => { if (j > i && !at[i].includes(j) && Math.hypot(c.location[0] - a.location[0], c.location[1] - a.location[1]) < 0.35) hit.add(i).add(j); }));
     // Only bonds up to three bonds from them, so a long chain is not turned over at each of its bonds.
@@ -680,6 +683,11 @@ function nudged(m: Mol, free?: Set<number>): Mol {
     const was = now[1] + 1000 * now[0], hits: [number, number, number][] = [];
     besideBonds(best, 0.15, unlabelled(best), (i, _, u, v) => hits.push([i, u, v]));
     for (const [i, u, v] of hits) off(i, u, v, 0.15);
+    // An atom in line with its two bonds stepped square to the line, either way, so its bonds bend and it shows.
+    for (const i of linear(best, at)) {
+      const [q, r] = at[i].map((k) => best.atoms[k].location), dx = r[0] - q[0], dy = r[1] - q[1], l = Math.hypot(dx, dy) || 1;
+      [0.15, 0.25, 0.35].some((d) => [1, -1].some((side) => tried(ends(i), (-side * d * dy) / l, (side * d * dx) / l)));
+    }
     // Labels, and atoms on atoms, once no carbon is left on a bond or in line (the structure check's warnings): labels
     // apart to 0.65 or 0.75 of a bond length, atoms to 0.4 or 0.5.
     if (now[0] < 1000) {
@@ -836,14 +844,20 @@ function crowds(m: Mol, near: number, close: number, labels = false, hits?: unkn
         if (d < close) pairs++;
         if (labels && d < 2 * LABEL && !plain(i) && !plain(j) && !bonded[i].includes(j)) over++;
       }
-    const [q, r] = bonded[i];
-    if (bonded[i].length === 2 && plain(i) && !m.atoms[i].charge && single[i]) {
-      const u = [xy[q][0] - p[0], xy[q][1] - p[1]], v = [xy[r][0] - p[0], xy[r][1] - p[1]];
-      if ((u[0] * v[0] + u[1] * v[1]) / (Math.hypot(u[0], u[1]) * Math.hypot(v[0], v[1]) || 1) < Math.cos((175 * Math.PI) / 180)) lines++;
-    }
   });
+  lines = linear(m, bonded).length;
   if (labels && hits) over += hits.length;
   return [[...on].filter(plain).length, on.size, pairs, lines, over];
+}
+// The unlabelled carbons with two single bonds in a straight line (within 5°), which do not show (check.ts).
+function linear(m: Mol, bonded = bondedTo(m)): number[] {
+  const xy = m.atoms.map((a) => a.location), plain = unlabelled(m), single = m.atoms.map(() => true);
+  for (const b of m.bonds) if (b.type !== 1) single[b.atoms[0]] = single[b.atoms[1]] = false;
+  return xy.flatMap((p, i) => {
+    if (bonded[i].length !== 2 || !plain(i) || m.atoms[i].charge || !single[i]) return [];
+    const [q, r] = bonded[i], u = [xy[q][0] - p[0], xy[q][1] - p[1]], v = [xy[r][0] - p[0], xy[r][1] - p[1]];
+    return (u[0] * v[0] + u[1] * v[1]) / (Math.hypot(u[0], u[1]) * Math.hypot(v[0], v[1]) || 1) < Math.cos((175 * Math.PI) / 180) ? [i] : [];
+  });
 }
 // The atoms (those keep allows) by square cells a bond long, so each bond or atom tests only the atoms round it.
 const cell = (x: number, y: number) => x * 4194304 + y;

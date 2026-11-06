@@ -288,7 +288,7 @@ const steps = [
     await until("the name field empty", async () => (await fieldValue()) === "");
     system.menu("Edit", "Paste");
     await until("the name pasted back", async () => (await fieldValue()) === "benzene");
-    await page("document.querySelector(arguments[0]).dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))", nameField);
+    await page("document.querySelector(arguments[0]).dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))", nameField);
     await until("the name field closed", async () => !(await page("return !!document.querySelector(arguments[0])", nameField)));
   }],
   ["File > New opens a new drawing in another window, and the drawing stays", async () => {
@@ -351,14 +351,14 @@ const steps = [
     await until("the label's text box", () => page("return !!document.activeElement?.matches('.caption-box')"));
     await page(`const el = document.activeElement, r = document.createRange(); r.selectNodeContents(el); getSelection().removeAllRanges(); getSelection().addRange(r);
       document.execCommand("insertText", false, arguments[0])`, LABEL);
-    await page("document.activeElement.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))");
+    await page("document.activeElement.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))");
     await until("the text box closed", () => page("return !document.querySelector('.caption-box')"));
     system.menu("Colour", "Red");
     got = await copied();
     check(got.captions?.length === 1 && got.captions[0].text === LABEL && got.captions[0].colour === RED && Math.abs(got.captions[0].x - x1) < 0.001, `the label: ${JSON.stringify(got.captions)}`);
     // The spectrum alone, picked by a click, and its frame's right handle dragged 200 px: the plot grows, every caption
     // keeps the document's size, and the edited label keeps its text and colour. Undo takes it back in one step.
-    await page("document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))");
+    await page("document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))");
     await click(at);
     const handle = DRY ? [0, 0] : await page(`const hs = [...document.querySelectorAll("svg.canvas rect.resize-handle")].map((e) => e.getBoundingClientRect());
       const ys = hs.map((r) => r.top + r.height / 2), mid = (Math.min(...ys) + Math.max(...ys)) / 2;
@@ -369,7 +369,7 @@ const steps = [
     system.menu("Edit", "Select All");
     const was = spectrumOf(await copied());
     await page(`window.__frames = []; const f = (t) => { if (window.__frames) { window.__frames.push(t); requestAnimationFrame(f); } }; requestAnimationFrame(f)`);
-    await page("document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))");
+    await page("document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))");
     await click(at);
     await drag(handle, [handle[0] + 200, handle[1]]);
     const gaps = DRY ? [] : await page("const f = window.__frames; window.__frames = undefined; return f.slice(1).map((t, k) => t - f[k]).sort((a, b) => a - b)");
