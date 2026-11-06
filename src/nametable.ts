@@ -80,7 +80,8 @@ export class NameTable {
   suggested: Promise<void> = Promise.resolve();
   gramStart: Int32Array = new Int32Array(1);
   grams: Uint8Array = new Uint8Array(0);
-  private lowerCache = new Map<number, string>();
+  // Each name in lower case once read, by index: an array, as a Map's lookups were most of a suggestion's time.
+  private lowerCache: (string | undefined)[] = [];
 
   private constructor(bytes: Uint8Array, lines: number, names: number, marked: number, cas: number) {
     this.bytes = bytes;
@@ -266,6 +267,7 @@ export class NameTable {
   }
   private install(x: SuggestionIndex) {
     [this.shownStart, this.shownEnd, this.shownCompound, this.gramStart, this.grams] = [x.start, x.end, x.compound, x.gramStart, x.grams];
+    [this.lowerCache, this.lengthCache] = [[], undefined];
     const ids = new Map<number, number>();
     x.keys.forEach((k, i) => ids.set(k, x.ids[i]));
     this.gramIds = ids;
@@ -287,9 +289,40 @@ export class NameTable {
       yield i;
     }
   }
+  // How long a trigram's list is (its bytes), to read the shorter of two.
+  gramSize(gram: string): number {
+    const id = gram.length === 3 ? this.gramId(gram, 0) : -1;
+    return id < 0 ? 0 : this.gramStart[id + 1] - this.gramStart[id];
+  }
+  // The same names to visit, in a plain loop: a generator costs more than the decoding in the hot loops (nearNames).
+  forGram(gram: string, visit: (i: number) => void) {
+    const id = gram.length === 3 ? this.gramId(gram, 0) : -1;
+    if (id < 0) return;
+    const grams = this.grams;
+    let i = -1;
+    for (let p = this.gramStart[id], e = this.gramStart[id + 1]; p < e;) {
+      let d = 0, shift = 0, b;
+      do { b = grams[p++]; d |= (b & 0x7f) << shift; shift += 7; } while (b & 0x80);
+      i += d;
+      visit(i);
+    }
+  }
+  // Each name's length in characters (its UTF-8 bytes less the continuation bytes), counted once, so nearNames passes
+  // over names too long or short to be a slip without reading them.
+  private lengthCache?: Uint16Array;
+  lengths(): Uint16Array {
+    if (this.lengthCache) return this.lengthCache;
+    const out = new Uint16Array(this.size), b = this.bytes;
+    for (let i = 0; i < out.length; i++) {
+      let n = 0;
+      for (let p = this.shownStart[i], e = this.shownEnd[i]; p < e; p++) if ((b[p] & 0xc0) !== 0x80) n++;
+      out[i] = Math.min(n, 65535);
+    }
+    return (this.lengthCache = out);
+  }
   lower(i: number): string {
-    let l = this.lowerCache.get(i);
-    if (l === undefined) this.lowerCache.set(i, (l = this.written(i).toLowerCase()));
+    let l = this.lowerCache[i];
+    if (l === undefined) this.lowerCache[i] = l = this.written(i).toLowerCase();
     return l;
   }
   written(i: number): string {

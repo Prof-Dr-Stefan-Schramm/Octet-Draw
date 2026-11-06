@@ -134,10 +134,19 @@ export function nameList(text: string, read: (name: string) => string | undefine
 
 // ——— Suggestions ———
 // The shortest dictionary name that starts with what was typed (lower case).
-// The names that start with it all start with its first trigram (a space and its first two letters).
+// The names that start with it all have its first trigram (a space and its first two letters) and its first three
+// letters: the shorter list is read.
 export function completeName(typed: string): string | undefined {
   let best: string | undefined;
-  if (typed.length >= 2 && table) for (const i of table.withGram(` ${typed.slice(0, 2)}`)) { const l = table.lower(i); if (l.startsWith(typed) && (!best || l.length < best.length)) best = l; }
+  const t = table;
+  if (typed.length < 2 || !t) return best;
+  const lengths = t.lengths();
+  const head = ` ${typed.slice(0, 2)}`, three = typed.slice(0, 3);
+  t.forGram(three.length === 3 && t.gramSize(three) < t.gramSize(head) ? three : head, (i) => {
+    if (lengths[i] + 1 < typed.length || (best && lengths[i] > best.length + 1)) return;
+    const l = t.lower(i);
+    if (l.startsWith(typed) && (!best || l.length < best.length)) best = l;
+  });
   return best;
 }
 // Dictionary names, as written, that begin as typed (compared as keys are, so "acetyl salicylic" finds acetylsalicylic
@@ -162,7 +171,9 @@ export function nearNames(typed: string, most: number): string[] {
   const mine = trigrams(typed), need = Math.max(1, mine.length - 3 * most), touched: number[] = [], out: string[] = [], t = table;
   if (!t) return out;
   if (counts.length < t.size) counts = new Uint8Array(t.size);
-  for (const g of new Set(mine)) for (const i of t.withGram(g)) if (counts[i]++ === 0) touched.push(i);
+  // Only names near its length are counted: lower case can lengthen a name by a character (İ), hence the 1 to spare.
+  const lengths = t.lengths(), long = typed.length;
+  for (const g of new Set(mine)) t.forGram(g, (i) => { if (Math.abs(lengths[i] - long) <= most + 1 && counts[i]++ === 0) touched.push(i); });
   for (const i of touched) {
     if (counts[i] >= need && Math.abs(t.lower(i).length - typed.length) <= most) out.push(t.lower(i));
     counts[i] = 0;
