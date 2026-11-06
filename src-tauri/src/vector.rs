@@ -721,7 +721,7 @@ pub(crate) mod tests {
     #[test]
     fn turned_or_underlined_text_is_outlines() {
         for attrs in [r#"transform="rotate(30 40 40)""#, r#"text-decoration="underline""#] {
-            let svg = format!(r##"<svg xmlns="http://www.w3.org/2000/svg" width="80pt" height="80pt" viewBox="0 0 80 80"><text x="30" y="40" font-family="Arial" font-size="10pt" {attrs}>OH</text></svg>"##);
+            let svg = format!(r##"<svg xmlns="http://www.w3.org/2000/svg" width="80pt" height="80pt" viewBox="0 0 80 80"><text x="30" y="40" font-family="Arial, Helvetica, sans-serif" font-size="10pt" {attrs}>OH</text></svg>"##);
             let all = records(&make_emf(&crate::export::tree(&svg).unwrap(), None));
             assert!(!all.iter().any(|r| r.0 == 84) && all.iter().any(|r| r.0 == 62), "{attrs}: {:?}", all.iter().map(|r| r.0).collect::<Vec<_>>());
         }
@@ -730,8 +730,8 @@ pub(crate) mod tests {
     }
 
     // Issue 20: the frame fits the ink. L-proline as Octet 1.1.1 copies it (standaloneSvg in Chromium with Arial, the
-    // view box from the glyphs' ink): the ink is within 0.01 pt of each edge with Arial (0.1 pt allowed here, as Linux
-    // draws Liberation Sans). Octet 1.1.0 made this 58 by 41 pt, from the labels' line boxes and whole points.
+    // view box from the glyphs' ink): the ink is within 0.01 pt of each edge with Arial (0.1 pt allowed here). Linux
+    // without Arial draws Liberation Sans, Arial's widths but not its outlines: 0.3 pt there. Octet 1.1.0 made this 58 by 41 pt, from the labels' line boxes and whole points.
     pub(crate) const PROLINE: &str = r##"<svg xmlns="http://www.w3.org/2000/svg" fill="rgb(0, 0, 0)" width="56.21pt" height="36.55pt" viewBox="-33.1 -21.54 56.21 36.55"><g transform="scale(0.75)"><g id="world"><g><defs/><path d="M-26.26 8.63L-25.61 9.10L-20.04 1.43L-19.10 -0.55L-18.24 -2.41ZM-17.48 -0.18L-16.75 -0.50L-21.93 -12.15L-22.66 -11.82ZM-20.64 1.23L-19.91 0.90L-25.09 -10.74L-25.82 -10.42ZM-0.29 1.77L-0.00 1.46L-0.22 1.10L-18.24 -2.41L-19.10 -0.55L-20.04 1.43ZM0.49 1.51L-0.00 1.46L-0.29 1.77L9.40 18.54L9.60 18.09L9.80 17.64ZM9.80 17.64L9.60 18.09L9.40 18.54L28.74 14.43L28.38 14.10L28.01 13.76ZM28.01 13.76L28.38 14.10L28.74 14.43L30.81 -5.25L30.38 -5.00L29.96 -4.75ZM29.96 -4.75L30.38 -5.00L30.81 -5.25L19.41 -10.32L19.09 -9.59ZM7.36 -6.12L6.77 -6.66L-0.22 1.10L-0.00 1.46L0.49 1.51Z" fill="rgb(15, 23, 42)"/><g><text x="-35.56808929443359" y="19.84140815734863" fill="rgb(15, 23, 42)" font-family="Arial, Helvetica, sans-serif" font-size="13.3333px">O</text><text x="-45.194584655761716" y="19.84140815734863" fill="rgb(15, 23, 42)" font-family="Arial, Helvetica, sans-serif" font-size="13.3333px">H</text><text x="-32.09196014404297" y="-13.231793975830076" fill="rgb(15, 23, 42)" font-family="Arial, Helvetica, sans-serif" font-size="13.3333px">O</text><text x="8.030521774291993" y="-8.037777423858643" fill="rgb(15, 23, 42)" font-family="Arial, Helvetica, sans-serif" font-size="13.3333px">N</text><text x="8.030521774291993" y="-19.173156544685362" fill="rgb(15, 23, 42)" font-family="Arial, Helvetica, sans-serif" font-size="13.3333px">H</text></g></g></g></g></svg>"##;
     #[test]
     fn the_frame_fits_the_ink() {
@@ -740,7 +740,9 @@ pub(crate) mod tests {
         assert!((w - 56.21).abs() < 1e-3 && (h - 36.55).abs() < 1e-3, "{w} by {h} pt");
         let ink = tree.root().abs_stroke_bounding_box();
         let slack = [ink.left(), ink.top(), w / 0.75 - ink.right(), h / 0.75 - ink.bottom()].map(|v| v * 0.75);
-        assert!(slack.iter().all(|s| (-0.1..=0.1).contains(s)), "{slack:?}");
+        let arial = tree.fontdb().faces().any(|f| f.families.iter().any(|(n, _)| n == "Arial"));
+        let room = if arial { 0.1 } else { 0.3 };
+        assert!(slack.iter().all(|s| (-room..=room).contains(s)), "{slack:?}");
         let emf = make_emf(&tree, None);
         assert_eq!([24, 28, 32, 36].map(|k| i32_at(&emf, k)), [0, 0, 1983, 1289], "the frame in 0.01 mm");
         let t = texts(&emf);
