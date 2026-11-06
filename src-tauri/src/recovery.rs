@@ -14,6 +14,9 @@ use tauri::{AppHandle, Manager, State, Window};
 
 use crate::{write_atomic, MAX_BYTES};
 
+// Home lists every kept drawing up to this many (a bound on a folder that a fault fills).
+const MAX_KEPT: usize = 1000;
+
 pub struct Session {
     id: String,
     dir: Option<PathBuf>, // None when the app has no data folder: nothing is kept
@@ -138,8 +141,17 @@ impl Session {
             })
             .collect();
         list.sort_by(|a, b| b.at.cmp(&a.at));
-        list.truncate(24);
+        list.truncate(MAX_KEPT);
         list
+    }
+
+    fn discard(&self, ids: &[String]) -> Result<(), String> {
+        let failed = ids.iter().take(MAX_KEPT).filter(|id| self.other(id).and_then(|dir| remove(dir, id)).is_err()).count();
+        match failed {
+            0 => Ok(()),
+            1 => Err("Octet cannot discard 1 drawing. It may be open in another window.".into()),
+            n => Err(format!("Octet cannot discard {n} drawings. They may be open in another window.")),
+        }
     }
 
     // Its copy becomes the window's, so it stays safe until the user saves it or chooses Don't Save.
@@ -174,7 +186,7 @@ pub async fn recovery_clear(window: Window, session: State<'_, Session>) -> Resu
     remove(session.dir()?, &copy_id(&session.id, window.label()))
 }
 
-// Drawings kept by Octet sessions that ended without closing them, newest first (24 at most). A folder Octet cannot
+// Drawings kept by Octet sessions that ended without closing them, newest first (MAX_KEPT at most). A folder Octet cannot
 // read is an error, not an empty list, so the page can say so (issue 2).
 #[tauri::command]
 pub async fn recovery_list(session: State<'_, Session>) -> Result<Vec<Recovered>, String> {
@@ -192,10 +204,10 @@ pub async fn recovery_open(window: Window, session: State<'_, Session>, id: Stri
     session.open(window.label(), &id)
 }
 
-// The user discarded a kept drawing on Home.
+// The user discarded kept drawings on Home. Each one Octet can remove goes; the error says how many stay.
 #[tauri::command]
-pub async fn recovery_discard(session: State<'_, Session>, id: String) -> Result<(), String> {
-    remove(session.other(&id)?, &id)
+pub async fn recovery_discard(session: State<'_, Session>, ids: Vec<String>) -> Result<(), String> {
+    session.discard(&ids)
 }
 
 #[cfg(test)]
@@ -240,6 +252,20 @@ mod tests {
         assert!(remove(&dir, "gone").is_ok(), "a copy that is not there is removed already");
         assert!(third.list().is_empty());
         assert!(third.open("draw-1", "../etc").is_err());
+        // Discard takes a list: the ones it can remove go, and the error counts the rest.
+        let fourth = Session::start_in(Some(dir.clone()));
+        fourth.write("draw-1", "Open still", "<CDXML/>").unwrap();
+        for k in 1..=2 {
+            let ended = Session::start_in(Some(dir.clone()));
+            ended.write("draw-1", &format!("Ended {k}"), "<CDXML/>").unwrap();
+        }
+        let mut ids: Vec<String> = third.list().into_iter().map(|r| r.id).collect();
+        assert_eq!(ids.len(), 2);
+        ids.push(copy_id(&fourth.id, "draw-1"));
+        assert_eq!(third.discard(&ids).unwrap_err(), "Octet cannot discard 1 drawing. It may be open in another window.");
+        assert!(third.list().is_empty());
+        drop(fourth);
+        assert_eq!(third.list().len(), 1, "the drawing that was open is still kept");
         let _ = fs::remove_dir_all(&dir);
     }
 }

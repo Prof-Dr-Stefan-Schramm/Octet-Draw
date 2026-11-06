@@ -124,8 +124,9 @@ fn rebuild(app: &AppHandle) -> Result<(), String> {
     let text = app.state::<TextLists>().0.lock().unwrap().clone();
     let (bar, checks, list) = menu(app, &names, &text, &keys, online).or_else(|_| menu(app, &names, &text, &HashMap::new(), online)).map_err(|e| e.to_string())?;
     if let Some(old) = app.try_state::<Checks>() {
-        for (c, was) in checks.iter().filter_map(|c| old.0.lock().unwrap().iter().find(|o| o.id() == c.id()).map(|o| (c, o.is_checked()))) {
+        for (c, was, on) in checks.iter().filter_map(|c| old.0.lock().unwrap().iter().find(|o| o.id() == c.id()).map(|o| (c, o.is_checked(), o.is_enabled()))) {
             let _ = c.set_checked(was.unwrap_or(true));
+            let _ = c.set_enabled(on.unwrap_or(true));
         }
     }
     set_bar(app, bar).map_err(|e| e.to_string())?;
@@ -170,10 +171,14 @@ fn set_online_search(app: AppHandle, on: bool) -> Result<(), String> {
     rebuild(&app)
 }
 
+// A tick, and (enabled) whether the item can be chosen: Curves > Solid, Hollow and Angled Arrowhead follow the selection.
 #[tauri::command]
-fn set_check(checks: State<'_, Checks>, id: String, checked: bool) -> Result<(), String> {
+fn set_check(checks: State<'_, Checks>, id: String, checked: bool, enabled: Option<bool>) -> Result<(), String> {
     let checks = checks.0.lock().unwrap();
     let item = checks.iter().find(|c| c.id().0 == id).ok_or("no such menu item")?;
+    if let Some(on) = enabled {
+        item.set_enabled(on).map_err(|e| e.to_string())?;
+    }
     item.set_checked(checked).map_err(|e| e.to_string())
 }
 
@@ -637,6 +642,9 @@ fn menu(app: &AppHandle, palette: &[String], text: &(Vec<String>, Vec<f64>), ove
         // ChemDraw's keys: Actual Size and Fit to Window.
         &item("zoom_actual", "Actual Size", "CmdOrCtrl+\\")?,
         &item("zoom_fit", "Fit to Window", "CmdOrCtrl+/")?,
+        // The selection (or the whole drawing) in the middle of the window, at the same zoom. ChemDraw has no such item; its
+        // Magnify keeps the selection in view.
+        &item("centre_view", "Centre in Window", "Alt+CmdOrCtrl+/")?,
         // ChemDraw's Show Document: the whole page.
         &item("show_page", "Show Page", "")?,
         // Sam's keys (31 October 2026), not ChemDraw's ⇧⌘> and ⇧⌘<: ⇧⌘+ and ⇧⌘-.
@@ -700,6 +708,10 @@ fn menu(app: &AppHandle, palette: &[String], text: &(Vec<String>, Vec<f64>), ove
         // ChemDraw's Add Structure to Dictionary…: a name of the user's own for the selected structure.
         &item("dictionary_add", "Add Structure to Dictionary…", "")?,
         &item("name_to_structure", "Convert Name to Structure", "CmdOrCtrl+Shift+N")?,
+        // One-letter peptide, RNA and DNA codes, drawn through Name to Structure (issue 27).
+        &item("insert_peptide", "Insert Peptide…", "")?,
+        &item("insert_rna", "Insert RNA…", "")?,
+        &item("insert_dna", "Insert DNA…", "")?,
         &item("structure_to_name", "Convert Structure to Name", "Alt+CmdOrCtrl+N")?,
     ])?;
     // Align and Distribute, as ChemDraw's (lined up on the highest thing; spaced out between the two at the ends).
@@ -799,6 +811,9 @@ fn menu(app: &AppHandle, palette: &[String], text: &(Vec<String>, Vec<f64>), ove
         &item("text_formula", "Formula", "CmdOrCtrl+F")?,
         // Octet's own: *italic*, **bold**, LaTeX's \textit{…} and $^{13}$C in the text become rich text (experiment.ts).
         &item("text_markup", "Apply Markup", "")?,
+        // As ChemDraw's Character Map window: Greek, arrows and signs typed where the caret is (CharMap.tsx).
+        // ⇧⌘Space (Ctrl+Shift+Space): from any text box. The Mac's ⌃⌘Space stays the system's Emoji & Symbols.
+        &item("char_map", "Character Map", "CmdOrCtrl+Shift+Space")?,
         &sep()?,
         &item("align_left", "Flush Left", "CmdOrCtrl+Shift+L")?,
         &item("align_centre", "Centre", "CmdOrCtrl+Shift+C")?,
@@ -812,7 +827,12 @@ fn menu(app: &AppHandle, palette: &[String], text: &(Vec<String>, Vec<f64>), ove
         &item("line_spacing", "Line Spacing…", "")?,
     ])?;
     // Curves, as ChemDraw's Curves menu: the line, a head at either end (again takes it off), and a closed curve's fill.
+    // Then the heads' shape, as ChemDraw's arrow context menu has it (Solid, Hollow and Angled Arrowhead): ticked for
+    // the selection, and only on for arrows and catalytic cycles whose heads take a shape (the page sets both).
     section.replace("Curves".into());
+    let heads = [("solid", "Solid Arrowhead"), ("hollow", "Hollow Arrowhead"), ("angled", "Angled Arrowhead")].iter()
+        .map(|(id, name)| check(&format!("curves_head_{id}"), name, "").and_then(|c| c.set_enabled(false).map(|_| c)))
+        .collect::<tauri::Result<Vec<_>>>()?;
     let curves = Submenu::with_items(app, "&Curves", true, &[
         &item("curves_plain", "Plain", "")?,
         &item("curves_dashed", "Dashed", "")?,
@@ -825,6 +845,10 @@ fn menu(app: &AppHandle, palette: &[String], text: &(Vec<String>, Vec<f64>), ove
         &item("curves_start_right", "Half Arrowhead at Start, Right", "")?,
         &item("curves_end_left", "Half Arrowhead at End, Left", "")?,
         &item("curves_end_right", "Half Arrowhead at End, Right", "")?,
+        &sep()?,
+        &heads[0],
+        &heads[1],
+        &heads[2],
         &sep()?,
         &item("curves_closed", "Closed", "")?,
         &item("curves_solid", "Filled", "")?,
@@ -931,6 +955,7 @@ fn menu(app: &AppHandle, palette: &[String], text: &(Vec<String>, Vec<f64>), ove
     let listed = list.borrow().iter().filter(|c| online || c.2 != "Search").cloned().collect();
     let mut checks = vec![grid, rulers, crosshair, snap, snap_grid, warnings, interpretation, fixed_lengths, fixed_angles];
     checks.extend(set_items.iter().cloned());
+    checks.extend(heads.iter().cloned());
     Ok((Menu::with_items(app, &items)?, checks, listed))
 }
 

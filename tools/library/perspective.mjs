@@ -219,6 +219,35 @@ export function fischer(top, centres, bottom) {
   d.bond(prev, d.atom(bottom, [0, 0, 0]));
   return d.done();
 }
+// ——— Generic stereocentres ———
+// A carbon with its four bonds as IUPAC's graphical recommendations draw a stereocentre (ST-1.1): two plain bonds
+// 120° apart in the plane of the page, and a wedge and a hash 70° apart in the space opposite them, turned four ways
+// (the plain bonds up, down, left and right of the carbon); the same with three bonds (two plain bonds and one wedge,
+// or one hash, the H left out); and one Fischer projection, its across bonds nearer the viewer. The ends are bare
+// carbons, for labels to go on (issue 36).
+export function stereocentres() {
+  const at = (t, r = 1) => [r * Math.cos(t * deg), r * Math.sin(t * deg), 0];
+  const star = (bonds) => {
+    const d = new Drawing(), c = d.atom("C", [0, 0, 0]);
+    for (const [t, more] of bonds) d.bond(c, d.atom("C", at(t)), 1, more);
+    return d.done();
+  };
+  const WEDGE = { stereo: 1 }, HASH = { stereo: 6 };
+  const four = (up) => star([[up + 60, {}], [up - 60, {}], [up + 215, WEDGE], [up + 145, HASH]]);
+  const cross = new Drawing(), c = cross.atom("C", [0, 0, 0]);
+  for (const p of [[0, 1, 0], [0, -1, 0], [-1, 0, 0.5], [1, 0, 0.5]]) cross.bond(c, cross.atom("C", p));
+  const also = "stereocenter, tetrahedral carbon, wedge, hash";
+  return [
+    { name: "Stereocentre, plain bonds up", also, mol: four(90) },
+    { name: "Stereocentre, plain bonds down", also, mol: four(270) },
+    { name: "Stereocentre, plain bonds left", also, mol: four(180) },
+    { name: "Stereocentre, plain bonds right", also, mol: four(0) },
+    { name: "Stereocentre, three bonds, wedge", also: `${also}, implicit hydrogen`, mol: star([[210, {}], [330, {}], [90, WEDGE]]) },
+    { name: "Stereocentre, three bonds, hash", also: `${also}, implicit hydrogen`, mol: star([[210, {}], [330, {}], [90, HASH]]) },
+    { name: "Fischer projection, one centre", also: "stereocentre, stereocenter, Fischer cross", mol: cross.done() },
+  ];
+}
+
 // Each way of putting the OH (or NH2) of each centre on the left or right.
 export function fischerWays(top, n, group, bottom) {
   const out = [];

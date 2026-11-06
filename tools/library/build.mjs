@@ -8,7 +8,7 @@
 // Nothing comes from another program's files.
 import { readFileSync, writeFileSync } from "node:fs";
 import { LAB, TLC } from "./lab.mjs";
-import { conformers, cube, fischerWays, FRUCTOSES, hexose, HEXOSES, paddlewheel, PADDLEWHEELS } from "./perspective.mjs";
+import { conformers, cube, fischerWays, FRUCTOSES, hexose, HEXOSES, paddlewheel, PADDLEWHEELS, stereocentres } from "./perspective.mjs";
 import { clashes } from "./clashes.mjs";
 import { CP_RINGS, DPPF, METALLOCENES } from "./organometallics.mjs";
 
@@ -49,7 +49,6 @@ const NAMED = {
     ["α-D-Mannopyranose", "alpha-D-mannopyranose"], ["β-D-Fructofuranose", "beta-D-fructofuranose"], ["β-D-Ribofuranose", "beta-D-ribofuranose"],
     ["2-Deoxy-β-D-ribofuranose", "2-deoxy-beta-D-ribofuranose"], ["D-Glucose (open chain)", "D-glucose"],
   ],
-  "Nucleobases": [["Adenine"], ["Guanine"], ["Cytosine"], ["Thymine"], ["Uracil"]],
   "Stereocentres": [
     ["(R)-Bromochlorofluoromethane", "(1R)-bromo(chloro)(fluoro)methane", "CHBrClF"], ["(S)-Bromochlorofluoromethane", "(1S)-bromo(chloro)(fluoro)methane", "CHBrClF"],
     ["(R)-Butan-2-ol", "(2R)-butan-2-ol", "2-butanol"], ["(S)-Butan-2-ol", "(2S)-butan-2-ol", "2-butanol"],
@@ -189,6 +188,37 @@ const named = (category) => NAMED[category].flatMap(([shown, source = shown, als
   if (crowded) { const again = rounded(chem.cleanUp(asMol(flat))); if (clashes(again).length < crowded) return [entry(shown, also, { mol: again })]; }
   return [entry(shown, also, compact(flat))];
 });
+// The nucleobases all face one way: the atom that bonds to the sugar (N9 of a purine, N1 of a pyrimidine) at the
+// bottom, its bond to the sugar pointing straight down, and the Watson-Crick edge (N1 or N3 and the groups beside it)
+// on the right (a pyrimidine's C4 group on the line straight up from N1). Purines are the 9H tautomers, so the NH is where the sugar goes. [name, SMILES with the sugar's N
+// first, the Watson-Crick atoms by their place in the SMILES, the other edge's atoms (C5, C6 or N7, C8)].
+export const NUCLEOBASES = [
+  ["Adenine", "N1C=NC2=C1N=CN=C2N", [6, 7, 8, 9], [1, 2]],
+  ["Guanine", "N1C=NC2=C1N=C(N)NC2=O", [6, 7, 8, 9, 10], [1, 2]],
+  ["Cytosine", "N1C=CC(N)=NC1=O", [3, 4, 5, 6, 7], [1, 2]],
+  ["Thymine", "N1C=C(C)C(=O)NC1=O", [4, 5, 6, 7, 8], [1, 2, 3]],
+  ["Uracil", "N1C=CC(=O)NC1=O", [3, 4, 5, 6, 7], [1, 2]],
+];
+function nucleobases() {
+  return NUCLEOBASES.map(([name, smiles, edge, back]) => {
+    const { atoms, bonds } = laidOut(smiles), at = atoms[0];
+    if (inchiOf(smiles) !== inchiOf(smilesOf(name.toLowerCase()))) fail(`${name}: the SMILES is not ${name.toLowerCase()}`);
+    // The sugar's bond points away from the middle of N's two ring neighbours: turn it to straight down.
+    const ring = bonds.flatMap(([a, b]) => (a === 0 ? [b] : b === 0 ? [a] : []));
+    const mx = ring.reduce((s, j) => s + atoms[j].x, 0) / ring.length - at.x, my = ring.reduce((s, j) => s + atoms[j].y, 0) / ring.length - at.y;
+    const turn = -Math.PI / 2 - Math.atan2(-my, -mx), c = Math.cos(turn), s = Math.sin(turn);
+    let placed = atoms.map((a) => ({ ...a, x: (a.x - at.x) * c - (a.y - at.y) * s, y: (a.x - at.x) * s + (a.y - at.y) * c }));
+    // Mirrored if the Watson-Crick edge came out on the left (a flat base has no stereochemistry to lose).
+    if (edge.reduce((t, j) => t + placed[j].x, 0) < 0) placed = placed.map((a) => ({ ...a, x: -a.x }));
+    const cx = placed.reduce((t, a) => t + a.x, 0) / placed.length, cy = placed.reduce((t, a) => t + a.y, 0) / placed.length;
+    const mol = { atoms: placed.map((a) => ({ ...a, x: r3(a.x - cx), y: r3(a.y - cy) })), bonds };
+    const y0 = mol.atoms[0].y;
+    if (mol.atoms.some((a) => a.y < y0 - 0.005) || edge.some((j) => mol.atoms[j].x < mol.atoms[0].x - 0.005) || back.some((j) => mol.atoms[j].x >= mol.atoms[0].x)) fail(`${name}: not facing the right way`);
+    if (clashes(asMol(mol)).length) fail(`${name}: labels clash`);
+    return entry(name, undefined, compact(mol));
+  });
+}
+
 // A hexose's two drawings: in a chair, the one with more substituents equatorial; and the substituents placed must be
 // the textbook's (all equatorial in β-D-glucopyranose's 4C1 chair, the D sugars' CH2OH up in a Haworth projection).
 const hexoses = [];
@@ -219,8 +249,9 @@ const fischers = FISCHER.map(([shown, top, n, group, bottom, name, also]) => {
 out.push({ name: "Amino acids", items: named("Amino acids") });
 out.push({ name: "Sugars", items: named("Sugars") });
 out.push({ name: "Hexoses", items: hexoses });
-out.push({ name: "Nucleobases", items: named("Nucleobases") });
-out.push({ name: "Stereocentres", items: [...named("Stereocentres"), ...fischers] });
+out.push({ name: "Nucleobases", items: nucleobases() });
+// The generic stereocentres first, then the named compounds.
+out.push({ name: "Stereocentres", items: [...stereocentres(), ...named("Stereocentres"), ...fischers] });
 out.push({ name: "Conformers", items: conformers() });
 out.push({ name: "Cycloalkanes", items: named("Cycloalkanes") });
 out.push({ name: "Aromatics", items: named("Aromatics") });

@@ -106,11 +106,18 @@ pub async fn open_window(app: AppHandle, windows: State<'_, Windows>, start: ser
     Ok(())
 }
 
-// Close closes the window. On Linux the menu bar comes off first: muda keeps each GTK window's menu bar under the
-// window's address and never lets it go, so a new window made at the same address got no menu bar (issue 4).
+// Close closes the window. On Windows and Linux the menu bar comes off first. On Linux, muda keeps each GTK window's
+// menu bar under the window's address and never lets it go, so a new window made at the same address got no menu bar
+// (issue 4). On Windows, every window shows the same menu, and DestroyWindow destroys the menu of the window it
+// closes, so the other windows lost their menu bar. (On the Mac the menu belongs to the app.)
+// home: Windows and Linux, where closing the last drawing window opens Home, so Octet is not left running with no
+// window (issue 38).
 #[tauri::command]
-pub async fn close_window(window: Window) -> Result<(), String> {
-    #[cfg(target_os = "linux")]
+pub async fn close_window(app: AppHandle, window: Window, home: Option<bool>) -> Result<(), String> {
+    if home == Some(true) && last(app.webview_windows().keys().map(String::as_str), window.label()) {
+        self::home(&app).map_err(|e| e.to_string())?;
+    }
+    #[cfg(not(target_os = "macos"))]
     let _ = window.remove_menu();
     window.destroy().map_err(|e| e.to_string())
 }
@@ -197,6 +204,11 @@ pub fn home(app: &AppHandle) -> tauri::Result<()> {
     window.set_focus()
 }
 
+// Whether a window is the last of Octet's windows open.
+fn last<'a>(labels: impl Iterator<Item = &'a str>, label: &str) -> bool {
+    !labels.into_iter().any(|l| ours(l) && l != label)
+}
+
 // A closed window leaves Home's list.
 pub fn closed(app: &AppHandle, label: &str) {
     let windows = app.state::<Windows>();
@@ -220,5 +232,14 @@ mod tests {
     fn octets_windows_only() {
         assert!(ours("main") && ours("draw-3"));
         assert!(!ours("reaxys") && !ours("drawing"));
+    }
+
+    // Closing the last drawing window opens Home; with Home or another drawing window open, nothing opens.
+    #[test]
+    fn the_last_window_closed_opens_home() {
+        assert!(last(["draw-2"].into_iter(), "draw-2"));
+        assert!(last(["draw-2", "reaxys"].into_iter(), "draw-2"));
+        assert!(!last(["draw-2", "main"].into_iter(), "draw-2"));
+        assert!(!last(["draw-2", "draw-5"].into_iter(), "draw-2"));
     }
 }

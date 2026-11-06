@@ -24,11 +24,36 @@ pub async fn update_check(app: AppHandle, found: State<'_, Found>) -> Result<Opt
 
 // Downloads the update found, checks its signature, installs it and starts Octet again. The page asks to save the
 // drawing first. The download has no time limit, as a slow network needs longer. On Windows the installer closes
-// Octet itself.
+// Octet itself. On the Mac the new Octet opens once this one has ended (open_when_ended), so it keeps its Dock icon.
 #[tauri::command]
 pub async fn update_install(app: AppHandle, found: State<'_, Found>) -> Result<(), String> {
     let mut update = found.0.lock().unwrap().take().ok_or("Octet found no update to install.")?;
     update.timeout = None;
     update.download_and_install(|_, _| {}, || {}).await.map_err(|e| e.to_string())?;
+    #[cfg(target_os = "macos")]
+    if open_when_ended().is_ok() {
+        app.exit(0);
+        return Ok(());
+    }
     app.restart()
+}
+
+// Opens Octet's app once this process has ended, as Sparkle does. Tauri's restart opens a second Octet while this one
+// still runs: the Dock gives that one an icon of its own, and the icon kept in the Dock loses its dot.
+#[cfg(target_os = "macos")]
+fn open_when_ended() -> std::io::Result<()> {
+    use std::os::unix::process::CommandExt;
+    use std::process::{Command, Stdio};
+    let exe = std::env::current_exe()?;
+    let app = exe.ancestors().nth(3).filter(|p| p.extension().is_some_and(|e| e == "app")).ok_or(std::io::ErrorKind::NotFound)?;
+    Command::new("/bin/sh")
+        .args(["-c", "while kill -0 \"$0\" 2>/dev/null; do sleep 0.1; done; sleep 0.5; exec /usr/bin/open \"$1\""])
+        .arg(std::process::id().to_string())
+        .arg(app)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .process_group(0)
+        .spawn()
+        .map(|_| ())
 }

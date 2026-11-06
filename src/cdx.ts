@@ -5,8 +5,9 @@
 // The file is hostile until checked: every length is checked against the bytes left, nesting and object counts are
 // capped as the XML reader caps them, and a property that does not read as its tag says is left out.
 
-import { CHARSETS, OBJECTS, PROPS } from "./cdxtags.ts";
-import { DAMAGED, TOO_BIG, fmt, type Xml } from "./cdxml.ts";
+import { OBJECTS, PROPS } from "./cdxtags.ts";
+import { LABELS, charsetCode, charsets, decoder, legacyByte } from "./charset.ts";
+import { DAMAGED, TOO_BIG, fmt, pictureHex, type Xml } from "./cdxml.ts";
 
 export const MAGIC = "VjCD0100";
 // The magic, 04 03 02 01 and 10 reserved bytes; the document object's tag and id follow, as ChemDraw writes them.
@@ -30,43 +31,21 @@ for (const [tag, name, kind, list] of PROPS) {
   if (name && !byName.has(name)) byName.set(name, p);
 }
 for (const [tag, name] of Object.entries(OBJECTS)) objectTag.set(name, Number(tag));
-const charsets = new Map(CHARSETS.split(",").map((pair) => { const k = pair.indexOf("="); return [Number(pair.slice(0, k)), pair.slice(k + 1)] as const; }));
-const charsetCode = new Map([...charsets].map(([code, name]) => [name, code]));
 // The style records' four parts, as CDXML splits them (LabelFont, LabelFace, LabelSize, LabelColor).
 const STYLE_PARTS = ["Font", "Face", "Size", "Color"];
 // Name on a tag and on a chemical property is plain bytes, not a styled string.
 const plainName = (el: Xml, p?: Prop): Prop | undefined => (p?.tag === 0x0008 && (el.name === "objecttag" || el.name === "chemicalproperty") ? { ...p, kind: "plain" } : p);
 
-// Text in a legacy charset: the WHATWG name of each charset code ChemDraw writes. Others read as Mac Roman, which is
-// what ChemDraw itself falls back to.
-const LABELS: Record<number, string> = { 10000: "macintosh", 1252: "windows-1252", 1250: "windows-1250", 1251: "windows-1251", 1253: "windows-1253", 1254: "windows-1254",
-  1255: "windows-1255", 1256: "windows-1256", 1257: "windows-1257", 1258: "windows-1258", 874: "windows-874", 932: "shift_jis", 936: "gbk", 949: "euc-kr", 950: "big5",
-  866: "ibm866", 10007: "x-mac-cyrillic", 65001: "utf-8", 1200: "utf-8" };
-const decoders = new Map<string, TextDecoder>();
-function decoder(label: string): TextDecoder {
-  let d = decoders.get(label);
-  if (!d) {
-    try { d = new TextDecoder(label); } catch { d = new TextDecoder("macintosh"); }
-    decoders.set(label, d);
-  }
-  return d;
-}
 const utf8 = new TextDecoder("utf-8", { fatal: true });
 // Bytes as UTF-8 when they are, otherwise as Mac Roman.
 function anyText(b: Uint8Array): string {
   try { return utf8.decode(b); } catch { return decoder("macintosh").decode(b); }
 }
-// Mac Roman's characters, for writing ChemDraw's legacy copy of a text.
-let macRoman: Map<string, number> | undefined;
-function macByte(ch: string): number | undefined {
-  if (!macRoman) {
-    macRoman = new Map();
-    const d = decoder("macintosh");
-    for (let b = 0x80; b < 0x100; b++) macRoman.set(d.decode(new Uint8Array([b])), b);
-  }
-  const c = ch.codePointAt(0)!;
-  return c < 0x80 ? c : macRoman.get(ch);
-}
+const macByte = (ch: string) => legacyByte(ch, 10000);
+// A text run's charset, as reader and writer both take it: its font's, else the text's caption or label font's, else
+// the document's, else Mac Roman.
+const runCharset = (fonts: Map<number, number>, font: number, el: Xml, root?: Xml) =>
+  [font, ...[el, root].flatMap((x) => [x?.attrs.CaptionFont, x?.attrs.LabelFont]).map((f) => Number.parseInt(f ?? "", 10))].map((f) => fonts.get(f)).find((c) => c !== undefined) ?? 10000;
 
 // Bytes as uppercase hex and back, as CDXML holds pictures: by table, as a picture can be megabytes.
 const HEX = Array.from({ length: 256 }, (_, k) => k.toString(16).padStart(2, "0").toUpperCase());
@@ -136,9 +115,6 @@ export function cdxToXml(bytes: Uint8Array, exact = false): Xml {
     if (b.length < 2 || b.length < 2 + 10 * n) return { runs: [] as number[][], text: b };
     return { runs: Array.from({ length: n }, (_, k) => [0, 2, 4, 6, 8].map((o) => d.getUint16(2 + 10 * k + o, little))), text: b.subarray(2 + 10 * n) };
   };
-  // A run's charset: its font's, else the text's caption or label font's, else the document's, else Mac Roman.
-  const charsetOf = (font: number, el: Xml) => [font, ...[el, root].flatMap((x) => [x?.attrs.CaptionFont, x?.attrs.LabelFont]).map((f) => Number.parseInt(f ?? "", 10))]
-    .map((f) => fonts.get(f)).find((c) => c !== undefined) ?? 10000;
   // A text object's runs as CDXML's <s> elements: each run's bytes decoded in its font's charset (UTF-8 for 0x0709).
   const runsOf = (b: Uint8Array, unicode: boolean, el: Xml): Xml[] => {
     const { runs, text } = styled(b);
@@ -154,7 +130,7 @@ export function cdxToXml(bytes: Uint8Array, exact = false): Xml {
       if (run && run[3]) s.attrs.size = String(run[3] / 20);
       if (run) s.attrs.color = String(run[4]);
       if (run && run[2]) s.attrs.face = String(run[2]);
-      s.text = (unicode ? anyText(b2) : decoder(LABELS[charsetOf(run?.[1] ?? -1, el)] ?? "macintosh").decode(b2)).replace(/\r\n?/g, "\n");
+      s.text = (unicode ? anyText(b2) : decoder(LABELS[runCharset(fonts, run?.[1] ?? -1, el, root)] ?? "macintosh").decode(b2)).replace(/\r\n?/g, "\n");
       return s;
     });
   };
@@ -356,6 +332,9 @@ export function xmlToCdx(root: Xml): Uint8Array {
   const docStyle: Record<string, string> = {};
   for (const [k, v] of Object.entries(root.attrs)) if (/^(Label|Caption)(Font|Face|Size|Color)$/.test(k)) docStyle[k] = v;
   const fontIds: number[] = [];
+  // Font id to charset code, so each run's legacy text is in its font's charset.
+  const fonts = new Map<number, number>();
+  for (const f of root.kids.find((k) => k.name === "fonttable")?.kids ?? []) fonts.set(Number.parseInt(f.attrs.id ?? "", 10), charsetCode.get(f.attrs.charset ?? "") ?? 10000);
   const put = (tag: number, data: Uint8Array) => {
     out.u16(tag);
     if (data.length >= 0xffff) { out.u16(0xffff); out.u32(data.length); } else out.u16(data.length);
@@ -395,7 +374,7 @@ export function xmlToCdx(root: Xml): Uint8Array {
       case "wrap": return r === undefined ? undefined : le(2, Math.round(r));
       case "str": return plainString(v.replace(/\n/g, "\r"), p.tag === 0x1500 || p.tag === 0x1501);
       case "plain": return stringBytes(v);
-      case "hex": return unhex(v.trim());
+      case "hex": { const h = pictureHex(v); return h === undefined ? undefined : unhex(h); }
       case "ids": return whole.every((x) => x !== undefined) ? le(4, ...(whole as number[])) : undefined;
       case "attachments": return whole.every((x) => x !== undefined) ? new Uint8Array([...le(2, whole.length), ...le(4, ...(whole as number[]))]) : undefined;
       case "linestarts": return whole.every((x) => x !== undefined) ? le(2, whole.length, ...(whole as number[])) : undefined;
@@ -420,9 +399,9 @@ export function xmlToCdx(root: Xml): Uint8Array {
   // A raw property kept from a CDX file ("|x|" and hex).
   const rawValue = (v: string) => (v.startsWith("|x|") ? unhex(v.slice(3)) : enc.encode(v));
 
-  // A text object's runs as the legacy text (Mac Roman, each run cut at its first character Mac Roman lacks) and
-  // the UTF-8 text, as ChemDraw writes them.
-  const textProps = (runs: Xml[]) => {
+  // A text object's runs as the legacy text (in each run's charset, the run cut at its first character the charset
+  // lacks) and the UTF-8 text, as ChemDraw writes them.
+  const textProps = (runs: Xml[], el: Xml) => {
     const legacy: number[][] = [], unicode: number[][] = [], legacyBytes: number[] = [], unicodeBytes: number[] = [];
     for (const s of runs) {
       const text = s.text.replace(/\r\n?|\n/g, "\r"), font = Number.parseInt(s.attrs.font ?? "", 10), size = real(s.attrs.size), colour = Number.parseInt(s.attrs.color ?? "", 10), face = Number.parseInt(s.attrs.face ?? "", 10);
@@ -431,9 +410,9 @@ export function xmlToCdx(root: Xml): Uint8Array {
       const u = enc.encode(text);
       unicode.push([unicodeBytes.length, ...style]);
       unicodeBytes.push(...u);
-      const mac: number[] = [];
-      for (const ch of text) { const b = macByte(ch); if (b === undefined || b === 0) break; mac.push(b); }
-      if (mac.length) { legacy.push([legacyBytes.length, ...style]); legacyBytes.push(...mac); }
+      const bytes: number[] = [], cs = runCharset(fonts, style[0], el, root);
+      for (const ch of text) { const b = legacyByte(ch, cs); if (b === undefined || b === 0) break; bytes.push(b); }
+      if (bytes.length) { legacy.push([legacyBytes.length, ...style]); legacyBytes.push(...bytes); }
     }
     const pack = (rs: number[][], b: number[]) => new Uint8Array([...le(2, rs.length), ...rs.flatMap((r) => [...le(2, ...r)]), ...b]);
     if (legacy.length) put(0x0700, pack(legacy, legacyBytes));
@@ -475,7 +454,7 @@ export function xmlToCdx(root: Xml): Uint8Array {
           if (!Number.isFinite(id)) continue;
           fontIds.push(id);
           const nm: number[] = [];
-          for (const ch of f.attrs.name ?? "") { const b = macByte(ch); if (b !== undefined) nm.push(b); }
+          for (const ch of f.attrs.name ?? "") { const b = legacyByte(ch, cs); if (b !== undefined) nm.push(b); }
           entries.push(...le(2, id, cs, nm.length), ...nm);
         }
         put(0x0100, new Uint8Array([...le(2, 1, fontIds.length), ...entries]));
@@ -496,7 +475,7 @@ export function xmlToCdx(root: Xml): Uint8Array {
       }
     }
     const runs = x.kids.filter((k) => k.name === "s");
-    if (runs.length) textProps(runs);
+    if (runs.length) textProps(runs, x);
     for (const k of x.kids) if (!["colortable", "fonttable", "represent", "s"].includes(k.name)) object(k, depth + 1);
     out.u16(0);
   };

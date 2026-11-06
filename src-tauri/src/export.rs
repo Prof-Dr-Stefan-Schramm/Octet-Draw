@@ -114,6 +114,29 @@ pub fn make_pdf(svg: &str, cdxml: Option<&str>) -> Result<Vec<u8>, String> {
     Ok(pdf.finish())
 }
 
+// The clipboard's SVG on Linux: the same width and height in pt, with 1 user unit = 1 px (96 to the inch), the unit
+// Inkscape gives pasted content. Inkscape pastes an SVG's content in its own user units and drops the root's width,
+// height and viewBox, so the picture as export writes it (1 user unit = 1 pt) pasted at 72/96, 75% of true size
+// (issue 47). The view box is scaled by 4/3 and the content drawn in a group scaled by 4/3, so every reader that
+// honours width and height sees the same picture. An SVG without a root view box is unchanged.
+pub fn px_units(svg: &str) -> String {
+    let scaled = || -> Option<String> {
+        let start = svg.find("<svg")?;
+        let open = start + svg[start..].find('>')?;
+        let close = svg.rfind("</svg>").filter(|&k| k > open)?;
+        let head = &svg[start..open];
+        let at = start + head.find(" viewBox=\"")? + 10;
+        let len = svg[at..open].find('"')?;
+        let v: Vec<f64> = svg[at..at + len].split([' ', ',']).filter(|s| !s.is_empty()).map(str::parse).collect::<Result<_, _>>().ok()?;
+        if v.len() != 4 || v.iter().any(|n| !n.is_finite()) || v[2] <= 0.0 || v[3] <= 0.0 {
+            return None;
+        }
+        let box_ = v.iter().map(|n| format!("{}", n * 4.0 / 3.0)).collect::<Vec<_>>().join(" ");
+        Some(format!("{}{box_}{}><g transform=\"scale(1.3333333333333333)\">{}</g>{}", &svg[..at], &svg[at + len..open], &svg[open + 1..close], &svg[close..]))
+    };
+    scaled().unwrap_or_else(|| svg.to_string())
+}
+
 // The SVG drawn at `dpi` of its true size, white or transparent behind. A part pixel at the edge counts; a rounding
 // error does not (pixelsAt in src/export.ts counts the same, so Export… shows the size written).
 fn draw(tree: &usvg::Tree, dpi: f32, transparent: bool) -> Result<resvg::tiny_skia::Pixmap, String> {
@@ -1075,6 +1098,42 @@ mod tests {
         assert_eq!(size(clipboard_pictures(SVG, false, 150.0, None).unwrap().0), (180, 136));
         let big = r#"<svg xmlns="http://www.w3.org/2000/svg" width="400pt" height="400pt" viewBox="0 0 400 400"/>"#;
         assert!(make_png(big, 2400.0, true, None).unwrap_err().contains("too large"));
+    }
+
+    // Issue 47: the clipboard's SVG on Linux keeps export's width and height in pt and draws the same picture, but in px
+    // user units. Inkscape drops the root's size on paste and reads user units as px, so its content measures the true
+    // size in px there (before: 75% of it).
+    #[test]
+    fn clipboard_svg_is_true_size_in_px_units() {
+        let px = px_units(SVG);
+        assert!(px.starts_with(r#"<svg xmlns="http://www.w3.org/2000/svg" width="86pt" height="65pt" viewBox="0 0 114.66666666666667 86.66666666666667">"#), "{px}");
+        let (a, b) = (tree(SVG).unwrap(), tree(&px).unwrap());
+        assert_eq!(a.size(), b.size(), "the same true size");
+        let (ia, ib) = (a.root().abs_bounding_box(), b.root().abs_bounding_box());
+        for (x, y) in [(ia.left(), ib.left()), (ia.top(), ib.top()), (ia.width(), ib.width()), (ia.height(), ib.height())] {
+            assert!((x - y).abs() < 1e-3, "the same picture: {ia:?} {ib:?}");
+        }
+        // As Inkscape pastes: the root's size and view box gone, the content's user units as px.
+        let pasted = |s: &str| {
+            let open = s.find('>').unwrap();
+            let s = format!("<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"1000\" height=\"1000\">{}", &s[open + 1..]);
+            tree(&s).unwrap().root().abs_bounding_box().width()
+        };
+        let true_px = 50.0 * 4.0 / 3.0; // the 50 pt bar
+        assert!((pasted(&px) - true_px).abs() < 1e-3, "{}", pasted(&px));
+        assert!((pasted(SVG) / true_px - 0.75).abs() < 1e-3, "export's own units paste at 75%");
+        // The PNG from it has the same pixels across.
+        let size = |png: Vec<u8>| png::Decoder::new(std::io::Cursor::new(png)).read_info().unwrap().info().size();
+        assert_eq!(size(make_png(&px, 300.0, true, None).unwrap()), size(make_png(SVG, 300.0, true, None).unwrap()));
+        // No root view box, or a broken one: unchanged. Cut short anywhere: no panic.
+        for s in [r#"<svg xmlns="http://www.w3.org/2000/svg" width="20pt" height="10pt"/>"#, r#"<svg viewBox="0 0 0 5"></svg>"#, r#"<svg viewBox="a b c d"></svg>"#, "", "<svg"] {
+            assert_eq!(px_units(s), s);
+        }
+        for k in 0..SVG.len() {
+            if SVG.is_char_boundary(k) {
+                px_units(&SVG[..k]);
+            }
+        }
     }
 
     // A PNG Octet writes carries the drawing in an iTXt chunk before the pixels, and reads back as it went in; the

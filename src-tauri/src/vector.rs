@@ -1,6 +1,7 @@
 // Export as EPS and EMF (Windows Enhanced Metafile, the picture Windows Office uses), from the same SVG as the PDF
-// (export.rs). Both are vector: every shape is a path, filled or stroked in one colour. Text is drawn as its glyph
-// outlines (usvg's flattened text), so the file needs no fonts. Neither format has transparency: a colour drawn at
+// (export.rs). Both are vector: every shape is a path, filled or stroked in one colour. The EPS draws text as its glyph
+// outlines (usvg's flattened text), so it needs no fonts. The EMF writes text as text in a font every Windows has, at
+// usvg's glyph positions, and outlines only the text it cannot (pick_runs). Neither format has transparency: a colour drawn at
 // part opacity is blended with white, as it shows on white paper, and a gradient (a shaded shape) takes the mean of its
 // stops' colours. A picture in the drawing (an image it holds) goes in as pixels, on white, in the same place and at
 // the same size as in the PDF.
@@ -34,10 +35,24 @@ struct Picture {
     rgb: Vec<u8>,
     place: Transform,
 }
+// A run of text as GDI draws it: one font, one baseline, one colour. Each character's origin is usvg's, so GDI's
+// advances (EXTTEXTOUTW's dx) put every glyph where the PDF has it.
+struct Run {
+    face: &'static str, // a font every Windows has (windows_font)
+    size: f32,          // em, pt
+    weight: u16,
+    italic: bool,
+    rgb: [u8; 3],
+    y: f32,          // baseline, pt
+    chars: Vec<u16>, // UTF-16, one glyph each
+    xs: Vec<f32>,    // each character's origin, pt
+    end: f32,        // where the last character's advance ends, pt
+}
 // What the drawing paints, in order.
 enum Mark {
     Shape(Shape),
     Picture(Picture),
+    Text(Run),
 }
 
 // A paint's colour on white paper at `opacity` (0 to 1).
@@ -63,19 +78,31 @@ fn mean(stops: &[usvg::Stop], opacity: f32) -> ([f32; 3], f32) {
 }
 
 // Every visible path and picture in the tree, in drawing order, in pt. usvg measures in CSS px (96 to the inch); pt
-// are 72.
-fn marks(tree: &usvg::Tree) -> Vec<Mark> {
+// are 72. With `text` (the EMF), text goes in as runs where it can; otherwise all of it as glyph outlines.
+fn marks(tree: &usvg::Tree, text: bool) -> Vec<Mark> {
     let mut out = Vec::new();
-    walk(tree.root(), 1.0, Transform::identity(), &mut out);
+    walk(tree.root(), 1.0, Transform::identity(), text.then(|| tree.fontdb().as_ref()), &mut out);
     out
 }
 // `base`: what takes the group's own frame to the page. A text's flattened glyphs carry transforms from the text, not
 // from the page, so they get the text's (issue 16: the labels fell outside the picture in Word on Windows).
-fn walk(g: &usvg::Group, opacity: f32, base: Transform, out: &mut Vec<Mark>) {
+fn walk(g: &usvg::Group, opacity: f32, base: Transform, text: Option<&usvg::fontdb::Database>, out: &mut Vec<Mark>) {
     for node in g.children() {
         match node {
-            Node::Group(c) => walk(c, opacity * c.opacity().get(), base, out),
-            Node::Text(t) => walk(t.flattened(), opacity, base.pre_concat(t.abs_transform()), out),
+            Node::Group(c) => walk(c, opacity * c.opacity().get(), base, text, out),
+            Node::Text(t) => match text.and_then(|db| pick_runs(t, db, base, opacity)) {
+                Some(runs) => {
+                    for r in runs {
+                        // A label Octet draws a letter at a time (the O, then the H before it, of HO) is one string, as
+                        // ChemDraw writes it: a run that ends where the last one starts, or starts where it ends.
+                        match out.pop() {
+                            Some(Mark::Text(p)) if abut(&p, &r) => out.push(Mark::Text(join(p, r))),
+                            last => out.extend(last.into_iter().chain([Mark::Text(r)])),
+                        }
+                    }
+                }
+                None => walk(t.flattened(), opacity, base.pre_concat(t.abs_transform()), None, out),
+            },
             Node::Image(img) if img.is_visible() => out.extend(picture(node, img, opacity).map(Mark::Picture)),
             Node::Image(_) => {}
             Node::Path(p) if p.is_visible() => {
@@ -123,6 +150,82 @@ fn walk(g: &usvg::Group, opacity: f32, base: Transform, out: &mut Vec<Mark>) {
     }
 }
 
+// Whether two runs are one string: the same font, colour and baseline, one's advances ending where the other starts.
+fn abut(a: &Run, b: &Run) -> bool {
+    (a.face, a.size, a.weight, a.italic, a.rgb) == (b.face, b.size, b.weight, b.italic, b.rgb)
+        && (a.y - b.y).abs() < 0.005
+        && ((b.xs[0] - a.end).abs() < 0.05 || (a.xs[0] - b.end).abs() < 0.05)
+}
+fn join(a: Run, b: Run) -> Run {
+    let (mut left, right) = if a.xs[0] <= b.xs[0] { (a, b) } else { (b, a) };
+    left.chars.extend(right.chars);
+    left.xs.extend(right.xs);
+    left.end = right.end;
+    left
+}
+
+// The Windows font for a face usvg drew with: one every Windows 10 and 11 has, or the one with the same widths that
+// a Mac or Linux face stands in for. None for any other face: its text goes in as outlines, as Word would otherwise
+// draw it in a font of its own choosing.
+fn windows_font(family: &str) -> Option<&'static str> {
+    const SAME: [&str; 19] = ["Arial", "Arial Black", "Calibri", "Cambria", "Candara", "Comic Sans MS", "Consolas", "Constantia", "Corbel",
+        "Courier New", "Georgia", "Impact", "Lucida Console", "Palatino Linotype", "Segoe UI", "Tahoma", "Times New Roman", "Trebuchet MS", "Verdana"];
+    const LIKE: [(&str, &str); 9] = [("Helvetica", "Arial"), ("Liberation Sans", "Arial"), ("Arimo", "Arial"), ("Times", "Times New Roman"),
+        ("Liberation Serif", "Times New Roman"), ("Tinos", "Times New Roman"), ("Courier", "Courier New"), ("Liberation Mono", "Courier New"), ("Cousine", "Courier New")];
+    SAME.into_iter().find(|f| f.eq_ignore_ascii_case(family)).or_else(|| LIKE.into_iter().find(|(f, _)| f.eq_ignore_ascii_case(family)).map(|(_, w)| w))
+}
+
+// A text as runs GDI can draw (issue 20: ChemDraw's EMF has its labels as text, so Word and PowerPoint can search
+// them). None, so the text goes in as outlines, if any glyph is turned, slanted or mirrored, has a stroke or a
+// decoration, is in a face windows_font has no font for, stands for anything but one character of the Basic
+// Multilingual Plane, is a missing glyph, or runs right to left.
+fn pick_runs(t: &usvg::Text, db: &usvg::fontdb::Database, base: Transform, opacity: f32) -> Option<Vec<Run>> {
+    let to = base.pre_concat(t.abs_transform()).post_scale(0.75, 0.75);
+    let upright = |m: &Transform| m.kx.abs() <= 1e-4 * m.sx && m.ky.abs() <= 1e-4 * m.sx && m.sx > 0.0 && (m.sy - m.sx).abs() <= 1e-4 * m.sx;
+    if !upright(&to) {
+        return None;
+    }
+    let mut runs: Vec<Run> = Vec::new();
+    for span in t.layouted() {
+        if span.stroke.is_some() || span.underline.is_some() || span.overline.is_some() || span.line_through.is_some() {
+            return None;
+        }
+        let Some(fill) = span.fill.as_ref().filter(|_| span.visible) else { continue };
+        let rgb = colour(fill.paint(), opacity * fill.opacity().get());
+        let size = span.font_size.get() * to.sx;
+        for g in &span.positioned_glyphs {
+            let m = to.pre_concat(g.transform());
+            let mut chars = g.text.chars();
+            let (Some(c), None) = (chars.next(), chars.next()) else { return None };
+            if !upright(&m) || g.id.0 == 0 || c.is_control() || u32::from(c) > 0xFFFF {
+                return None;
+            }
+            let face = db.face(g.font)?;
+            let (font, weight, italic) = (windows_font(&face.families.first()?.0)?, face.weight.0, face.style != usvg::fontdb::Style::Normal);
+            let (x, y) = (m.tx, m.ty);
+            match runs.last_mut() {
+                Some(r) if r.face == font && r.size == size && r.weight == weight && r.italic == italic && r.rgb == rgb && (r.y - y).abs() < 0.005 => {
+                    if x < *r.xs.last()? {
+                        return None;
+                    }
+                    r.xs.push(x);
+                    r.chars.push(u32::from(c) as u16);
+                }
+                _ => runs.push(Run { face: font, size, weight, italic, rgb, y, chars: vec![u32::from(c) as u16], xs: vec![x], end: x }),
+            }
+        }
+    }
+    // Where each run's last advance ends: where the next run starts, if that is further right (a subscript after its
+    // letter), or else the right of the text's box, which usvg makes from the advances. GDI only moves its pen by it.
+    let right = to.sx * t.bounding_box().right() + to.tx;
+    let starts: Vec<f32> = runs.iter().skip(1).map(|r| r.xs[0]).chain([right]).collect();
+    for (r, next) in runs.iter_mut().zip(starts) {
+        let last = *r.xs.last()?;
+        r.end = if next > last { next } else if right > last { right } else { last + r.size / 2.0 };
+    }
+    Some(runs)
+}
+
 // A picture's pixels: its own (a PNG's, a JPEG's), but no more than 300 dpi of the size it is drawn at and 16 million
 // in all, drawn on white at its opacity. None if it has no size or cannot be drawn.
 fn picture(node: &Node, img: &usvg::Image, opacity: f32) -> Option<Picture> {
@@ -164,9 +267,10 @@ pub fn make_eps(tree: &usvg::Tree) -> Vec<u8> {
         "%!PS-Adobe-3.0 EPSF-3.0\n%%BoundingBox: 0 0 {} {}\n%%HiResBoundingBox: 0 0 {} {}\n%%Creator: Octet\n%%LanguageLevel: 2\n%%Pages: 1\n%%EndComments\n%%BeginProlog\n%%EndProlog\n%%Page: 1 1\ngsave\n0 {} translate 1 -1 scale\n",
         w.ceil(), h.ceil(), n(w), n(h), n(h)
     );
-    for mark in marks(tree) {
+    for mark in marks(tree, false) {
         let sh = match mark {
             Mark::Shape(sh) => sh,
+            Mark::Text(_) => continue,
             Mark::Picture(p) => {
                 // The pixel grid placed in pt, then the pixels in hex, 64 to a line.
                 let t = p.place;
@@ -209,11 +313,15 @@ pub fn make_eps(tree: &usvg::Tree) -> Vec<u8> {
 
 // ---- EMF ----
 
-// Logical units per pt (so 1/20 pt), and the reference device the metafile is recorded on: a 96 dpi screen of
-// 1920 by 1080 px, 508 by 285.75 mm (rounded to whole mm in the header, as GDI does).
+// Logical units per pt (so 1/20 pt), and the reference device the metafile is recorded on: 720 dpi, so 10 device px
+// a pt and exactly 2 logical units a device px, 20 by 15 in (508 by 381 mm, 14,400 by 10,800 px, all whole numbers).
+// Issue 20: some programs draw a metafile into pixels at its reference resolution (GDI+'s DrawImage did at 96 dpi:
+// bonds grew fat and a hashed wedge's hashes ran together). ChemDraw's is about 261 dpi; 720 is finer still, yet a
+// whole A4 page at it stays under 50 million pixels.
 const UNIT: f32 = 20.0;
-const DEVICE: (i32, i32) = (1920, 1080);
-const DEVICE_MM: (i32, i32) = (508, 286);
+const PER_PX: i32 = 2;
+const DEVICE: (i32, i32) = (14_400, 10_800);
+const DEVICE_MM: (i32, i32) = (508, 381);
 
 struct Emf {
     out: Vec<u8>,
@@ -238,9 +346,47 @@ impl Emf {
     }
 }
 const COLORREF: fn([u8; 3]) -> i32 = |c| i32::from(c[0]) | (i32::from(c[1]) << 8) | (i32::from(c[2]) << 16);
-// Stock objects: NULL_BRUSH and NULL_PEN.
+// Stock objects: NULL_BRUSH, NULL_PEN and SYSTEM_FONT.
 const NULL_BRUSH: i32 = 0x8000_0005u32 as i32;
 const NULL_PEN: i32 = 0x8000_0008u32 as i32;
+const SYSTEM_FONT: i32 = 0x8000_000Du32 as i32;
+// A box in logical units as device px (bounds records are in device px), rounded outward.
+fn device(r: [i32; 4]) -> [i32; 4] {
+    [r[0].div_euclid(PER_PX), r[1].div_euclid(PER_PX), r[2].saturating_add(PER_PX - 1).div_euclid(PER_PX), r[3].saturating_add(PER_PX - 1).div_euclid(PER_PX)]
+}
+
+// A run of text as GDI records it: the font (EMR_EXTCREATEFONTINDIRECTW, object 3), its colour, then the characters
+// from the first one's origin on the baseline (EMR_EXTTEXTOUTW), each advance in dx so every glyph lands at its
+// origin in the run; then the font goes. `at`: pt to logical units.
+fn text_record(e: &mut Emf, r: &Run, at: impl Fn(f32) -> i32) {
+    // LOGFONTW: height (negative, so it is the em height), width, escapement, orientation, weight; italic, underline,
+    // strike-out, DEFAULT_CHARSET, OUT_TT_PRECIS, clip, quality and pitch; the face, 32 UTF-16 units. Then the rest of
+    // a LogFontPanose (320 bytes in all) left empty, the size older GDI expects; MS-EMF reads it as a LogFont.
+    let height = -((r.size * UNIT).round() as i32).max(1);
+    let mut font = vec![u8::from(r.italic), 0, 0, 1, 4, 0, 0, 0];
+    font.extend(r.face.encode_utf16().chain(std::iter::repeat(0)).take(32).flat_map(u16::to_le_bytes));
+    font.resize(320 - 20, 0);
+    e.record_with(82, &[3, height, 0, 0, 0, i32::from(r.weight)], &font);
+    e.record(37, &[3]); // EMR_SELECTOBJECT
+    e.record(24, &[COLORREF(r.rgb)]); // EMR_SETTEXTCOLOR
+    let xs: Vec<i32> = r.xs.iter().map(|x| at(*x)).collect();
+    let end = at(r.end).max(xs[xs.len() - 1]);
+    let dx: Vec<i32> = xs.iter().enumerate().map(|(i, x)| xs.get(i + 1).copied().unwrap_or(end).saturating_sub(*x)).collect();
+    let (n, y) = (r.chars.len(), at(r.y));
+    let mut bytes: Vec<u8> = r.chars.iter().flat_map(|c| c.to_le_bytes()).collect();
+    bytes.resize((2 * n + 3) & !3, 0);
+    let off_dx = 76 + bytes.len() as i32;
+    bytes.extend(dx.iter().flat_map(|d| d.to_le_bytes()));
+    // Bounds in device px: the advances across, an em above the baseline and a quarter below.
+    let em = at(r.size);
+    let b = device([xs[0], y.saturating_sub(em), end, y.saturating_add(em / 4)]);
+    // EMR_EXTTEXTOUTW: bounds; GM_COMPATIBLE and its scale (logical units to 0.01 mm); then EMRTEXT: the reference
+    // point, the number of characters, where they are, no options, no rectangle, and where dx is.
+    let scale = (2540.0 / 72.0 / UNIT).to_bits() as i32;
+    e.record_with(84, &[b[0], b[1], b[2], b[3], 1, scale, scale, xs[0], y, n as i32, 76, 0, 0, 0, -1, -1, off_dx], &bytes);
+    e.record(37, &[SYSTEM_FONT]);
+    e.record(40, &[3]); // EMR_DELETEOBJECT
+}
 
 // A picture as GDI draws one: the world transform takes its pixel grid to its place in logical units, StretchDIBits
 // draws its pixels (a 24-bit bitmap, bottom row first), and the transform goes back. `device`: device px per pt, for
@@ -293,15 +439,15 @@ const CDXML_TAG: &[u8] = b"Octet CDXML\0";
 // With `cdxml`, the drawing goes in an EMR_COMMENT after the header, which GDI and Office skip when they draw.
 pub fn make_emf(tree: &usvg::Tree, cdxml: Option<&str>) -> Vec<u8> {
     let (w, h) = size(tree);
-    let (lw, lh) = ((w * UNIT).ceil().max(1.0) as i32, (h * UNIT).ceil().max(1.0) as i32);
-    // The picture in device px, and in hundredths of a mm.
-    let px = |pt: f32, dev: i32, mm: i32| ((pt * 25.4 / 72.0) * dev as f32 / mm as f32).ceil().max(1.0) as i32;
-    let (dw, dh) = (px(w, DEVICE.0, DEVICE_MM.0), px(h, DEVICE.1, DEVICE_MM.1));
+    // The picture in device px (whole ones, the logical units two to each), and its frame in hundredths of a mm.
+    let px = |pt: f32| (((pt * UNIT).ceil().max(1.0) as i32).saturating_add(PER_PX - 1)) / PER_PX;
+    let (dw, dh) = (px(w), px(h));
+    let (lw, lh) = (dw * PER_PX, dh * PER_PX);
     let (fw, fh) = ((w * 2540.0 / 72.0).round() as i32, (h * 2540.0 / 72.0).round() as i32);
     let mut e = Emf { out: Vec::new(), records: 0 };
     // EMR_HEADER (filled in at the end with the totals): bounds, frame, " EMF", version, bytes, records, handles,
     // reserved, description, palette, device, millimetres, pixel format, OpenGL, micrometres.
-    e.record(1, &[0, 0, dw - 1, dh - 1, 0, 0, fw, fh, 0x464D_4520, 0x10000, 0, 0, 3, 0, 0, 0, DEVICE.0, DEVICE.1, DEVICE_MM.0, DEVICE_MM.1, 0, 0, 0, DEVICE_MM.0 * 1000, DEVICE_MM.1 * 1000]);
+    e.record(1, &[0, 0, dw - 1, dh - 1, 0, 0, fw, fh, 0x464D_4520, 0x10000, 0, 0, 4, 0, 0, 0, DEVICE.0, DEVICE.1, DEVICE_MM.0, DEVICE_MM.1, 0, 0, 0, DEVICE_MM.0 * 1000, DEVICE_MM.1 * 1000]);
     if let Some(x) = cdxml {
         let data = [CDXML_TAG, x.as_bytes()].concat();
         e.record_with(70, &[data.len() as i32], &data); // EMR_COMMENT: the data's size, then the data
@@ -312,12 +458,18 @@ pub fn make_emf(tree: &usvg::Tree, cdxml: Option<&str>) -> Vec<u8> {
     e.record(11, &[dw, dh]); // EMR_SETVIEWPORTEXTEX
     e.record(12, &[0, 0]); // EMR_SETVIEWPORTORGEX
     e.record(18, &[1]); // EMR_SETBKMODE TRANSPARENT
+    e.record(22, &[24]); // EMR_SETTEXTALIGN TA_BASELINE, TA_LEFT
     let at = |v: f32| (v * UNIT).round() as i32;
-    for mark in marks(tree) {
+    for mark in marks(tree, true) {
         let sh = match mark {
             Mark::Shape(sh) => sh,
+            Mark::Text(r) => {
+                text_record(&mut e, &r, at);
+                continue;
+            }
             Mark::Picture(p) => {
-                picture_record(&mut e, &p, (dw as f32 / w, dh as f32 / h));
+                let k = UNIT / PER_PX as f32;
+                picture_record(&mut e, &p, (k, k));
                 continue;
             }
         };
@@ -331,7 +483,7 @@ pub fn make_emf(tree: &usvg::Tree, cdxml: Option<&str>) -> Vec<u8> {
                     Seg::Curve(a, b, c, d, x, y) => {
                         let xs = [at(a), at(c), at(x)];
                         let ys = [at(b), at(d), at(y)];
-                        let bounds = [*xs.iter().min().unwrap(), *ys.iter().min().unwrap(), *xs.iter().max().unwrap(), *ys.iter().max().unwrap()];
+                        let bounds = device([*xs.iter().min().unwrap(), *ys.iter().min().unwrap(), *xs.iter().max().unwrap(), *ys.iter().max().unwrap()]);
                         e.record(5, &[bounds[0], bounds[1], bounds[2], bounds[3], 3, xs[0], ys[0], xs[1], ys[1], xs[2], ys[2]]); // EMR_POLYBEZIERTO
                     }
                     Seg::Close => e.record(61, &[]), // EMR_CLOSEFIGURE
@@ -339,7 +491,7 @@ pub fn make_emf(tree: &usvg::Tree, cdxml: Option<&str>) -> Vec<u8> {
             }
             e.record(60, &[]); // EMR_ENDPATH
         };
-        let bounds = [0, 0, lw, lh];
+        let bounds = [0, 0, dw - 1, dh - 1];
         if let Some((c, even)) = sh.fill {
             e.record(19, &[if even { 1 } else { 2 }]); // EMR_SETPOLYFILLMODE ALTERNATE or WINDING
             e.record(39, &[1, 0, COLORREF(c), 0]); // EMR_CREATEBRUSHINDIRECT 1: BS_SOLID
@@ -451,7 +603,7 @@ pub(crate) mod tests {
     #[test]
     fn text_lands_inside_the_picture() {
         let svg = r##"<svg xmlns="http://www.w3.org/2000/svg" width="60pt" height="30pt" viewBox="-302 -425 60 30"><g transform="scale(0.75)"><path d="M-400 -560h40v4h-40z" fill="#000"/><text x="-395" y="-540" fill="#000" font-family="Arial, Helvetica, sans-serif" font-size="13.3333px">NH</text></g></svg>"##;
-        let marks = marks(&crate::export::tree(svg).unwrap());
+        let marks = marks(&crate::export::tree(svg).unwrap(), false);
         assert!(marks.len() > 1, "the label has glyphs");
         for m in &marks {
             let Mark::Shape(sh) = m else { continue };
@@ -461,6 +613,138 @@ pub(crate) mod tests {
                 }
             }
         }
+    }
+
+    // The records of an EMF: each one's kind and where it starts. Every record's size takes the next to the end.
+    fn records(emf: &[u8]) -> Vec<(u32, usize)> {
+        let u = |at: usize| u32::from_le_bytes(emf[at..at + 4].try_into().unwrap());
+        let (mut at, mut out) = (0, Vec::new());
+        while at < emf.len() {
+            out.push((u(at), at));
+            at += u(at + 4) as usize;
+        }
+        assert_eq!((at, u(48) as usize, u(52) as usize), (emf.len(), emf.len(), out.len()));
+        out
+    }
+    fn i32_at(emf: &[u8], at: usize) -> i32 {
+        i32::from_le_bytes(emf[at..at + 4].try_into().unwrap())
+    }
+
+    // Issue 20: the metafile is recorded against a 720 dpi device (ChemDraw's about 261, Octet's was 96), the logical
+    // units exactly 2 device px, and every bounds record in device px.
+    #[test]
+    fn emf_reference_device_is_720_dpi() {
+        let emf = make_emf(&tree(SVG), None);
+        let v = |at: usize| i32_at(&emf, at);
+        assert_eq!((v(8), v(12), v(16), v(20)), (0, 0, 719, 359), "bounds: 72 by 36 pt is 720 by 360 px");
+        assert_eq!((v(24), v(28), v(32), v(36)), (0, 0, 2540, 1270), "the frame, in 0.01 mm, is the picture");
+        assert_eq!(v(56), 4, "handles: none, a brush, a pen and a font");
+        assert_eq!((v(72), v(76), v(80), v(84)), (14_400, 10_800, 508, 381));
+        assert_eq!((v(100), v(104)), (508_000, 381_000));
+        assert_eq!((f64::from(v(72)) * 25.4 / f64::from(v(80)), f64::from(v(76)) * 25.4 / f64::from(v(84))), (720.0, 720.0));
+        let all = records(&emf);
+        let body = |kind: u32| all.iter().find(|r| r.0 == kind).map(|r| (i32_at(&emf, r.1 + 8), i32_at(&emf, r.1 + 12))).unwrap();
+        assert_eq!((body(9), body(11)), ((1440, 720), (720, 360)), "window 1/20 pt, viewport device px");
+        for &(kind, at) in &all {
+            if kind == 62 || kind == 64 {
+                assert_eq!((v(at + 8), v(at + 12), v(at + 16), v(at + 20)), (0, 0, 719, 359), "path bounds in device px");
+            }
+        }
+    }
+
+    // What an EMF writes as text: each EXTTEXTOUTW's string, reference point and dx, and the font it is in (face,
+    // height, weight, italic).
+    fn texts(emf: &[u8]) -> Vec<(String, (i32, i32), Vec<i32>, (String, i32, i32, u8))> {
+        let mut font = None;
+        let mut out = Vec::new();
+        for (kind, at) in records(emf) {
+            if kind == 82 {
+                assert_eq!(i32_at(emf, at + 4), 332, "a LogFontPanose");
+                let face: Vec<u16> = emf[at + 40..at + 104].chunks(2).map(|c| u16::from_le_bytes([c[0], c[1]])).take_while(|c| *c != 0).collect();
+                font = Some((String::from_utf16(&face).unwrap(), i32_at(emf, at + 12), i32_at(emf, at + 28), emf[at + 32]));
+            }
+            if kind == 84 {
+                assert_eq!(i32_at(emf, at + 24), 1, "GM_COMPATIBLE");
+                let n = i32_at(emf, at + 44) as usize;
+                let (s, d) = (i32_at(emf, at + 48) as usize, i32_at(emf, at + 72) as usize);
+                assert_eq!((s, i32_at(emf, at + 52)), (76, 0));
+                let chars: Vec<u16> = emf[at + s..at + s + 2 * n].chunks(2).map(|c| u16::from_le_bytes([c[0], c[1]])).collect();
+                let dx = (0..n).map(|i| i32_at(emf, at + d + 4 * i)).collect();
+                assert_eq!(d + 4 * n, i32_at(emf, at + 4) as usize, "dx ends the record");
+                out.push((String::from_utf16(&chars).unwrap(), (i32_at(emf, at + 36), i32_at(emf, at + 40)), dx, font.clone().expect("a font first")));
+            }
+        }
+        out
+    }
+
+    // Issue 20: labels go in as text, as ChemDraw's do, each character where the PDF has it. Arial's advances (Liberation
+    // Sans has the same) in 1/2048 em: N, H and C 1479, O 1593, 3 1139, + 1196. At 10 pt in 1/20 pt: 200 / 2048 each.
+    #[test]
+    fn labels_are_text_at_their_glyph_positions() {
+        let svg = r##"<svg xmlns="http://www.w3.org/2000/svg" width="120pt" height="72pt" viewBox="0 0 120 72"><g transform="scale(0.75)"><path d="M0 0h20v1h-20z" fill="#000"/><g font-family="Arial, Helvetica, sans-serif" font-size="13.3333px" fill="rgb(15, 23, 42)"><text x="20" y="30">NH</text><text x="20" y="50">OH</text><text x="60" y="30">H</text><text x="69.62890625" y="30">O</text><text x="100" y="30">O</text><text x="80" y="60">CH<tspan dy="2.827" font-size="10px">3</tspan></text><text x="20" y="80">NH<tspan dy="-4" font-size="10px">+</tspan></text></g></g></svg>"##;
+        let emf = make_emf(&crate::export::tree(svg).unwrap(), None);
+        let all = records(&emf);
+        let count = |k: u32| all.iter().filter(|r| r.0 == k).count();
+        // Record histogram: the bond is the only path; each run has its font made, chosen, coloured and deleted.
+        assert_eq!((count(62), count(82), count(84), count(24), count(22)), (1, 8, 8, 8, 1));
+        assert_eq!(count(40), 1 + 8, "the bond's brush and the fonts are deleted");
+        let t = texts(&emf);
+        let strings: Vec<&str> = t.iter().map(|x| x.0.as_str()).collect();
+        assert_eq!(strings, ["NH", "OH", "HO", "O", "CH", "3", "NH", "+"]);
+        let arial = |h: i32| ("Arial".to_string(), h, 400, 0u8);
+        assert!(t.iter().all(|x| x.3 == arial(if x.0.len() == 1 && x.0 != "O" { -150 } else { -200 })), "{t:?}");
+        // Reference points on the baseline, in 1/20 pt (px * 0.75 * 20).
+        let at = |px: f64| (px * 15.0).round() as i32;
+        let adv = |units: f64, pt: f64| units * pt / 2048.0 * 20.0;
+        let starts: Vec<(i32, i32)> = t.iter().map(|x| x.1).collect();
+        assert_eq!(starts[..5], [(at(20.0), at(30.0)), (at(20.0), at(50.0)), (at(60.0), at(30.0)), (at(100.0), at(30.0)), (at(80.0), at(60.0))]);
+        // The subscript starts where CH's advances end, 0.212 em below; the superscript where NH's do, 3 pt above.
+        let (sub, sup) = (at(80.0) as f64 + adv(2.0 * 1479.0, 10.0), at(20.0) as f64 + adv(2.0 * 1479.0, 10.0));
+        assert!((starts[5].0 as f64 - sub).abs() <= 1.0 && starts[5].1 == at(62.827), "{:?} {sub}", starts[5]);
+        assert!((starts[7].0 as f64 - sup).abs() <= 1.0 && starts[7].1 == at(76.0), "{:?} {sup}", starts[7]);
+        // Each advance as Arial's, to a twentieth of a pt; HO's H ends where its O starts.
+        let near = |dx: &[i32], units: &[f64], pt: f64| dx.len() == units.len() && dx.iter().zip(units).all(|(d, u)| (f64::from(*d) - adv(*u, pt)).abs() <= 1.0);
+        assert!(near(&t[0].2, &[1479.0, 1479.0], 10.0), "{:?}", t[0].2);
+        assert!(near(&t[1].2, &[1593.0, 1479.0], 10.0), "{:?}", t[1].2);
+        assert!(near(&t[2].2, &[1479.0, 1593.0], 10.0), "{:?}", t[2].2);
+        assert!(near(&t[5].2, &[1139.0], 7.5) && near(&t[7].2, &[1196.0], 7.5), "{t:?}");
+        // The text records' bounds are inside the picture's, in device px.
+        for (kind, at) in all {
+            if kind == 84 {
+                let b = [8, 12, 16, 20].map(|k| i32_at(&emf, at + k));
+                assert!(b[0] >= 0 && b[1] >= 0 && b[2] <= 1199 && b[3] <= 719 && b[0] < b[2] && b[1] < b[3], "{b:?}");
+            }
+        }
+    }
+
+    // Text GDI cannot draw as usvg did goes in as outlines: turned, or underlined.
+    #[test]
+    fn turned_or_underlined_text_is_outlines() {
+        for attrs in [r#"transform="rotate(30 40 40)""#, r#"text-decoration="underline""#] {
+            let svg = format!(r##"<svg xmlns="http://www.w3.org/2000/svg" width="80pt" height="80pt" viewBox="0 0 80 80"><text x="30" y="40" font-family="Arial" font-size="10pt" {attrs}>OH</text></svg>"##);
+            let all = records(&make_emf(&crate::export::tree(&svg).unwrap(), None));
+            assert!(!all.iter().any(|r| r.0 == 84) && all.iter().any(|r| r.0 == 62), "{attrs}: {:?}", all.iter().map(|r| r.0).collect::<Vec<_>>());
+        }
+        assert_eq!((windows_font("Arial"), windows_font("Liberation Sans"), windows_font("helvetica")), (Some("Arial"), Some("Arial"), Some("Arial")));
+        assert_eq!((windows_font("Tinos"), windows_font("Menlo"), windows_font("Instrument Sans")), (Some("Times New Roman"), None, None));
+    }
+
+    // Issue 20: the frame fits the ink. L-proline as Octet 1.1.1 copies it (standaloneSvg in Chromium with Arial, the
+    // view box from the glyphs' ink): the ink is within 0.01 pt of each edge with Arial (0.1 pt allowed here, as Linux
+    // draws Liberation Sans). Octet 1.1.0 made this 58 by 41 pt, from the labels' line boxes and whole points.
+    pub(crate) const PROLINE: &str = r##"<svg xmlns="http://www.w3.org/2000/svg" fill="rgb(0, 0, 0)" width="56.21pt" height="36.55pt" viewBox="-33.1 -21.54 56.21 36.55"><g transform="scale(0.75)"><g id="world"><g><defs/><path d="M-26.26 8.63L-25.61 9.10L-20.04 1.43L-19.10 -0.55L-18.24 -2.41ZM-17.48 -0.18L-16.75 -0.50L-21.93 -12.15L-22.66 -11.82ZM-20.64 1.23L-19.91 0.90L-25.09 -10.74L-25.82 -10.42ZM-0.29 1.77L-0.00 1.46L-0.22 1.10L-18.24 -2.41L-19.10 -0.55L-20.04 1.43ZM0.49 1.51L-0.00 1.46L-0.29 1.77L9.40 18.54L9.60 18.09L9.80 17.64ZM9.80 17.64L9.60 18.09L9.40 18.54L28.74 14.43L28.38 14.10L28.01 13.76ZM28.01 13.76L28.38 14.10L28.74 14.43L30.81 -5.25L30.38 -5.00L29.96 -4.75ZM29.96 -4.75L30.38 -5.00L30.81 -5.25L19.41 -10.32L19.09 -9.59ZM7.36 -6.12L6.77 -6.66L-0.22 1.10L-0.00 1.46L0.49 1.51Z" fill="rgb(15, 23, 42)"/><g><text x="-35.56808929443359" y="19.84140815734863" fill="rgb(15, 23, 42)" font-family="Arial, Helvetica, sans-serif" font-size="13.3333px">O</text><text x="-45.194584655761716" y="19.84140815734863" fill="rgb(15, 23, 42)" font-family="Arial, Helvetica, sans-serif" font-size="13.3333px">H</text><text x="-32.09196014404297" y="-13.231793975830076" fill="rgb(15, 23, 42)" font-family="Arial, Helvetica, sans-serif" font-size="13.3333px">O</text><text x="8.030521774291993" y="-8.037777423858643" fill="rgb(15, 23, 42)" font-family="Arial, Helvetica, sans-serif" font-size="13.3333px">N</text><text x="8.030521774291993" y="-19.173156544685362" fill="rgb(15, 23, 42)" font-family="Arial, Helvetica, sans-serif" font-size="13.3333px">H</text></g></g></g></g></svg>"##;
+    #[test]
+    fn the_frame_fits_the_ink() {
+        let tree = crate::export::tree(PROLINE).unwrap();
+        let (w, h) = size(&tree);
+        assert!((w - 56.21).abs() < 1e-3 && (h - 36.55).abs() < 1e-3, "{w} by {h} pt");
+        let ink = tree.root().abs_stroke_bounding_box();
+        let slack = [ink.left(), ink.top(), w / 0.75 - ink.right(), h / 0.75 - ink.bottom()].map(|v| v * 0.75);
+        assert!(slack.iter().all(|s| (-0.1..=0.1).contains(s)), "{slack:?}");
+        let emf = make_emf(&tree, None);
+        assert_eq!([24, 28, 32, 36].map(|k| i32_at(&emf, k)), [0, 0, 1983, 1289], "the frame in 0.01 mm");
+        let t = texts(&emf);
+        assert_eq!(t.iter().map(|x| x.0.as_str()).collect::<Vec<_>>(), ["HO", "O", "N", "H"]);
     }
 
     // A picture as standaloneSvg writes one (src/export.ts): a red PNG of 4 by 2 px, drawn 36 by 18 pt at (18, 9) on a

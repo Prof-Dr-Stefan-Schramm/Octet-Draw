@@ -33,6 +33,9 @@ Octet needs no account and no internet connection.
 - Draws structures, reactions, arrows, shapes and text, with ChemDraw's keyboard shortcuts.
 - Starts each drawing in the ACS Document 1996 style. Settings has other journal styles.
 - Opens and saves ChemDraw files (CDXML and CDX). Imports and exports MOL, SDF, SMILES and InChI.
+- Saves `.oct` files by default: CDXML with Octet's own drawing in it. ChemDraw opens a `.oct` file as an empty
+  document. For ChemDraw users, save a `.cdxml`, or set Settings > Import and export > Save new drawings as to
+  ChemDraw XML (.cdxml). A file saved again in ChemDraw keeps the structures but not Octet's own extras.
 - Exports PDF, SVG and PNG. On the Mac, Copy puts the drawing into Word, PowerPoint and Keynote, and it pastes
   back into Octet or ChemDraw as a structure.
 - Turns names into structures and structures into names, offline.
