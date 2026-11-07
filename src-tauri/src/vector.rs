@@ -313,14 +313,24 @@ pub fn make_eps(tree: &usvg::Tree) -> Vec<u8> {
 
 // ---- EMF ----
 
-// Logical units per pt (so 1/20 pt), and the reference device the metafile is recorded on: 720 dpi, so 10 device px
-// a pt and exactly 2 logical units a device px, 20 by 15 in (508 by 381 mm, 14,400 by 10,800 px, all whole numbers).
-// Issue 20: some programs draw a metafile into pixels at its reference resolution (GDI+'s DrawImage did at 96 dpi:
-// bonds grew fat and a hashed wedge's hashes ran together). ChemDraw's is about 261 dpi; 720 is finer still, yet a
-// whole A4 page at it stays under 50 million pixels.
+// Logical units per pt (so 1/20 pt), and the reference device the metafile is recorded on: 96 dpi, so 4 device px
+// every 3 pt and exactly 15 logical units a device px, 20 by 15 in (508 by 381 mm, 1,920 by 1,440 px, all whole
+// numbers). The drawing itself is still laid down in logical units of 1/20 pt, so the reference resolution costs the
+// geometry no precision; it only decides what the bounds are counted in.
+//
+// It has to be 96, because Word sizes an enhanced metafile from `rclBounds` — device units read as 96 dpi — and not
+// from `rclFrame`, which is physical. At any other reference the two disagree and Word places the picture by the
+// ratio: 1.1.1 recorded against 720 dpi and Word drew every drawing 7.5 times too large (issue 55, and 7.5 is
+// 720/96). `an_emf_is_the_size_it_says_it_is` holds the two together.
+//
+// Issue 20 raised this to 720 because some programs draw a metafile into pixels at its reference resolution, and
+// GDI+'s DrawImage was said to do that at 96 dpi: bonds grew fat and a hashed wedge's hashes ran together. Measured
+// again on Windows 11 for issue 55, with thin bonds, a six-hash wedge and a double bond, GDI+ draws the 96 dpi and
+// the 720 dpi metafile identically at 1x, 2x and 4x — same hashes apart, same lines apart, the same ink to the
+// pixel. Whatever that was, it is not the reference resolution now, and 720 only costs the size.
 const UNIT: f32 = 20.0;
-const PER_PX: i32 = 2;
-const DEVICE: (i32, i32) = (14_400, 10_800);
+const PER_PX: i32 = 15;
+const DEVICE: (i32, i32) = (1_920, 1_440);
 const DEVICE_MM: (i32, i32) = (508, 381);
 
 struct Emf {
@@ -630,25 +640,51 @@ pub(crate) mod tests {
         i32::from_le_bytes(emf[at..at + 4].try_into().unwrap())
     }
 
-    // Issue 20: the metafile is recorded against a 720 dpi device (ChemDraw's about 261, Octet's was 96), the logical
-    // units exactly 2 device px, and every bounds record in device px.
+    // The metafile is recorded against a 96 dpi device, the logical units exactly 15 device px, and every bounds
+    // record in device px.
     #[test]
-    fn emf_reference_device_is_720_dpi() {
+    fn emf_reference_device_is_96_dpi() {
         let emf = make_emf(&tree(SVG), None);
         let v = |at: usize| i32_at(&emf, at);
-        assert_eq!((v(8), v(12), v(16), v(20)), (0, 0, 719, 359), "bounds: 72 by 36 pt is 720 by 360 px");
+        assert_eq!((v(8), v(12), v(16), v(20)), (0, 0, 95, 47), "bounds: 72 by 36 pt is 96 by 48 px");
         assert_eq!((v(24), v(28), v(32), v(36)), (0, 0, 2540, 1270), "the frame, in 0.01 mm, is the picture");
         assert_eq!(v(56), 4, "handles: none, a brush, a pen and a font");
-        assert_eq!((v(72), v(76), v(80), v(84)), (14_400, 10_800, 508, 381));
+        assert_eq!((v(72), v(76), v(80), v(84)), (1_920, 1_440, 508, 381));
         assert_eq!((v(100), v(104)), (508_000, 381_000));
-        assert_eq!((f64::from(v(72)) * 25.4 / f64::from(v(80)), f64::from(v(76)) * 25.4 / f64::from(v(84))), (720.0, 720.0));
+        assert_eq!((f64::from(v(72)) * 25.4 / f64::from(v(80)), f64::from(v(76)) * 25.4 / f64::from(v(84))), (96.0, 96.0));
         let all = records(&emf);
         let body = |kind: u32| all.iter().find(|r| r.0 == kind).map(|r| (i32_at(&emf, r.1 + 8), i32_at(&emf, r.1 + 12))).unwrap();
-        assert_eq!((body(9), body(11)), ((1440, 720), (720, 360)), "window 1/20 pt, viewport device px");
+        assert_eq!((body(9), body(11)), ((1440, 720), (96, 48)), "window 1/20 pt, viewport device px");
         for &(kind, at) in &all {
             if kind == 62 || kind == 64 {
-                assert_eq!((v(at + 8), v(at + 12), v(at + 16), v(at + 20)), (0, 0, 719, 359), "path bounds in device px");
+                assert_eq!((v(at + 8), v(at + 12), v(at + 16), v(at + 20)), (0, 0, 95, 47), "path bounds in device px");
             }
+        }
+    }
+
+    // The bounds and the frame describe the same picture: the bounds, read at the reference device's own resolution,
+    // are the frame's physical size. This is the one a host relies on and the one 1.1.1 broke — Word reads the bounds
+    // at 96 dpi and ignores the frame, so a metafile whose two sizes disagree is placed by however much they differ
+    // (issue 55). Checked over a range of sizes, because the bounds are whole device px and the frame is whole 0.01
+    // mm, so each is rounded and they have to agree anyway.
+    #[test]
+    fn an_emf_is_the_size_it_says_it_is() {
+        for (w, h) in [(72.0, 36.0), (48.0, 24.0), (144.0, 108.0), (86.0, 65.0), (56.55, 55.28)] {
+            let svg = format!(
+                r##"<svg xmlns="http://www.w3.org/2000/svg" width="{w}pt" height="{h}pt" viewBox="0 0 {w} {h}"><path d="M0 0L{w} {h}" stroke="#000" stroke-width="0.6"/></svg>"##
+            );
+            let emf = make_emf(&tree(&svg), None);
+            let v = |at: usize| i32_at(&emf, at);
+            let dpi = f64::from(v(72)) * 25.4 / f64::from(v(80));
+            assert_eq!(dpi, 96.0, "{w} by {h}: the reference device");
+            // Bounds are inclusive, so the width in px is right minus left plus one.
+            let (bw, bh) = (f64::from(v(16) - v(8) + 1), f64::from(v(20) - v(12) + 1));
+            let (fw, fh) = (f64::from(v(32) - v(24)) / 2540.0, f64::from(v(36) - v(28)) / 2540.0);
+            // Within one device pixel, which is as close as whole px and whole 0.01 mm can agree.
+            assert!((bw / dpi - fw).abs() <= 1.0 / dpi, "{w} by {h}: bounds {bw} px at {dpi} dpi is not the frame's {fw} in");
+            assert!((bh / dpi - fh).abs() <= 1.0 / dpi, "{w} by {h}: bounds {bh} px at {dpi} dpi is not the frame's {fh} in");
+            // And what Word will do with it: the bounds read at 96 dpi are the picture's true size in pt.
+            assert!((bw * 72.0 / 96.0 - f64::from(w)).abs() <= 1.0, "{w} by {h}: Word would place it {} pt wide", bw * 72.0 / 96.0);
         }
     }
 
