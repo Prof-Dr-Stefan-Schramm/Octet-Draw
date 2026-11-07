@@ -58,7 +58,7 @@ use windows::Win32::System::Com::{
     CLSCTX_LOCAL_SERVER, COINIT_APARTMENTTHREADED, CoInitializeEx, CoRegisterClassObject, CoRevokeClassObject, CoUninitialize, CreateDataAdviseHolder,
     DATADIR_GET, DVASPECT, DVASPECT_CONTENT, FORMATETC, IAdviseSink, IClassFactory, IDataAdviseHolder,
     IClassFactory_Impl, IDataObject, IDataObject_Impl, IEnumFORMATETC, IEnumSTATDATA, IMoniker, IPersist_Impl, REGCLS_MULTIPLEUSE, STGMEDIUM,
-    STATFLAG_NONAME, STATSTG, STGC_DEFAULT, STGM, STGM_CREATE, STGM_READ, STGM_READWRITE, STGM_SHARE_EXCLUSIVE, TYMED_ENHMF, TYMED_MFPICT,
+    IStream, STATFLAG_NONAME, STATSTG, STGC_DEFAULT, STGM, STGM_CREATE, STGM_READ, STGM_READWRITE, STGM_SHARE_EXCLUSIVE, TYMED_ENHMF, TYMED_MFPICT,
 };
 use windows::Win32::System::Ole::{
     IEnumOLEVERB, IOleAdviseHolder, IOleClientSite, IOleObject_Impl, OLECLOSE, OLECLOSE_NOSAVE, OLEGETMONIKER, OLEMISC, OLEWHICHMK, USERCLASSTYPE,
@@ -296,10 +296,8 @@ fn finish(edit: u64) {
                     // And the cache, so the picture on the page is drawn again rather than
                     // the one it kept from before the edit.
                     let cache = object.get().state.borrow().data_advise.clone();
-                    if let Some(cache) = cache {
-                        if let Ok(me) = object.get().cast_self::<IDataObject>() {
-                            let _ = unsafe { cache.SendOnDataChange(&me, None, 0) };
-                        }
+                    if let (Some(cache), Ok(me)) = (cache, object.get().cast_self::<IDataObject>()) {
+                        let _ = unsafe { cache.SendOnDataChange(&me, None, 0) };
                     }
                     ok
                 }
@@ -568,10 +566,8 @@ impl IOleObject_Impl for Drawing_Impl {
             let state = self.state.borrow();
             (state.dirty, state.site.clone(), state.advise.clone())
         };
-        if *save != OLECLOSE_NOSAVE && dirty {
-            if let Some(site) = &site {
-                let _ = unsafe { site.SaveObject() };
-            }
+        if let (true, Some(site)) = (*save != OLECLOSE_NOSAVE && dirty, &site) {
+            let _ = unsafe { site.SaveObject() };
         }
         if let Some(holder) = &holder {
             let _ = unsafe { holder.SendOnClose() };
@@ -964,7 +960,7 @@ fn offered() -> [FORMATETC; 2] {
     let one = |format: u16, tymed: i32| FORMATETC {
         cfFormat: format,
         ptd: std::ptr::null_mut(),
-        dwAspect: DVASPECT_CONTENT.0 as u32,
+        dwAspect: DVASPECT_CONTENT.0,
         lindex: -1,
         tymed: tymed as u32,
     };
@@ -1024,14 +1020,32 @@ fn read_stream(storage: &IStorage, name: &str) -> Result<Vec<u8>> {
     if stat.cbSize > crate::MAX_BYTES {
         return Err(E_FAIL.into());
     }
-    let mut out = vec![0u8; stat.cbSize as usize];
-    let mut read = 0u32;
-    // Through IStream itself, never a cast to ISequentialStream. IStream inherits Read and
-    // Write, so the cast buys nothing — and the IStream a host hands over is a proxy that
-    // answers E_NOINTERFACE for ISequentialStream, so the cast failed and every stream Octet
-    // tried to write was silently lost.
-    unsafe { stream.Read(out.as_mut_ptr() as *mut _, out.len() as u32, Some(&mut read)).ok()? };
-    out.truncate(read as usize);
+    read_whole(&stream, stat.cbSize as usize)
+}
+
+// A stream read to its end, however little it gives at a time.
+//
+// IStream::Read may return fewer bytes than asked for with more still to come, and the stream
+// a host hands an out-of-process server is a MARSHALLED PROXY — that is why the
+// ISequentialStream cast below failed — so a large drawing really does arrive in whatever
+// chunks the RPC buffer holds. Taking the first chunk for the whole stream would load a
+// truncated drawing: a fault that shows up only on somebody's biggest file.
+fn read_whole(stream: &IStream, size: usize) -> Result<Vec<u8>> {
+    let mut out = vec![0u8; size];
+    let mut got = 0usize;
+    while got < out.len() {
+        let mut read = 0u32;
+        // Through IStream itself, never a cast to ISequentialStream. IStream inherits Read and
+        // Write, so the cast buys nothing — and the IStream a host hands over is a proxy that
+        // answers E_NOINTERFACE for ISequentialStream, so the cast failed and every stream Octet
+        // tried to write was silently lost.
+        unsafe { stream.Read(out[got..].as_mut_ptr() as *mut _, (out.len() - got) as u32, Some(&mut read)).ok()? };
+        if read == 0 {
+            break;
+        }
+        got += read as usize;
+    }
+    out.truncate(got);
     Ok(out)
 }
 
@@ -1041,12 +1055,24 @@ fn write_stream(storage: &IStorage, name: &str, bytes: &[u8]) -> Result<()> {
     let stream = unsafe {
         storage.CreateStream(PCWSTR(wide.as_ptr()), STGM(STGM_CREATE.0 | STGM_READWRITE.0 | STGM_SHARE_EXCLUSIVE.0), 0, 0)?
     };
-    let mut written = 0u32;
-    unsafe { stream.Write(bytes.as_ptr() as *const _, bytes.len() as u32, Some(&mut written)).ok()? };
-    if written as usize != bytes.len() {
-        return Err(E_FAIL.into());
-    }
+    write_whole(&stream, bytes)?;
     unsafe { stream.Commit(STGC_DEFAULT)? };
+    Ok(())
+}
+
+// All of the bytes written, for the same reason the read loops: a proxy may take fewer than
+// offered and expect the rest. A write that stops taking bytes without saying why is still a
+// failure — the drawing would be saved half-written — so it gives up rather than spinning.
+fn write_whole(stream: &IStream, bytes: &[u8]) -> Result<()> {
+    let mut sent = 0usize;
+    while sent < bytes.len() {
+        let mut written = 0u32;
+        unsafe { stream.Write(bytes[sent..].as_ptr() as *const _, (bytes.len() - sent) as u32, Some(&mut written)).ok()? };
+        if written == 0 {
+            return Err(E_FAIL.into());
+        }
+        sent += written as usize;
+    }
     Ok(())
 }
 
@@ -1113,6 +1139,7 @@ pub fn tell_window_closed(app: &AppHandle, label: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use windows::Win32::System::Com::{ISequentialStream_Impl, IStream_Impl, LOCKTYPE, STATFLAG, STGC, STREAM_SEEK};
 
     #[test]
     fn the_class_id_matches_the_one_written_into_an_object() {
@@ -1130,6 +1157,85 @@ mod tests {
         assert!(!embedding(args(&["octet.exe", "luminol.oct"])));
         // Not a file that merely reads like the switch.
         assert!(!embedding(args(&["octet.exe", "embedding.oct"])));
+    }
+
+    // A stream that hands over a few bytes at a time, the way a marshalled proxy does.
+    #[implement(IStream)]
+    struct Dribble {
+        bytes: RefCell<Vec<u8>>,
+        at: RefCell<usize>,
+        most: usize,
+    }
+
+    #[allow(non_snake_case)]
+    impl ISequentialStream_Impl for Dribble_Impl {
+        fn Read(&self, buffer: *mut core::ffi::c_void, want: u32, done: *mut u32) -> windows::core::HRESULT {
+            let (bytes, mut at) = (self.bytes.borrow(), self.at.borrow_mut());
+            let n = (bytes.len() - *at).min(want as usize).min(self.most);
+            unsafe {
+                std::ptr::copy_nonoverlapping(bytes[*at..].as_ptr(), buffer as *mut u8, n);
+                if !done.is_null() {
+                    *done = n as u32;
+                }
+            }
+            *at += n;
+            S_OK
+        }
+        fn Write(&self, buffer: *const core::ffi::c_void, have: u32, done: *mut u32) -> windows::core::HRESULT {
+            let n = (have as usize).min(self.most);
+            let mut bytes = self.bytes.borrow_mut();
+            unsafe {
+                bytes.extend_from_slice(std::slice::from_raw_parts(buffer as *const u8, n));
+                if !done.is_null() {
+                    *done = n as u32;
+                }
+            }
+            S_OK
+        }
+    }
+
+    #[allow(non_snake_case)]
+    impl IStream_Impl for Dribble_Impl {
+        fn Seek(&self, _: i64, _: STREAM_SEEK, _: *mut u64) -> Result<()> { Ok(()) }
+        fn SetSize(&self, _: u64) -> Result<()> { Ok(()) }
+        fn CopyTo(&self, _: Ref<IStream>, _: u64, _: *mut u64, _: *mut u64) -> Result<()> { Err(E_NOTIMPL.into()) }
+        fn Commit(&self, _: &STGC) -> Result<()> { Ok(()) }
+        fn Revert(&self) -> Result<()> { Ok(()) }
+        fn LockRegion(&self, _: u64, _: u64, _: &LOCKTYPE) -> Result<()> { Err(E_NOTIMPL.into()) }
+        fn UnlockRegion(&self, _: u64, _: u64, _: u32) -> Result<()> { Err(E_NOTIMPL.into()) }
+        fn Stat(&self, out: *mut STATSTG, _: &STATFLAG) -> Result<()> {
+            unsafe { (*out).cbSize = self.bytes.borrow().len() as u64 };
+            Ok(())
+        }
+        fn Clone(&self) -> Result<IStream> { Err(E_NOTIMPL.into()) }
+    }
+
+    // A stream is read and written to the end, however little it gives at a time.
+    //
+    // IStream::Read may return fewer bytes than asked for with more still to come, and Write
+    // may take fewer than offered. The stream a host hands an out-of-process server is a
+    // marshalled proxy, so a large drawing really does arrive in chunks. Reading once would
+    // load a truncated drawing and writing once would save half of one — faults that appear
+    // only on somebody's biggest file, and only on the real cross-process path, which no
+    // bench of ours exercises.
+    #[test]
+    fn a_stream_is_read_and_written_whole_however_little_it_gives_at_a_time() {
+        let drawing: Vec<u8> = (0..5_000u32).map(|i| (i % 251) as u8).collect();
+        for most in [1, 7, 4096, usize::MAX] {
+            let source = Dribble { bytes: RefCell::new(drawing.clone()), at: RefCell::new(0), most };
+            let back = read_whole(&source.into(), drawing.len()).unwrap();
+            assert_eq!(back, drawing, "{most} bytes at a time: read {} of {}", back.len(), drawing.len());
+
+            let sink = ComObject::new(Dribble { bytes: RefCell::new(Vec::new()), at: RefCell::new(0), most });
+            write_whole(&sink.to_interface(), &drawing).unwrap();
+            assert_eq!(*sink.get().bytes.borrow(), drawing, "{most} bytes at a time: wrote it all, in order");
+        }
+        // A stream that takes nothing gives up instead of spinning for ever.
+        let stuck = Dribble { bytes: RefCell::new(Vec::new()), at: RefCell::new(0), most: 0 };
+        assert!(write_whole(&stuck.into(), b"a drawing").is_err(), "a write that takes nothing is a failure");
+        // And one that gives nothing returns what it had rather than a buffer of zeros.
+        let empty = Dribble { bytes: RefCell::new(Vec::new()), at: RefCell::new(0), most: 0 };
+        assert!(read_whole(&empty.into(), 9).unwrap().is_empty(), "a read that gives nothing is not nine zero bytes");
     }
 
     #[test]
