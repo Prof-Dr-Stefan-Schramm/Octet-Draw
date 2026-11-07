@@ -4,10 +4,12 @@
 // - Structures drawn in perspective (perspective.mjs) and π complexes (organometallics.mjs), worked out from geometry.
 //   A hexose's or Fischer projection's stereocentres are placed each way, and the build keeps the way whose InChI is
 //   the named compound's.
-// - The Lab group (glassware and lamps) is drawn in lab.mjs.
+// - The Lab group (glassware and lamps) is drawn in lab.mjs, and the Photochemistry group (transitions and
+//   Jablonski diagrams) in photochemistry.mjs.
 // Nothing comes from another program's files.
 import { readFileSync, writeFileSync } from "node:fs";
 import { LAB, TLC } from "./lab.mjs";
+import { PHOTOCHEMISTRY } from "./photochemistry.mjs";
 import { conformers, cube, fischerWays, FRUCTOSES, hexose, HEXOSES, paddlewheel, PADDLEWHEELS, stereocentres } from "./perspective.mjs";
 import { clashes } from "./clashes.mjs";
 import { CP_RINGS, DPPF, METALLOCENES } from "./organometallics.mjs";
@@ -271,6 +273,7 @@ out.push({ name: "Cp and arene rings", items: CP_RINGS });
 out.push({ name: "Metallocenes", items: METALLOCENES });
 out.push({ name: "Paddlewheels", items: PADDLEWHEELS.map(([name, metal, r, more]) => entry(name, more.also, { mol: paddlewheel(metal, r, more) })) });
 out.push({ name: "Lab", items: [...LAB, TLC] });
+out.push({ name: "Photochemistry", items: PHOTOCHEMISTRY });
 
 const names = out.flatMap((c) => c.items.map((t) => t.name));
 const twice = names.filter((n, k) => names.indexOf(n) !== k);

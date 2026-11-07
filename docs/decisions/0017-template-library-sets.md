@@ -36,7 +36,7 @@ What each ChemDraw set holds, and how it draws a Newman projection or a Cp ring,
 The library has 292 templates in 16 sets: Amino acids 20, Sugars 8, Hexoses 16, Nucleobases 5, Stereocentres 18,
 Conformers 12, Cycloalkanes 17, Aromatics 25, Bicyclics 24, Heterocycles 29, Functional groups 44, Ligands 33, Cp and
 arene rings 6, Metallocenes 11, Paddlewheels 8, Lab 16. Polycyclics is split into Aromatics and Bicyclics.
-`tools/library/build.mjs` builds them all.
+`tools/library/build.mjs` builds them all. A 17th set, Photochemistry, was added by decision 0023.
 
 - Structures with a name are drawn from it (OPSIN, then Indigo's layout), as before. Where Indigo's layout runs a bond
   through a label (a porphyrin's NH), Octet's Clean Up lays it out again: porphyrin, H2TPP, phthalocyanine and XPhos.
