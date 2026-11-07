@@ -28,6 +28,17 @@
 // thread's queue, so the calls arrive one at a time and in order, and the objects can hold
 // plain `RefCell` state and the host's own interface pointers.
 //
+// That only holds because every object a host is given says `Agile = false`. windows-rs makes
+// an implemented object agile by default: it answers IAgileObject and hands out an IMarshal
+// that marshals it to any apartment, which tells COM the object is safe to call anywhere, so
+// calls are delivered on RPC worker threads instead of here. This was written that way at
+// first and it broke quietly in both directions: the `RefCell` state was touched by two
+// threads at once, and a pointer the host passed in — IOleClientSite — belonged to the RPC
+// thread that passed it, so calling it back from here failed with RPC_E_WRONG_THREAD
+// (0x8001010E). In Word that looked like a page that never redrew after an edit: SaveObject
+// answered that error, so Word never called IPersistStorage::Save and never re-fetched the
+// picture.
+//
 // Registering the class from Tauri's main thread instead does not work, and does not fail
 // loudly either: that thread is not an STA, so COM treats Octet as a free-threaded server
 // and delivers calls on RPC worker threads, several at once. The first attempt did that, and
@@ -328,7 +339,7 @@ fn finish(edit: u64) {
 // The class factory
 // ---------------------------------------------------------------------------------------
 
-#[implement(IClassFactory)]
+#[implement(Agile = false, IClassFactory)]
 struct Factory {
     app: AppHandle,
 }
@@ -378,7 +389,7 @@ struct State {
     extent: Option<SIZE>,   // a size the host set, in HIMETRIC
 }
 
-#[implement(windows::Win32::System::Ole::IOleObject, windows::Win32::System::Com::StructuredStorage::IPersistStorage, IDataObject)]
+#[implement(Agile = false, windows::Win32::System::Ole::IOleObject, windows::Win32::System::Com::StructuredStorage::IPersistStorage, IDataObject)]
 struct Drawing {
     app: AppHandle,
     edit: u64,
@@ -950,7 +961,7 @@ impl IDataObject_Impl for Drawing_Impl {
 }
 
 // The one format Octet offers, as an enumerator, because IDataObject has to have one.
-#[implement(IEnumFORMATETC)]
+#[implement(Agile = false, IEnumFORMATETC)]
 struct Formats {
     next: RefCell<u32>,
 }
@@ -1139,6 +1150,7 @@ pub fn tell_window_closed(app: &AppHandle, label: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use windows::Win32::Foundation::E_NOINTERFACE;
     use windows::Win32::System::Com::{ISequentialStream_Impl, IStream_Impl, LOCKTYPE, STATFLAG, STGC, STREAM_SEEK};
 
     #[test]
@@ -1146,6 +1158,43 @@ mod tests {
         // ole.rs writes the sixteen bytes; COM wants them as a GUID. The two must agree, or
         // a document would hold a class id no server answers for.
         assert_eq!(format!("{{{:?}}}", guid()).to_uppercase(), ole::guid_string(ole::CLSID));
+    }
+
+    // COM asks an object whether it is agile by asking it for this interface. Nothing else
+    // names it: windows-rs keeps its own copy private, so the id is written out here.
+    const IID_IAGILEOBJECT: GUID = GUID::from_u128(0x94ea_2b94_e9cc_49e0_c0ff_ee64_ca8f_5b90);
+
+    #[test]
+    fn an_object_a_host_is_given_is_bound_to_the_apartment() {
+        // An agile object is one COM may call on any thread, so it stops marshalling calls
+        // into the apartment and delivers them on RPC workers instead. Then two threads share
+        // the objects' RefCell state, and a pointer the host hands in belongs to the thread it
+        // came in on: calling it back from the apartment fails with RPC_E_WRONG_THREAD. Word
+        // showed that as a page that never redrew after an edit.
+        //
+        // windows-rs makes an implemented object agile unless it is told not to, so this is
+        // the one question these objects have to answer no to.
+        let object: IUnknown = ComObject::new(Formats { next: RefCell::new(0) }).into_interface();
+        let mut agile = std::ptr::null_mut();
+        let answer = unsafe { object.query(&IID_IAGILEOBJECT, &mut agile) };
+        assert_eq!(answer, E_NOINTERFACE, "an object a host holds must not call itself agile");
+        assert!(agile.is_null());
+    }
+
+    #[test]
+    fn every_object_a_host_is_given_says_so() {
+        // Drawing and Factory need a running Tauri app to make, so they cannot be asked the
+        // way Formats is above. What can be checked is that nothing in here is implemented
+        // without saying which apartment it belongs to: the default is the wrong one, and it
+        // fails quietly.
+        let source = include_str!("ole_server.rs");
+        let plain: Vec<&str> = source
+            .lines()
+            .map(str::trim)
+            .filter(|line| line.starts_with("#[implement(") && !line.contains("Agile ="))
+            .collect();
+        // The one exception is the test stream below, which never leaves this process.
+        assert_eq!(plain, ["#[implement(IStream)]"], "every COM object a host sees needs Agile = false");
     }
 
     #[test]
