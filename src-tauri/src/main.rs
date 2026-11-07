@@ -22,7 +22,10 @@ mod export;
 #[cfg(feedback)]
 mod feedback;
 mod home;
-#[cfg(windows)]
+// Not Windows-only: ole.rs builds the bytes of an embedded object, and clipboard.rs builds
+// the Windows clipboard's formats on every platform — its check compares what each system
+// would get, so the Linux and Mac builds have to be able to make them too. Only the registry
+// half of ole.rs is Windows-only, and it says so itself.
 mod ole;
 #[cfg(windows)]
 mod ole_server;

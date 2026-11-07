@@ -252,6 +252,7 @@ pub fn registration(exe: &str) -> Vec<(String, Option<&'static str>, String)> {
 /// found, and an embedded object unopenable.
 ///
 /// Registering must never stop Octet starting, so the caller logs the error and carries on.
+#[cfg(windows)]
 pub fn register(exe: &str) -> Result<(), String> {
     write_registration(&classes_key()?, exe)
 }
@@ -259,10 +260,12 @@ pub fn register(exe: &str) -> Result<(), String> {
 /// Takes the registration away again: the three trees `register` writes, and nothing else.
 /// The uninstaller's half of `register`; nothing in the running app calls it.
 #[allow(dead_code)]
+#[cfg(windows)]
 pub fn unregister() -> Result<(), String> {
     remove_registration(&classes_key()?)
 }
 
+#[cfg(windows)]
 fn classes_key() -> Result<windows_registry::Key, String> {
     windows_registry::CURRENT_USER
         .create(r"Software\Classes")
@@ -271,6 +274,7 @@ fn classes_key() -> Result<windows_registry::Key, String> {
 
 // The two halves, against any root key, so a test can use a scratch one instead of the
 // live class registration.
+#[cfg(windows)]
 fn write_registration(root: &windows_registry::Key, exe: &str) -> Result<(), String> {
     for (subkey, name, data) in registration(exe) {
         let key = root.create(&subkey).map_err(|why| format!("{subkey}: {why}"))?;
@@ -279,6 +283,7 @@ fn write_registration(root: &windows_registry::Key, exe: &str) -> Result<(), Str
     Ok(())
 }
 
+#[cfg(windows)]
 fn remove_registration(root: &windows_registry::Key) -> Result<(), String> {
     for tree in [format!(r"CLSID\{}", guid_string(CLSID)), PROGID.to_string(), "OctetDraw.Drawing".to_string()] {
         if let Err(why) = root.remove_tree(&tree) {
@@ -405,6 +410,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(windows)]
     fn the_registration_is_written_and_taken_away_again() {
         // Against a scratch key, never the live class registration, so running the tests
         // cannot break an Octet that is installed on the same computer.
