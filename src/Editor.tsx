@@ -393,7 +393,9 @@ const OCTET_CLIP = "application/x-octet+json";
 type OpenedFile = { name: string; path: string | null; text: string | null; picture: string | null; error: string | null; at: [number, number] | null };
 // What a new drawing window opens: a new drawing for a purpose, the tutorial, a recent or recovered drawing, an example
 // drawing's text, a file picked in Open, or files Octet was asked to open.
-type Start = { new: string } | { tutorial: true } | { recent: string } | { recovered: string } | { text: string } | { picked: [string, string] } | { files: OpenedFile[] };
+type Start = { new: string } | { tutorial: true } | { recent: string } | { recovered: string } | { text: string } | { picked: [string, string] } | { files: OpenedFile[] }
+  // A drawing embedded in a Word or PowerPoint document, opened by a double click there (src-tauri/src/ole_server.rs).
+  | { embedded: { edit: number; text: string } };
 // Abbreviations Contract Label recognises, each with its InChI when capped with xenon at its attachment point
 // (worked out once, on first use): the groups chemists name, and condensed formulas they write.
 const CONTRACTED = ["OMe", "OEt", "OiPr", "OtBu", "OAc", "OBz", "OBn", "OPh", "OTs", "OMs", "OTf", "OTBS", "OTIPS", "OTBDPS", "OTMS", "OMOM", "OTHP", "OPMB",
@@ -1034,6 +1036,12 @@ export default function Editor() {
     if (back) setHover({ ...back, key: true });
   };
   const [file, setFile] = useState<FileState>(() => rescue.current?.file ?? { saved: EMPTY });
+  // Set when this window is editing a drawing embedded in another program's document
+  // (Windows, issue 24): the edit's number, which the app uses to hand the drawing back to
+  // the host. Save then goes to the document, not to a file, and the drawing has no path.
+  const [embedded, setEmbedded] = useState<number | undefined>(undefined);
+  const embeddedEdit = useRef<number | undefined>(undefined);
+  embeddedEdit.current = embedded;
   // Home (decision 0003): where Octet opens (?editor skips it, for tests), with the name box on first launch and the
   // tutorial then, or from Help > Tutorial. Recent drawings come from the app (src-tauri/src/recent.rs), and drawings
   // a crash took from src-tauri/src/recovery.rs.
@@ -1165,7 +1173,13 @@ export default function Editor() {
   }, [doc]);
 
   const name = file.path?.split(/[\\/]/).pop()?.replace(/\.(octet|oct|cdxml)$/i, "") ?? file.name ?? "Untitled";
-  useEffect(() => { if (TAURI) getCurrentWindow().setTitle(home ? "Octet Draw" : dirty ? `${name} (edited)` : name); }, [name, dirty, home]);
+  useEffect(() => {
+    if (!TAURI) return;
+    // A drawing being edited inside another program's document has no file of its own, so
+    // the title says so rather than showing "Untitled" (issue 24).
+    const shown = embedded !== undefined ? "Drawing in a document" : home ? "Octet Draw" : name;
+    getCurrentWindow().setTitle(embedded === undefined && home ? shown : dirty ? `${shown} (edited)` : shown);
+  }, [name, dirty, home, embedded]);
 
   // A picture of part of the drawing (or all of it) as a standalone SVG at true size: the canvas shows only that part
   // for a moment (nothing is painted in between), and the picture is cut to the ink of what it draws.
@@ -1331,6 +1345,10 @@ export default function Editor() {
   // could not hold (REL-11), Save asks too: Save As keeps the original file, Replace writes over it. anyway: the first
   // question was answered.
   async function save(as: boolean, replace = false, anyway = false): Promise<boolean> {
+    // A drawing embedded in a Word or PowerPoint document is saved into the document, which
+    // is where it lives: the host writes it, and the picture on its page changes with it
+    // (issue 24). Save As still writes a file, so a drawing can be taken out of a document.
+    if (embedded !== undefined && !as) return handBack();
     if (!as && !anyway && file.path && TAURI && await invoke<boolean>("file_changed", { path: file.path }).catch(() => false))
       return new Promise((done) => setDialog({ kind: "changed", done }));
     if (!as && !replace && file.path && file.lost) {
@@ -1350,6 +1368,32 @@ export default function Editor() {
       return false;
     }
   }
+  // Gives an embedded drawing back to the document it came from: the drawing itself, and a
+  // picture of it, which the app turns into the metafile the page shows
+  // (src-tauri/src/ole_server.rs embedded_save). closing: the last handback of this edit.
+  async function handBack(): Promise<boolean> {
+    const edit = embeddedEdit.current;
+    if (edit === undefined) return false;
+    try {
+      const text = formatOf(doc, "oct");
+      if (!text) throw new Error("Octet cannot write this drawing.");
+      await invoke("embedded_save", { edit, text, picture: pictureOf(doc) ?? "", closing: false });
+      setFile((f) => ({ ...f, saved: doc }));
+      return true;
+    } catch (e) {
+      setNotice(failure("Octet cannot put this drawing back in the document.", e));
+      return false;
+    }
+  }
+  // The edit is over: the host takes its object back and the window closes. No drawing goes
+  // with it, so Don't Save leaves the document exactly as it was — whatever the last
+  // handBack sent is what the document keeps.
+  const endEdit = async () => {
+    const edit = embeddedEdit.current;
+    embeddedEdit.current = undefined;
+    if (edit === undefined) return;
+    await invoke("embedded_save", { edit, text: "", picture: "", closing: true }).catch(() => {});
+  };
   // Before the drawing is replaced (New, Open, a recent drawing) or the window closes: with unsaved changes, ask to
   // save them first. stay: what runs when the drawing stays (Cancel, or a save that did not happen).
   // While a template is open on the canvas, nothing replaces the drawing: the template is saved or cancelled first.
@@ -1372,7 +1416,8 @@ export default function Editor() {
   // Octet is never left running with no window. On the Mac the window closes and Octet stays open, as a Mac app does.
   // Quit (and a quit from outside Octet) still closes each window. With Home showing (and in one window, Settings >
   // windows off) the window closes, so the close button always closes it in the end.
-  const closeDrawing = () => MAC || home ? closeWindow() : DRAW_WINDOW ? leave(() => invoke("close_window", { home: true })) : leave(async () => {
+  const closeDrawing = () => embedded !== undefined ? leave(async () => { await endEdit(); return invoke("close_window"); })
+    : MAC || home ? closeWindow() : DRAW_WINDOW ? leave(() => invoke("close_window", { home: true })) : leave(async () => {
     const fresh = set(EMPTY);
     setFile({ saved: fresh }); setHome(true); setOverDrawing(false); setCoach(0);
   });
@@ -2601,11 +2646,20 @@ export default function Editor() {
       else if ("tutorial" in s) startTutorial();
       else if ("recent" in s) openRecent({ path: s.recent });
       else if ("recovered" in s) openRecovered({ id: s.recovered, name: "", at: 0 });
+      else if ("embedded" in s) { setEmbedded(s.embedded.edit); load(undefined, s.embedded.text || EMPTY); }
       else if ("text" in s) load(undefined, s.text);
       else if ("picked" in s) openPicked(s.picked);
       else await takeFiles(s.files, false);
     }).catch((e) => setNotice(failure("Octet cannot open this drawing.", e)));
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  // Word or PowerPoint has taken its object back: the document was closed, or the object
+  // deleted. The edit is over, so the window must not try to hand anything back as it goes
+  // (src-tauri/src/ole_server.rs Close, which destroys the window straight after this).
+  useEffect(() => {
+    if (!DRAW_WINDOW) return;
+    const off = listen("embedded-closed", () => { embeddedEdit.current = undefined; setEmbedded(undefined); });
+    return () => { off.then((f) => f()); };
+  }, []);
   // File > Home in a drawing window: Home over this window's drawing (src-tauri/src/windows.rs show_home).
   useEffect(() => {
     if (!HOME_WINDOW) return;

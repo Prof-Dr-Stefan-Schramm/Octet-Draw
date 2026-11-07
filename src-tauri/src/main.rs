@@ -24,6 +24,8 @@ mod feedback;
 mod home;
 #[cfg(windows)]
 mod ole;
+#[cfg(windows)]
+mod ole_server;
 mod open;
 mod pubchem;
 mod quit;
@@ -965,10 +967,23 @@ fn main() {
     let builder = tauri::Builder::default();
     // Windows and Linux start a second Octet for each file opened from Explorer or a file manager. It gives its files
     // to the Octet that runs, and ends. (On the Mac the system sends them to the running Octet itself.)
+    // Except for a launch Windows made to serve an embedded object (issue #24). The plugin
+    // ends a second Octet once it has handed its files over, and COM expects the process it
+    // started with -Embedding to stay and offer the class: ended, the double-click gets
+    // nothing and Word says the server is not there. An Octet already running usually serves
+    // the double-click itself and no second one is started, but when one is, it must live.
+    #[cfg(windows)]
+    let one_only = !ole_server::embedding(std::env::args_os());
+    #[cfg(target_os = "linux")]
+    let one_only = true;
     #[cfg(any(windows, target_os = "linux"))]
-    let builder = builder.plugin(tauri_plugin_single_instance::init(|app, args, cwd| {
-        open::offer(app, open::from_args(args.into_iter().map(std::ffi::OsString::from), Path::new(&cwd)), None)
-    }));
+    let builder = if one_only {
+        builder.plugin(tauri_plugin_single_instance::init(|app, args, cwd| {
+            open::offer(app, open::from_args(args.into_iter().map(std::ffi::OsString::from), Path::new(&cwd)), None)
+        }))
+    } else {
+        builder
+    };
     builder
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
@@ -988,20 +1003,38 @@ fn main() {
         .manage(TextLists::default())
         .manage(Purposes::default())
         .manage(TemplateSets::default())
-        .invoke_handler(tauri::generate_handler![recent::recent_list, recent::recent_thumb, recent::recent_remove, recent::open_recent, file_changed, recent::experiment_note, recent::experiment_list, recent::experiment_remove, home::home_read, home::home_write, home::home_pick_drawings, home::home_pick_picture, home::thumb_save, home::thumb_load, home::thumb_drop, revert_drawing, menu_items, set_menu_keys, set_online_search, search::search_online, pubchem::pubchem_structure, open_link, open_licences, reveal_file, open_drawing, pick_style_file, save_drawing, set_check, set_palette, set_text_lists, set_purposes, set_template_sets, import_structure, print_page, clipboard::copy_to_clipboard, clipboard::read_clipboard, export::export_file, export::system_fonts, #[cfg(feedback)] feedback::snapshot, #[cfg(feedback)] feedback::send_feedback, update::update_check, update::update_install, recovery::recovery_write, recovery::recovery_clear, recovery::recovery_list, recovery::recovery_open, recovery::recovery_discard, crashlog::log_error, crashlog::crash_report, crashlog::show_log, quit::set_edited, quit::quit_answer, open::take_opened, windows::open_window, windows::close_window, windows::window_start, windows::window_info, windows::window_empty, windows::window_list, windows::window_show, windows::show_home])
+        .invoke_handler(tauri::generate_handler![recent::recent_list, recent::recent_thumb, recent::recent_remove, recent::open_recent, file_changed, recent::experiment_note, recent::experiment_list, recent::experiment_remove, home::home_read, home::home_write, home::home_pick_drawings, home::home_pick_picture, home::thumb_save, home::thumb_load, home::thumb_drop, revert_drawing, menu_items, set_menu_keys, set_online_search, search::search_online, pubchem::pubchem_structure, open_link, open_licences, reveal_file, open_drawing, pick_style_file, save_drawing, set_check, set_palette, set_text_lists, set_purposes, set_template_sets, import_structure, print_page, clipboard::copy_to_clipboard, clipboard::read_clipboard, #[cfg(windows)] ole_server::embedded_save, export::export_file, export::system_fonts, #[cfg(feedback)] feedback::snapshot, #[cfg(feedback)] feedback::send_feedback, update::update_check, update::update_install, recovery::recovery_write, recovery::recovery_clear, recovery::recovery_list, recovery::recovery_open, recovery::recovery_discard, crashlog::log_error, crashlog::crash_report, crashlog::show_log, quit::set_edited, quit::quit_answer, open::take_opened, windows::open_window, windows::close_window, windows::window_start, windows::window_info, windows::window_empty, windows::window_list, windows::window_show, windows::show_home])
         .setup(|app| {
             let handle = app.handle();
             // Files named when Octet starts (Explorer and file managers pass them as arguments).
             let cwd = std::env::current_dir().unwrap_or_default();
             open::offer(handle, open::from_args(std::env::args_os(), &cwd), None);
             crashlog::install(handle);
-            // Octet's class registration, so a drawing embedded in Word can be opened again
-            // (issue #24). Written at every start, so the path is right after an update or a
-            // move. It must never stop Octet starting, so a failure is only logged.
+            // Octet as the server for a drawing embedded in Word or PowerPoint (issue #24).
+            //
+            // The registration is written at every start, so LocalServer32 names the right
+            // file after an update or a move, and the class is offered at every start, not
+            // only with -Embedding, so an Octet that is already running serves a
+            // double-click itself instead of Windows starting a second copy. Neither may
+            // stop Octet starting, so a failure is only logged.
+            //
+            // A launch with -Embedding is Windows asking for a server, not a person opening
+            // Octet, so Home stays hidden: the only window the user should see is the one
+            // the drawing opens in.
             #[cfg(windows)]
-            if let Ok(exe) = std::env::current_exe() {
-                if let Err(why) = ole::register(&exe.to_string_lossy()) {
-                    eprintln!("octet: could not register the drawing class: {why}");
+            {
+                if let Ok(exe) = std::env::current_exe() {
+                    if let Err(why) = ole::register(&exe.to_string_lossy()) {
+                        eprintln!("octet: cannot register the drawing class: {why}");
+                    }
+                }
+                if let Err(why) = ole_server::offer_class(handle) {
+                    eprintln!("octet: cannot offer the drawing class: {why}");
+                }
+                if ole_server::embedding(std::env::args_os()) {
+                    if let Some(home) = app.get_webview_window("main") {
+                        let _ = home.hide();
+                    }
                 }
             }
             #[cfg(feature = "smoke")]
@@ -1075,6 +1108,11 @@ fn main() {
                 quit::closed(_app, &label);
             }
             tauri::RunEvent::ExitRequested { api, .. } if quit::ending() => api.prevent_exit(),
+            // Octet's class goes back to COM as Octet ends, so Windows does not hand a host
+            // a factory in a process that is on its way out (#24). On the thread that
+            // offered it, which is this one.
+            #[cfg(windows)]
+            tauri::RunEvent::Exit => ole_server::withdraw_class(),
             _ => {}
         });
 }

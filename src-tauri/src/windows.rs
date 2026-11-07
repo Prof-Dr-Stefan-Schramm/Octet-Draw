@@ -79,17 +79,26 @@ fn changed(app: &AppHandle) {
 // The commands that make or show windows are async: on Windows, making a window in a synchronous command (which runs
 // on the main thread) deadlocks, and the app hangs with a white window.
 #[tauri::command]
-pub async fn open_window(app: AppHandle, windows: State<'_, Windows>, start: serde_json::Value) -> Result<(), String> {
+pub async fn open_window(app: AppHandle, start: serde_json::Value) -> Result<(), String> {
+    new_drawing_window(&app, start).await.map(|_| ())
+}
+
+// The same, for Rust to call, giving back the new window's label. An embedded drawing opened
+// from Word comes through here too (ole_server.rs), and needs to know which window has it.
+//
+// Must not be called from the main thread: see the note above.
+pub async fn new_drawing_window(app: &AppHandle, start: serde_json::Value) -> Result<String, String> {
     if start.to_string().len() as u64 > MAX_BYTES + 4096 {
         return Err("This drawing is larger than 64 MB. Octet cannot open it.".into());
     }
+    let windows = app.state::<Windows>();
     let label = format!("draw-{}", NEXT.fetch_add(1, Ordering::Relaxed));
     windows.starts.lock().unwrap().insert(label.clone(), start);
-    let mut builder = WebviewWindowBuilder::new(&app, &label, WebviewUrl::App("index.html?window".into()))
+    let mut builder = WebviewWindowBuilder::new(app, &label, WebviewUrl::App("index.html?window".into()))
         .title("Octet Draw")
         .inner_size(1200.0, 800.0)
         .min_inner_size(800.0, 620.0);
-    let from = front(&app).and_then(|l| app.get_webview_window(&l));
+    let from = front(app).and_then(|l| app.get_webview_window(&l));
     if let Some((pos, scale)) = from.and_then(|w| Some((w.outer_position().ok()?, w.scale_factor().ok()?))) {
         let pos = pos.to_logical::<f64>(scale);
         builder = builder.position(pos.x + 28.0, pos.y + 28.0);
@@ -103,7 +112,7 @@ pub async fn open_window(app: AppHandle, windows: State<'_, Windows>, start: ser
     #[cfg(windows)]
     crate::access_keys::install(&window);
     let _ = window.set_focus();
-    Ok(())
+    Ok(label)
 }
 
 // Close closes the window. On Windows and Linux the menu bar comes off first. On Linux, muda keeps each GTK window's

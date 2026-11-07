@@ -36,7 +36,14 @@ pub const CLSID: [u8; 16] = [
 ];
 pub const PROGID: &str = "OctetDraw.Drawing.1";
 pub const USER_TYPE: &str = "Octet Draw Drawing";
+// The clipboard format, aspect, medium and direction an embedded drawing is offered on, the
+// numbers the registration and the presentation stream both need (wingdi.h, objidl.h).
 const CF_ENHMETAFILE: u32 = 14;
+const CF_METAFILEPICT: u32 = 3;
+const DVASPECT_CONTENT: u32 = 1;
+const TYMED_ENHMF: u32 = 64;
+const TYMED_MFPICT: u32 = 32;
+const DATADIR_GET: u32 = 1;
 
 // A length-prefixed ANSI string as the CompObj stream wants it: the byte count including
 // the terminator, then the bytes, then the terminator.
@@ -93,7 +100,7 @@ fn presentation(emf: &[u8], w: i32, h: i32) -> Vec<u8> {
     v.extend_from_slice(&0xffff_ffffu32.to_le_bytes()); // a standard format follows, not a name
     v.extend_from_slice(&CF_ENHMETAFILE.to_le_bytes());
     v.extend_from_slice(&4u32.to_le_bytes()); // TargetDeviceSize: none
-    v.extend_from_slice(&1u32.to_le_bytes()); // Aspect: DVASPECT_CONTENT
+    v.extend_from_slice(&DVASPECT_CONTENT.to_le_bytes()); // Aspect
     v.extend_from_slice(&(-1i32).to_le_bytes()); // Lindex
     v.extend_from_slice(&0u32.to_le_bytes()); // Advf
     v.extend_from_slice(&0u32.to_le_bytes()); // Reserved1
@@ -104,19 +111,32 @@ fn presentation(emf: &[u8], w: i32, h: i32) -> Vec<u8> {
     v
 }
 
-/// The "Embed Source" format: the whole object as a compound file.
+/// The name of the stream Octet keeps its own drawing in.
+pub const CONTENTS: &str = "CONTENTS";
+
+/// The four streams an embedded Octet drawing is made of, in the order they are written.
 ///
 /// `drawing` is what Octet needs to open it again (the bytes of a .oct), and `emf` is the
 /// picture the document shows until Octet is asked to edit it. `w` and `h` are HIMETRIC.
-pub fn embed_source(drawing: &[u8], emf: &[u8], w: i32, h: i32) -> Result<Vec<u8>, String> {
-    let mut file = cfb::CompoundFile::create(Cursor::new(Vec::new())).map_err(|e| e.to_string())?;
-    file.set_storage_clsid("/", uuid_of(CLSID)).map_err(|e| e.to_string())?;
-    for (name, bytes) in [
+///
+/// Both ways of handing over an object use this: the clipboard, which puts the streams in a
+/// compound file of its own (`embed_source`), and the server, which writes them into the
+/// storage the host gives it (`ole_server`). They have to agree, or a drawing pasted into
+/// Word and a drawing saved from Word would not be the same object.
+pub fn streams(drawing: &[u8], emf: &[u8], w: i32, h: i32) -> Vec<(&'static str, Vec<u8>)> {
+    vec![
         ("\u{1}CompObj", comp_obj()),
         ("\u{1}Ole", ole_stream()),
         ("\u{2}OlePres000", presentation(emf, w, h)),
-        ("CONTENTS", drawing.to_vec()),
-    ] {
+        (CONTENTS, drawing.to_vec()),
+    ]
+}
+
+/// The "Embed Source" format: the whole object as a compound file.
+pub fn embed_source(drawing: &[u8], emf: &[u8], w: i32, h: i32) -> Result<Vec<u8>, String> {
+    let mut file = cfb::CompoundFile::create(Cursor::new(Vec::new())).map_err(|e| e.to_string())?;
+    file.set_storage_clsid("/", uuid_of(CLSID)).map_err(|e| e.to_string())?;
+    for (name, bytes) in streams(drawing, emf, w, h) {
         let mut s = file.create_stream(name).map_err(|e| e.to_string())?;
         s.write_all(&bytes).map_err(|e| e.to_string())?;
         s.flush().map_err(|e| e.to_string())?;
@@ -192,10 +212,26 @@ pub fn registration(exe: &str) -> Vec<(String, Option<&'static str>, String)> {
         // and the verb may be run on an object that is not already active.
         (format!("{clsid}\\Verb\\0"), None, "&Edit,0,2".to_string()),
         (format!("{clsid}\\Verb\\1"), None, "&Open,0,2".to_string()),
-        // What the object can give a host: an enhanced metafile of its content.
-        (format!("{clsid}\\DataFormats\\GetSet\\0"), None, "14,1,32,1".to_string()),
-        // No OLEMISC flags: Octet edits in its own window, as ChemDraw does, not in place.
-        (format!("{clsid}\\MiscStatus"), None, "0".to_string()),
+        // What the object can give a host, as format,aspect,medium,direction: an enhanced
+        // metafile (CF_ENHMETAFILE) of its content (DVASPECT_CONTENT) on an enhanced
+        // metafile handle (TYMED_ENHMF), which the object can give but not take.
+        //
+        // The medium has to be TYMED_ENHMF, 64. It said 32 — TYMED_GDI, a bitmap handle —
+        // and that one wrong number was enough: Word read this entry, asked GetData for a
+        // metafile on a bitmap medium, got DV_E_FORMATETC because that is not a medium Octet
+        // has, and refused to insert the object at all, reporting only "command failed".
+        (
+            format!("{clsid}\\DataFormats\\GetSet\\0"),
+            None,
+            format!("{CF_ENHMETAFILE},{DVASPECT_CONTENT},{TYMED_ENHMF},{DATADIR_GET}"),
+        ),
+        // And the old Windows metafile, which is the one a host's cache actually asks for.
+        (
+            format!("{clsid}\\DataFormats\\GetSet\\1"),
+            None,
+            format!("{CF_METAFILEPICT},{DVASPECT_CONTENT},{TYMED_MFPICT},{DATADIR_GET}"),
+        ),
+        (format!("{clsid}\\DataFormats\\DefaultFile"), None, format!("{CF_METAFILEPICT}")),
         // The ProgID side, so Insert > Object can find the class by name.
         (PROGID.to_string(), None, USER_TYPE.to_string()),
         (format!("{PROGID}\\CLSID"), None, guid.clone()),
@@ -212,8 +248,8 @@ pub fn registration(exe: &str) -> Vec<(String, Option<&'static str>, String)> {
 /// Under `HKEY_CURRENT_USER\Software\Classes`: no administrator, no installer, and
 /// `unregister` takes it away again. Written at every start rather than once at install
 /// time, so `LocalServer32` still names the right file after Octet is moved, renamed or
-/// updated — a stale path there is the "the server application could not be found" that
-/// makes an embedded object unopenable.
+/// updated. A stale path there is what makes Windows say the server application cannot be
+/// found, and an embedded object unopenable.
 ///
 /// Registering must never stop Octet starting, so the caller logs the error and carries on.
 pub fn register(exe: &str) -> Result<(), String> {
@@ -347,6 +383,25 @@ mod tests {
         let at = u32::from_le_bytes(d[44..48].try_into().unwrap()) as usize;
         let tail: Vec<u16> = d[at..].chunks(2).map(|c| u16::from_le_bytes([c[0], c[1]])).collect();
         assert_eq!(String::from_utf16_lossy(&tail).trim_end_matches('\0'), USER_TYPE);
+    }
+
+    #[test]
+    fn the_registration_offers_the_picture_on_a_medium_octet_can_give() {
+        let keys = registration(r"C:\Octet\octet.exe");
+        let (_, _, formats) = keys.iter().find(|(k, ..)| k.ends_with(r"DataFormats\GetSet\0")).expect("a data format");
+        // format, aspect, medium, direction. The medium is the one that matters: a metafile
+        // offered on a bitmap medium makes a host ask for something Octet has not got, and
+        // Word then refuses the object outright.
+        assert_eq!(formats, "14,1,64,1");
+        // And the old Windows metafile, on the medium that goes with it: this is the format
+        // Word's cache asks GetData for, and the object has to be able to give it.
+        let (_, _, old_style) = keys.iter().find(|(k, ..)| k.ends_with(r"DataFormats\GetSet\1")).expect("a second data format");
+        assert_eq!(old_style, "3,1,32,1");
+        // No MiscStatus: ChemDraw registers none either, and OLE reads no flags as none.
+        assert!(!keys.iter().any(|(k, ..)| k.ends_with("MiscStatus")), "no MiscStatus key");
+        // The verbs a host shows in the object's menu, and nothing else.
+        let verbs: Vec<&str> = keys.iter().filter(|(k, ..)| k.contains(r"\Verb\")).map(|(_, _, v)| v.as_str()).collect();
+        assert_eq!(verbs, ["&Edit,0,2", "&Open,0,2"]);
     }
 
     #[test]
