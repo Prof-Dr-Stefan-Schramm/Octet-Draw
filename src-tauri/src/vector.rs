@@ -338,6 +338,12 @@ pub fn make_eps(tree: &usvg::Tree) -> Vec<u8> {
 // 96 dpi ARE the frame, so both of Word's paths give the same answer and there is nothing to get wrong.
 // `an_emf_is_the_size_it_says_it_is` holds the two sizes together.
 //
+// The frame is written as the BOUNDS, not as the ink. Bounds are whole device px, so a drawing whose size is not a
+// whole number of them rounds up: at 96 dpi that is at most 0.75 pt an axis. Taking the frame from the ink instead
+// leaves the two a fraction of a pixel apart, and then the same drawing lands at one size with an atom label on it
+// and another without, because those are Word's two paths. Up to 0.75 pt of margin, always, beats up to 0.75 pt of
+// disagreement, sometimes. `frame_and_bounds_are_one_size` is that invariant.
+//
 // Issue 20 raised this to 720 because some programs draw a metafile into pixels at its reference resolution, and
 // GDI+'s DrawImage was said to do that at 96 dpi: bonds grew fat and a hashed wedge's hashes ran together. Measured
 // again on Windows 11 for issue 55, with thin bonds, a six-hash wedge and a double bond, GDI+ draws the 96 dpi and
@@ -464,11 +470,14 @@ const CDXML_TAG: &[u8] = b"Octet CDXML\0";
 // With `cdxml`, the drawing goes in an EMR_COMMENT after the header, which GDI and Office skip when they draw.
 pub fn make_emf(tree: &usvg::Tree, cdxml: Option<&str>) -> Vec<u8> {
     let (w, h) = size(tree);
-    // The picture in device px (whole ones, the logical units two to each), and its frame in hundredths of a mm.
+    // The picture in device px (whole ones, the logical units fifteen to each), and its frame in hundredths of a mm.
     let px = |pt: f32| (((pt * UNIT).ceil().max(1.0) as i32).saturating_add(PER_PX - 1)) / PER_PX;
     let (dw, dh) = (px(w), px(h));
     let (lw, lh) = (dw * PER_PX, dh * PER_PX);
-    let (fw, fh) = ((w * 2540.0 / 72.0).round() as i32, (h * 2540.0 / 72.0).round() as i32);
+    // The frame is those whole device px turned into hundredths of a mm at the reference device's own resolution,
+    // not the ink's own size: see `frame_and_bounds_are_one_size` for why the two have to be the same picture.
+    let mm100 = |px: i32, device: i32, mm: i32| (f64::from(px) * f64::from(mm) * 100.0 / f64::from(device)).round() as i32;
+    let (fw, fh) = (mm100(dw, DEVICE.0, DEVICE_MM.0), mm100(dh, DEVICE.1, DEVICE_MM.1));
     let mut e = Emf { out: Vec::new(), records: 0 };
     // EMR_HEADER (filled in at the end with the totals): bounds, frame, " EMF", version, bytes, records, handles,
     // reserved, description, palette, device, millimetres, pixel format, OpenGL, micrometres.
@@ -695,9 +704,10 @@ pub(crate) mod tests {
             // Bounds are inclusive, so the width in px is right minus left plus one.
             let (bw, bh) = (f64::from(v(16) - v(8) + 1), f64::from(v(20) - v(12) + 1));
             let (fw, fh) = (f64::from(v(32) - v(24)) / 2540.0, f64::from(v(36) - v(28)) / 2540.0);
-            // Within one device pixel, which is as close as whole px and whole 0.01 mm can agree.
-            assert!((bw / dpi - fw).abs() <= 1.0 / dpi, "{w} by {h}: bounds {bw} px at {dpi} dpi is not the frame's {fw} in");
-            assert!((bh / dpi - fh).abs() <= 1.0 / dpi, "{w} by {h}: bounds {bh} px at {dpi} dpi is not the frame's {fh} in");
+            // The frame IS the bounds, so these agree to the hundredth of a mm the frame is written in.
+            let quantum = 0.01 / 25.4;
+            assert!((bw / dpi - fw).abs() <= quantum, "{w} by {h}: bounds {bw} px at {dpi} dpi is not the frame's {fw} in");
+            assert!((bh / dpi - fh).abs() <= quantum, "{w} by {h}: bounds {bh} px at {dpi} dpi is not the frame's {fh} in");
             // And what Word will do with it: the bounds read at 96 dpi are the picture's true size in pt.
             assert!((bw * 72.0 / 96.0 - f64::from(w)).abs() <= 1.0, "{w} by {h}: Word would place it {} pt wide", bw * 72.0 / 96.0);
         }
@@ -709,6 +719,34 @@ pub(crate) mod tests {
         let bw = f64::from(v(16) - v(8) + 1);
         assert!(!texts(&emf).is_empty(), "the sample has text in it, or this proves nothing");
         assert!((bw * 72.0 / 96.0 - 56.21).abs() <= 1.0, "L-proline: Word would place it {} pt wide, not 56.21", bw * 72.0 / 96.0);
+    }
+
+    // Word sizes a metafile holding text from `rclBounds` and one holding none from `rclFrame` (issue 55). So the
+    // same drawing has to measure the same both ways, or putting one atom label on it changes the size it pastes
+    // at. The bounds are whole device px and cannot be anything else, so the frame is taken from them: the ink is
+    // given up to one device px of margin, and in exchange the two never disagree.
+    #[test]
+    fn frame_and_bounds_are_one_size() {
+        // Sizes that are a whole number of device px (72 pt is 96) and sizes that are not, which is the case the
+        // rounding is there for. L-proline is the one measured in Word: 56.21 by 36.55 pt is 75 by 49 px.
+        let mut with_text = vec![make_emf(&crate::export::tree(PROLINE).unwrap(), None)];
+        for (w, h) in [(72.0, 36.0), (56.21, 36.55), (86.0, 65.0), (56.55, 55.28), (13.3, 7.7)] {
+            let svg = format!(
+                r##"<svg xmlns="http://www.w3.org/2000/svg" width="{w}pt" height="{h}pt" viewBox="0 0 {w} {h}"><path d="M0 0L{w} {h}" stroke="#000" stroke-width="0.6"/></svg>"##
+            );
+            with_text.push(make_emf(&tree(&svg), None));
+        }
+        for emf in &with_text {
+            let v = |at: usize| i32_at(emf, at);
+            // What Word does with a picture that has text in it: the bounds, read at 96 dpi, in pt.
+            let (bw, bh) = (f64::from(v(16) - v(8) + 1) * 72.0 / 96.0, f64::from(v(20) - v(12) + 1) * 72.0 / 96.0);
+            // And with one that has none: the frame, which is physical, in pt.
+            let (fw, fh) = (f64::from(v(32) - v(24)) * 72.0 / 2540.0, f64::from(v(36) - v(28)) * 72.0 / 2540.0);
+            // A hundredth of a mm is 0.0284 pt, and that is all the frame can say.
+            let quantum = 0.01 / 25.4 * 72.0;
+            assert!((bw - fw).abs() <= quantum, "with a label {bw} pt wide, without one {fw}");
+            assert!((bh - fh).abs() <= quantum, "with a label {bh} pt tall, without one {fh}");
+        }
     }
 
     // What an EMF writes as text: each EXTTEXTOUTW's string, reference point and dx, and the font it is in (face,
@@ -791,6 +829,8 @@ pub(crate) mod tests {
     // Issue 20: the frame fits the ink. L-proline as Octet 1.1.1 copies it (standaloneSvg in Chromium with Arial, the
     // view box from the glyphs' ink): the ink is within 0.01 pt of each edge with Arial (0.1 pt allowed here). Linux
     // without Arial draws Liberation Sans, Arial's widths but not its outlines: 0.3 pt there. Octet 1.1.0 made this 58 by 41 pt, from the labels' line boxes and whole points.
+    // The frame itself is the bounds rounded out to whole device px (`frame_and_bounds_are_one_size`), so it is the
+    // ink plus under a pixel: 1984 by 1296 hundredths of a mm is 56.24 by 36.73 pt around ink of 56.21 by 36.55.
     pub(crate) const PROLINE: &str = r##"<svg xmlns="http://www.w3.org/2000/svg" fill="rgb(0, 0, 0)" width="56.21pt" height="36.55pt" viewBox="-33.1 -21.54 56.21 36.55"><g transform="scale(0.75)"><g id="world"><g><defs/><path d="M-26.26 8.63L-25.61 9.10L-20.04 1.43L-19.10 -0.55L-18.24 -2.41ZM-17.48 -0.18L-16.75 -0.50L-21.93 -12.15L-22.66 -11.82ZM-20.64 1.23L-19.91 0.90L-25.09 -10.74L-25.82 -10.42ZM-0.29 1.77L-0.00 1.46L-0.22 1.10L-18.24 -2.41L-19.10 -0.55L-20.04 1.43ZM0.49 1.51L-0.00 1.46L-0.29 1.77L9.40 18.54L9.60 18.09L9.80 17.64ZM9.80 17.64L9.60 18.09L9.40 18.54L28.74 14.43L28.38 14.10L28.01 13.76ZM28.01 13.76L28.38 14.10L28.74 14.43L30.81 -5.25L30.38 -5.00L29.96 -4.75ZM29.96 -4.75L30.38 -5.00L30.81 -5.25L19.41 -10.32L19.09 -9.59ZM7.36 -6.12L6.77 -6.66L-0.22 1.10L-0.00 1.46L0.49 1.51Z" fill="rgb(15, 23, 42)"/><g><text x="-35.56808929443359" y="19.84140815734863" fill="rgb(15, 23, 42)" font-family="Arial, Helvetica, sans-serif" font-size="13.3333px">O</text><text x="-45.194584655761716" y="19.84140815734863" fill="rgb(15, 23, 42)" font-family="Arial, Helvetica, sans-serif" font-size="13.3333px">H</text><text x="-32.09196014404297" y="-13.231793975830076" fill="rgb(15, 23, 42)" font-family="Arial, Helvetica, sans-serif" font-size="13.3333px">O</text><text x="8.030521774291993" y="-8.037777423858643" fill="rgb(15, 23, 42)" font-family="Arial, Helvetica, sans-serif" font-size="13.3333px">N</text><text x="8.030521774291993" y="-19.173156544685362" fill="rgb(15, 23, 42)" font-family="Arial, Helvetica, sans-serif" font-size="13.3333px">H</text></g></g></g></g></svg>"##;
     #[test]
     fn the_frame_fits_the_ink() {
@@ -803,7 +843,7 @@ pub(crate) mod tests {
         let room = if arial { 0.1 } else { 0.3 };
         assert!(slack.iter().all(|s| (-room..=room).contains(s)), "{slack:?}");
         let emf = make_emf(&tree, None);
-        assert_eq!([24, 28, 32, 36].map(|k| i32_at(&emf, k)), [0, 0, 1983, 1289], "the frame in 0.01 mm");
+        assert_eq!([24, 28, 32, 36].map(|k| i32_at(&emf, k)), [0, 0, 1984, 1296], "the frame in 0.01 mm");
         let t = texts(&emf);
         assert_eq!(t.iter().map(|x| x.0.as_str()).collect::<Vec<_>>(), ["HO", "O", "N", "H"]);
     }
