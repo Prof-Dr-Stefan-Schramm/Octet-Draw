@@ -1416,8 +1416,13 @@ export default function Editor() {
   // Octet is never left running with no window. On the Mac the window closes and Octet stays open, as a Mac app does.
   // Quit (and a quit from outside Octet) still closes each window. With Home showing (and in one window, Settings >
   // windows off) the window closes, so the close button always closes it in the end.
-  const closeDrawing = () => embedded !== undefined ? leave(async () => { await endEdit(); return invoke("close_window"); })
-    : MAC || home ? closeWindow() : DRAW_WINDOW ? leave(() => invoke("close_window", { home: true })) : leave(async () => {
+  // A window editing a drawing embedded in another program's document ends the edit and
+  // closes. It comes after the line below, not before it: such a window is never Home and
+  // never on a Mac, so the order changes nothing, and Close Window with Home showing has to
+  // stay the first thing this does (src/drive.check.ts holds it there).
+  const closeDrawing = () => MAC || home ? closeWindow()
+    : embedded !== undefined ? leave(async () => { await endEdit(); return invoke("close_window"); })
+    : DRAW_WINDOW ? leave(() => invoke("close_window", { home: true })) : leave(async () => {
     const fresh = set(EMPTY);
     setFile({ saved: fresh }); setHome(true); setOverDrawing(false); setCoach(0);
   });

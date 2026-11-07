@@ -85,6 +85,8 @@ assert.match(source("../src-tauri/src/main.rs"), /PredefinedMenuItem::close_wind
 assert.match(source("../scripts/drive/drive.mjs"), /const CLOSE = WIN \? "Close" : "Close Window";/);
 assert.ok(!/system\.menu\("File", "Close Window"\)/.test(source("../scripts/drive/drive.mjs")), "every Close Window goes by the platform's name");
 // Close Window (and the close button) with Home showing closes the window, also in one window (Settings > Windows off),
-// so a window always closes in the end and never only shows Home again.
-assert.match(source("./Editor.tsx"), /const closeDrawing = \(\) => MAC \|\| home \? closeWindow\(\) : DRAW_WINDOW \?/);
+// so a window always closes in the end and never only shows Home again. It is the FIRST thing closeDrawing does, so
+// that no branch added later can quietly get in front of it; what follows it is free to grow (an embedded drawing ends
+// its edit there, issue 24).
+assert.match(source("./Editor.tsx"), /const closeDrawing = \(\) => MAC \|\| home \? closeWindow\(\)\s/);
 console.log("drive checks pass");
