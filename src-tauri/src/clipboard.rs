@@ -55,6 +55,9 @@ pub const HERE: System = if cfg!(target_os = "macos") { System::Mac } else if cf
 enum Kind {
     Pdf,
     Emf,
+    // Windows only: the drawing as an embedded object, so Word keeps it editable (#24).
+    EmbedSource,
+    ObjectDescriptor,
     Png,
     Bitmap,
     Svg,
@@ -89,10 +92,13 @@ fn names(s: System, k: Kind) -> &'static [&'static str] {
             Office => &["com.microsoft.Art--GVML-ClipFormat"],
             // A prefix: mac::read gives the first such type that holds a PDF.
             Keynote => &["com.apple.iWork.TSPData."],
-            Svg | Emf => &[],
+            Svg | Emf | EmbedSource | ObjectDescriptor => &[],
         },
         System::Windows => match k {
             Emf => &[ENHMETAFILE],
+            // The two formats that make a paste an object rather than a picture (MS-OLEDS).
+            EmbedSource => &["Embed Source"],
+            ObjectDescriptor => &["Object Descriptor"],
             Png => &["PNG"],
             Bitmap => &[DIB],
             Cdx => &["ChemDraw Interchange Format"],
@@ -114,7 +120,7 @@ fn names(s: System, k: Kind) -> &'static [&'static str] {
             Octet => &["application/x-octet+json"],
             Text => &["text/plain;charset=utf-8", "UTF8_STRING", "text/plain"],
             FileUrl => &["text/uri-list"],
-            Pdf | Bitmap | Emf | Office | Keynote => &[],
+            Pdf | Bitmap | Emf | Office | Keynote | EmbedSource | ObjectDescriptor => &[],
         },
     }
 }
@@ -209,7 +215,25 @@ fn types(s: System, svg: Option<&str>, dpi: f32, cdxml: Option<&str>, cdxml_type
             put(Kind::Pdf, crate::export::make_pdf(svg, cdxml)?);
         } else if s == System::Windows {
             let tree = crate::export::tree(svg)?;
-            put(Kind::Emf, crate::vector::make_emf(&tree, cdxml));
+            let emf = crate::vector::make_emf(&tree, cdxml);
+            // The same picture again as an embedded object, so Word and PowerPoint keep the
+            // drawing and can give it back to Octet to edit (#24). The picture goes in the
+            // object's own presentation stream, which is what the document displays: an
+            // object with native data and no presentation shows as an empty frame.
+            //
+            // After the picture, as ChemDraw also puts its own OLE formats after its
+            // chemistry: a host that wants a plain picture still finds one first.
+            let embedded = cdxml.and_then(|x| {
+                let (w, h) = crate::ole::himetric_of(&emf);
+                crate::ole::embed_source(crate::export::cdxml_document(x).as_bytes(), &emf, w, h)
+                    .ok()
+                    .map(|e| (e, w, h))
+            });
+            put(Kind::Emf, emf);
+            if let Some((embed, w, h)) = embedded {
+                put(Kind::EmbedSource, embed);
+                put(Kind::ObjectDescriptor, crate::ole::object_descriptor(w, h));
+            }
             if let (_, Some(b)) = crate::export::clipboard_pixels(&tree, true, dpi, None)? {
                 put(Kind::Bitmap, b);
             }
@@ -640,20 +664,29 @@ mod tests {
         let cdx = b"VjCD0100\x04\x03\x02\x01".to_vec();
         let all = |s| types(s, Some(svg), 600.0, Some("<CDXML/>"), true, Some(cdx.clone()), Some(MOL), Some("CO"), Some("{}".into())).unwrap();
         let t = all(System::Windows);
-        assert_eq!(t.iter().map(|(t, _)| *t).collect::<Vec<_>>(), [ENHMETAFILE, DIB, "ChemDraw Interchange Format", "CDXML", "MDLCT", "SMILES", "application/x-octet+json"]);
+        // Windows also gets the drawing as an embedded object, after the picture (#24).
+        assert_eq!(t.iter().map(|(t, _)| *t).collect::<Vec<_>>(), [ENHMETAFILE, "Embed Source", "Object Descriptor", DIB, "ChemDraw Interchange Format", "CDXML", "MDLCT", "SMILES", "application/x-octet+json"]);
+        // The embedded object is a compound file, and it carries the picture so the document
+        // is not an empty frame.
+        let embed = &t.iter().find(|(n, _)| *n == "Embed Source").unwrap().1;
+        assert_eq!(&embed[..8], &[0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1], "an OLE compound file");
+        let descriptor = &t.iter().find(|(n, _)| *n == "Object Descriptor").unwrap().1;
+        assert_eq!(&descriptor[4..20], &crate::ole::CLSID, "it names Octet's class");
         assert_eq!(&t[0].1[40..44], b" EMF");
         // A picture copied back out of Word keeps its EMF: with nothing else, paste reads the drawing from it.
         let c = clip(System::Windows, |n| (n == ENHMETAFILE).then(|| t[0].1.clone()));
         assert_eq!(c.cdxml.as_deref(), Some("<CDXML/>"));
         // 20 pt by 10 pt at 600 dpi: 167 by 84 pixels, as a bottom-up 24-bit bitmap on white with rows of 504 bytes.
-        let dib = &t[1].1;
+        // Found by name, not by position: the embedded object now sits between the picture and this.
+        let dib = &t.iter().find(|(n, _)| *n == DIB).unwrap().1;
         let int = |k: usize| i32::from_le_bytes(dib[k..k + 4].try_into().unwrap());
         assert_eq!((int(0), int(4), int(8), dib[14]), (40, 167, 84, 24));
         assert_eq!(dib.len(), 40 + 504 * 84);
         assert_eq!(&dib[40..43], [255, 255, 255], "the bottom row is white");
         assert!(dib[40..].chunks(3).any(|c| c == [0, 0, 0]), "the bar is black");
-        assert_eq!((t[4].1.clone(), t[5].1.clone()), (prefixed_lines(MOL).unwrap(), b"CO\0".to_vec()));
         let read = |t: &Vec<(&str, Vec<u8>)>, n: &str| t.iter().find(|(x, _)| *x == n).map(|(_, b)| b.clone());
+        // By name, not by position: the embedded object shifted everything after the picture.
+        assert_eq!((read(&t, "MDLCT").unwrap(), read(&t, "SMILES").unwrap()), (prefixed_lines(MOL).unwrap(), b"CO\0".to_vec()));
         let c = clip(System::Windows, |n| read(&t, n));
         assert_eq!((c.octet.as_deref(), c.molfile.as_deref(), c.smiles.as_deref()), (Some("{}"), Some(MOL), Some("CO")));
         assert!(c.cdxml.unwrap().ends_with("<CDXML/>") && c.cdx.is_some());

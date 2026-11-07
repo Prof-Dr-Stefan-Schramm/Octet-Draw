@@ -22,6 +22,8 @@ mod export;
 #[cfg(feedback)]
 mod feedback;
 mod home;
+#[cfg(windows)]
+mod ole;
 mod open;
 mod pubchem;
 mod quit;
