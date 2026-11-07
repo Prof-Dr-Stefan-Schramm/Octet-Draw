@@ -2006,7 +2006,10 @@ export function arrowShapes(a: Arrow, s: Style, k: number): P[][] {
   };
   // A shaft along points, stopping `trim` short of the end, drawn in the arrow's style: dashes of 0.15 bond lengths
   // with gaps of 0.1, a wave 0.06 bond lengths high every 0.2, the bold width, or two lines 0.1 bond lengths apart.
-  const line = (pts: P[], trim: number) => {
+  // settle: where the wave comes back to the shaft's own line, at the start and at the end, in bond lengths. An end
+  // that runs into a head settles over one wavelength, so the shaft arrives at the head straight and on its axis; a
+  // wave still swinging where the head begins leaves the head looking stuck on askew, which is what it did.
+  const line = (pts: P[], trim: number, settle: [number, number] = [0, 0]) => {
     const path = cut(pts, trim);
     if (a.style === "doubled") {
       const g = 0.05 * s.bond;
@@ -2015,7 +2018,7 @@ export function arrowShapes(a: Arrow, s: Style, k: number): P[][] {
     }
     if (a.style === "dashed" || a.kind === "cut") return dashes(path, 0.15 * s.bond, 0.1 * s.bond).forEach(([p, q]) => bar(p, q));
     if (a.style === "wavy") {
-      const wave = waveAlong(path, 0.06 * s.bond, 0.2 * s.bond);
+      const wave = waveAlong(path, 0.06 * s.bond, 0.2 * s.bond, [settle[0] * s.bond, settle[1] * s.bond]);
       for (let i = 0; i + 1 < wave.length; i++) bar(wave[i], wave[i + 1]);
       return;
     }
@@ -2049,7 +2052,10 @@ export function arrowShapes(a: Arrow, s: Style, k: number): P[][] {
   if (takesHeads(a)) {
     // One shaft, and a head at either end as set (the Curves menu) or as the kind has them.
     const { start, end } = headsOf(a), reversed = [...path].reverse();
-    line(cut(cut(path, takes(end)).reverse(), takes(start)).reverse(), 0);
+    // A wavy shaft settles onto its own line over the last wavelength before a head, so it
+    // runs into the head straight and centred.
+    const settle: [number, number] = [start === "none" ? 0 : 0.2, end === "none" ? 0 : 0.2];
+    line(cut(cut(path, takes(end)).reverse(), takes(start)).reverse(), 0, settle);
     if (end !== "none") head(path, end === "full" ? undefined : end);
     if (start !== "none") head(reversed, start === "full" ? undefined : start);
     // ChemDraw's marks, d (twice the head's half-width) each way: on the middle of the shaft a cross, or two
@@ -2247,8 +2253,17 @@ export function dashes(path: P[], on: number, off: number): [P, P][] {
   return out;
 }
 // A sine wave following a path: amplitude and wavelength in px, sampled finely.
-export function waveAlong(path: P[], amplitude: number, wavelength: number): P[] {
+// settle: how far from the start and from the end the wave comes back to the path's own line
+// (px). Within that distance the amplitude is eased to nothing, so the wave leaves and
+// arrives flat. An arrow uses it where a head goes: a wave still swinging where the head
+// begins puts the head off the shaft's axis.
+export function waveAlong(path: P[], amplitude: number, wavelength: number, settle: [number, number] = [0, 0]): P[] {
   const out: P[] = [];
+  const whole = path.slice(1).reduce((sum, p, i) => sum + len(sub(p, path[i])), 0);
+  // Eased with a cosine, not a straight ramp, so the wave does not kink where it starts to flatten.
+  const ease = (x: number) => (1 - Math.cos(Math.PI * Math.min(1, Math.max(0, x)))) / 2;
+  const held = (along: number) =>
+    (settle[0] > 0 ? ease(along / settle[0]) : 1) * (settle[1] > 0 ? ease((whole - along) / settle[1]) : 1);
   let travelled = 0;
   for (let i = 0; i + 1 < path.length; i++) {
     const p = path[i], q = path[i + 1], d = len(sub(q, p));
@@ -2256,7 +2271,7 @@ export function waveAlong(path: P[], amplitude: number, wavelength: number): P[]
     const u = unit(sub(q, p)), n = perp(u), steps = Math.max(1, Math.ceil(d / (wavelength / 12)));
     for (let j = 0; j <= steps; j++) {
       const t = (d * j) / steps, along = travelled + t;
-      out.push(add(add(p, mul(u, t)), mul(n, amplitude * Math.sin((2 * Math.PI * along) / wavelength))));
+      out.push(add(add(p, mul(u, t)), mul(n, held(along) * amplitude * Math.sin((2 * Math.PI * along) / wavelength))));
     }
     travelled += d;
   }

@@ -9,12 +9,13 @@
 // layout path. A template that loses its superscript on the way to Word is no use to anyone.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { fromCdxml, toCdxml } from "./cdxml.ts";
+import { arialGlyph, fromCdxml, toCdxml } from "./cdxml.ts";
 import { DEFAULT_STYLE } from "./docstyle.ts";
 import { addRing, addTemplate, EMPTY } from "./edit.ts";
 import { readOct, writeOct } from "./oct.ts";
 import { plainOf } from "./richtext.ts";
-import type { Caption, Mol } from "./render.ts";
+import { arrowShapes, type Arrow, type Caption, type Mol } from "./render.ts";
+import { DEFAULT_STYLE as STYLE_SPEC, frameStyle } from "./docstyle.ts";
 
 type Item = { name: string; also?: string; mol: Mol };
 const library: { name: string; items: Item[] }[] = JSON.parse(readFileSync(new URL("./library.json", import.meta.url), "utf8"));
@@ -36,9 +37,13 @@ const box = (m: Mol) => {
   return [Math.min(...qs.map((q) => q[0])), Math.min(...qs.map((q) => q[1])), Math.max(...qs.map((q) => q[0])), Math.max(...qs.map((q) => q[1]))];
 };
 const runsOfText = (c: Caption) => (c.runs ?? []).map((r) => [r.text, r.script ?? ""]);
-// A key that is absent and a key set to undefined are the same object here: addTemplate
-// leaves angle: undefined on a caption it copies and a .oct file simply has no such key.
-const same = (x: unknown) => JSON.parse(JSON.stringify(x ?? null));
+// For comparing what came back from a file with what went in. Two things differ without
+// meaning anything: a key that is absent and a key set to undefined (addTemplate leaves
+// angle: undefined on a caption it copies, and a .oct file simply has no such key), and the
+// last bits of a coordinate (a .oct file keeps three decimals, so 4.8629999999999995 comes
+// back as 4.863). Both are settled here, so the comparison is about what was kept.
+const same = (x: unknown) =>
+  JSON.parse(JSON.stringify(x ?? null), (_, v) => (typeof v === "number" ? Math.round(v * 1e3) / 1e3 : v));
 
 for (const t of set.items) {
   const m = t.mol, arrows = m.arrows ?? [], captions = m.captions ?? [];
@@ -54,7 +59,10 @@ for (const t of set.items) {
   assert.equal(new Set(inside).size, inside.length, `${t.name}: arrows and captions share one id space, so no id is used twice`);
   // One line width and one size: no object sets its own, so every line takes the document's.
   assert.ok(arrows.every((a) => a.width === undefined && a.scale === undefined && a.colour === undefined), t.name);
-  assert.ok(captions.every((c) => c.size === undefined && c.colour === undefined && c.font === undefined), t.name);
+  assert.ok(captions.every((c) => c.size === undefined && c.colour === undefined), t.name);
+  // A label may name a font, but only the serif hν is set in, so that the Greek nu reads as
+  // Greek; everything else takes the document's.
+  assert.ok(captions.every((c) => c.font === undefined || (c.font === "Times New Roman" && c.text.startsWith("hν"))), t.name);
   // A caption's plain text is always its runs joined (render.ts), or the library ships a lie.
   assert.ok(captions.every((c) => !c.runs || plainOf(c.runs) === c.text), `${t.name}: text is its runs joined`);
   if (arrows.length) {
@@ -142,11 +150,60 @@ for (const name of ["Jablonski diagram", "Jablonski diagram with vibrational lev
 // real Greek nu. The abbreviations beside it are abbreviations, so they stay upright.
 for (const name of ["Reaction arrow, hν", "Absorption (hν)", "Fluorescence", "Phosphorescence"]) {
   const [label] = by(name).mol.captions!;
-  assert.ok(label.italic, `${name}: hν is italic`);
-  assert.ok(label.text.includes("ν"), `${name}: a Greek nu, not a Latin v`);
+  // A real Greek nu, U+03BD, and a face that draws it as one. Arial — the document font —
+  // draws a Greek nu as a plain v, so beside the Latin letter the two are one glyph and the
+  // notation is lost. The whole label takes the serif, not only the nu: a serif nu next to a
+  // sans h does not belong together on the page.
+  assert.ok(label.text.includes("\u03bd"), `${name}: a Greek nu, not a Latin v`);
+  assert.equal(label.font, "Times New Roman", `${name}: a face that draws the nu Greek`);
+  assert.ok(!label.runs?.some((r) => r.font), `${name}: one face for the whole label`);
+  assert.ok(!label.italic, `${name}: upright, since an italic serif nu leans back towards a v`);
 }
 for (const name of ["Reaction arrow, Δ", "Intersystem crossing", "Internal conversion", "Vibrational relaxation", "Energy transfer"]) {
-  assert.ok(!by(name).mol.captions![0].italic, `${name}: upright`);
+  const [label] = by(name).mol.captions!;
+  assert.ok(!label.italic && label.font === undefined, `${name}: the document's own font, upright`);
+}
+// No arrow sets a head of its own: a transition drawn with a special head would not match
+// the arrows a chemist draws beside it in the same document.
+for (const t of set.items) assert.ok((t.mol.arrows ?? []).every((a) => a.headSize === undefined), `${t.name}: Octet's own arrowheads`);
+
+// No label touches an arrow.
+//
+// This is the check that was missing. Every label in the set was first placed by hand, at an
+// offset measured from the arrow's centre line, and every one of them came out sitting ON
+// its arrow — a wavy shaft swings each side of that line and an arrowhead is wider still.
+// Measured here against what Octet actually draws, so an offset that only looks right cannot
+// pass again.
+{
+  const S = frameStyle(STYLE_SPEC, (STYLE_SPEC.bond * 4) / 3);
+  const BOND = S.bond, SIZE = (STYLE_SPEC.captionSize * 4 * S.k) / 3;
+  const CAP = (0.716 * SIZE) / BOND;
+  const widthOf = (c: Caption) =>
+    (c.runs?.length ? c.runs : [{ text: c.text, script: undefined }])
+      .reduce((w, r) => w + [...r.text].reduce((t, ch) => t + (arialGlyph(ch)[0] * (r.script ? SIZE * 0.68 : SIZE)) / 1000, 0), 0) / BOND;
+  const inside = (p: number[], b: number[]) => p[0] > b[0] && p[0] < b[2] && p[1] > b[1] && p[1] < b[3];
+  const turn = (a: number[], c: number[], e: number[]) => Math.sign((c[0] - a[0]) * (e[1] - a[1]) - (c[1] - a[1]) * (e[0] - a[0]));
+  const cross = (p: number[], q: number[], r: number[], w: number[]) => turn(p, q, r) * turn(p, q, w) < 0 && turn(r, w, p) * turn(r, w, q) < 0;
+  for (const t of set.items) {
+    const edges: number[][][] = [];
+    for (const a of t.mol.arrows ?? []) {
+      for (const shape of arrowShapes(a as Arrow, S, BOND)) {
+        const pts = shape.map(([x, y]) => [x / BOND, -y / BOND]);
+        for (let i = 0; i < pts.length; i++) edges.push([pts[i], pts[(i + 1) % pts.length]]);
+      }
+    }
+    for (const c of t.mol.captions ?? []) {
+      if (c.on) continue; // a condition on an arrow is laid out by Octet, not placed here
+      const w = widthOf(c), high = c.runs?.some((r) => r.script === "super") ? CAP + (0.33 * SIZE) / BOND : CAP;
+      const low = c.runs?.some((r) => r.script === "sub") ? (0.212 * SIZE) / BOND : 0;
+      const box = [c.x - w / 2, c.y - low, c.x + w / 2, c.y + high];
+      const hit = edges.find(([p, q]) =>
+        inside(p, box) || inside(q, box) ||
+        [[[box[0], box[1]], [box[2], box[1]]], [[box[2], box[1]], [box[2], box[3]]], [[box[2], box[3]], [box[0], box[3]]], [[box[0], box[3]], [box[0], box[1]]]]
+          .some(([r, v]) => cross(p, q, r, v)));
+      assert.ok(!hit, `${t.name}: "${c.text}" sits on an arrow`);
+    }
+  }
 }
 // Absorption points up and emission down, or the diagram says the opposite of what it means.
 assert.ok(by("Absorption (hν)").mol.arrows![0].to[1] > by("Absorption (hν)").mol.arrows![0].from[1], "absorption points up");
