@@ -32,6 +32,14 @@ export const RINGS = {
   benzene: { name: "Benzene", n: 6, aromatic: true },
 } satisfies Record<string, { name: string; n: number; aromatic: boolean; chair?: 1 | 2 }>;
 export type RingKind = keyof typeof RINGS;
+// The rings that have a tool command of their own (tool.benzene and so on), and which ring each one chooses. The Ring
+// tool is one slot in the palette whatever ring it holds, so its own command, tool.ring, has no key: the key belongs
+// to the ring. Both the commands (Editor.tsx) and the slot's tooltip read this, so the slot can tell the user which
+// key reaches the ring it is showing — J for benzene — instead of saying it has none.
+export const RING_TOOLS: Record<string, RingKind> = { benzene: "benzene", cyclopentadiene: "cyclopentadiene", cyclohexane: "6", cyclopentane: "5" };
+// The command for a ring, where it has one: the other way round.
+export const ringCommand = (kind: string): string | undefined =>
+  Object.keys(RING_TOOLS).find((command) => RING_TOOLS[command] === kind);
 
 // Curved arrows come in four sweeps. Their variants are "kind-sweep", for example "fishhook-180"; a bare kind is 120°.
 // ChemDraw's elliptical arcs are "ellipse-cw" and "ellipse-ccw": 270° round an ellipse 0.4 times as wide as it is long.
@@ -769,7 +777,7 @@ export function Palette(p: PaletteProps) {
               aria-label={t.name}
               aria-haspopup={strip ? "menu" : undefined}
               aria-expanded={strip ? open === t.id : undefined}
-              data-key={p.keys(`tool.${t.id}`)}
+              data-key={p.keys(`tool.${t.id}`) ?? (t.id === "ring" ? p.keys(`tool.${ringCommand(p.variants.ring) ?? ""}`) : undefined)}
               // A selection dragged from the canvas onto the Ring or Template tool goes into My templates.
               {...(t.id === "ring" || t.id === "template" ? { "data-drop-set": MY_SET, "data-drop-tool": t.id } : {})}
               onPointerDown={() => {
