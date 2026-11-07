@@ -207,6 +207,54 @@ pub fn registration(exe: &str) -> Vec<(String, Option<&'static str>, String)> {
     keys
 }
 
+/// Writes the class registration, so Windows can find Octet when a host asks for the class.
+///
+/// Under `HKEY_CURRENT_USER\Software\Classes`: no administrator, no installer, and
+/// `unregister` takes it away again. Written at every start rather than once at install
+/// time, so `LocalServer32` still names the right file after Octet is moved, renamed or
+/// updated — a stale path there is the "the server application could not be found" that
+/// makes an embedded object unopenable.
+///
+/// Registering must never stop Octet starting, so the caller logs the error and carries on.
+pub fn register(exe: &str) -> Result<(), String> {
+    write_registration(&classes_key()?, exe)
+}
+
+/// Takes the registration away again: the three trees `register` writes, and nothing else.
+/// The uninstaller's half of `register`; nothing in the running app calls it.
+#[allow(dead_code)]
+pub fn unregister() -> Result<(), String> {
+    remove_registration(&classes_key()?)
+}
+
+fn classes_key() -> Result<windows_registry::Key, String> {
+    windows_registry::CURRENT_USER
+        .create(r"Software\Classes")
+        .map_err(|why| format!(r"Software\Classes: {why}"))
+}
+
+// The two halves, against any root key, so a test can use a scratch one instead of the
+// live class registration.
+fn write_registration(root: &windows_registry::Key, exe: &str) -> Result<(), String> {
+    for (subkey, name, data) in registration(exe) {
+        let key = root.create(&subkey).map_err(|why| format!("{subkey}: {why}"))?;
+        key.set_string(name.unwrap_or(""), &data).map_err(|why| format!("{subkey}: {why}"))?;
+    }
+    Ok(())
+}
+
+fn remove_registration(root: &windows_registry::Key) -> Result<(), String> {
+    for tree in [format!(r"CLSID\{}", guid_string(CLSID)), PROGID.to_string(), "OctetDraw.Drawing".to_string()] {
+        if let Err(why) = root.remove_tree(&tree) {
+            // Already gone is the state we wanted.
+            if root.open(&tree).is_ok() {
+                return Err(format!("{tree}: {why}"));
+            }
+        }
+    }
+    Ok(())
+}
+
 /// `{XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX}`, as the registry writes a class id.
 pub fn guid_string(b: [u8; 16]) -> String {
     format!(
@@ -299,5 +347,45 @@ mod tests {
         let at = u32::from_le_bytes(d[44..48].try_into().unwrap()) as usize;
         let tail: Vec<u16> = d[at..].chunks(2).map(|c| u16::from_le_bytes([c[0], c[1]])).collect();
         assert_eq!(String::from_utf16_lossy(&tail).trim_end_matches('\0'), USER_TYPE);
+    }
+
+    #[test]
+    fn the_registration_is_written_and_taken_away_again() {
+        // Against a scratch key, never the live class registration, so running the tests
+        // cannot break an Octet that is installed on the same computer.
+        let root = windows_registry::CURRENT_USER
+            .create(r"Software\Octet Draw\ole-registration-test")
+            .expect("a scratch key");
+        let exe = r"C:\Program Files\Octet Draw\Octet Draw.exe";
+        write_registration(&root, exe).expect("written");
+
+        let clsid = format!(r"CLSID\{}", guid_string(CLSID));
+        let class = root.open(&clsid).expect("the class key");
+        assert_eq!(class.get_string("").unwrap(), USER_TYPE);
+        // The server line is what makes a double-click able to start Octet: the full path
+        // in quotes, then -Embedding.
+        assert_eq!(
+            root.open(format!(r"{clsid}\LocalServer32")).unwrap().get_string("").unwrap(),
+            format!("\"{exe}\" -Embedding"),
+        );
+        // ole32.dll draws the cached picture when Octet is not running.
+        assert_eq!(root.open(format!(r"{clsid}\InprocHandler32")).unwrap().get_string("").unwrap(), "ole32.dll");
+        // Insert > Object finds the class by name, and the name finds the class id back.
+        assert!(root.open(format!(r"{clsid}\Insertable")).is_ok());
+        assert_eq!(root.open(format!(r"{PROGID}\CLSID")).unwrap().get_string("").unwrap(), guid_string(CLSID));
+        assert_eq!(root.open(r"OctetDraw.Drawing\CLSID").unwrap().get_string("").unwrap(), guid_string(CLSID));
+
+        // Written twice over is the same as written once: Octet registers at every start.
+        write_registration(&root, exe).expect("written again");
+        assert_eq!(root.open(&clsid).unwrap().get_string("").unwrap(), USER_TYPE);
+
+        remove_registration(&root).expect("taken away");
+        assert!(root.open(&clsid).is_err(), "the class key is gone");
+        assert!(root.open(PROGID).is_err(), "the ProgID is gone");
+        assert!(root.open("OctetDraw.Drawing").is_err(), "the version-independent ProgID is gone");
+        // Taking away what is not there is not an error.
+        remove_registration(&root).expect("taken away twice");
+
+        let _ = windows_registry::CURRENT_USER.remove_tree(r"Software\Octet Draw\ole-registration-test");
     }
 }

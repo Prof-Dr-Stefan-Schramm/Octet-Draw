@@ -995,6 +995,15 @@ fn main() {
             let cwd = std::env::current_dir().unwrap_or_default();
             open::offer(handle, open::from_args(std::env::args_os(), &cwd), None);
             crashlog::install(handle);
+            // Octet's class registration, so a drawing embedded in Word can be opened again
+            // (issue #24). Written at every start, so the path is right after an update or a
+            // move. It must never stop Octet starting, so a failure is only logged.
+            #[cfg(windows)]
+            if let Ok(exe) = std::env::current_exe() {
+                if let Err(why) = ole::register(&exe.to_string_lossy()) {
+                    eprintln!("octet: could not register the drawing class: {why}");
+                }
+            }
             #[cfg(feature = "smoke")]
             smoke::start(handle.clone());
             quit::install(handle);

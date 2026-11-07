@@ -28,6 +28,9 @@ Every dependency Octet uses, with its licence. Rules: [docs/licence.md](docs/lic
 | objc2-web-kit, block2 (Rust) | 0.3, 0.6 | Zlib OR Apache-2.0 OR MIT; MIT | Feedback's picture of the window (WKWebView snapshot), for testers: not in the public release (REL-8). Already used by Tauri |
 | windows-sys (Rust, Microsoft) | 0.61 | MIT OR Apache-2.0 | The Windows clipboard (copy and paste), and the menu bar's access keys. Already used by Tauri |
 | webview2-com (Rust, Bill Avery) | 0.39 | MIT | Alt and a menu's access key on Windows, from the web view to the menu bar (WebView2's AcceleratorKeyPressed). Already used by Tauri |
+| windows-registry (Rust, Microsoft) | 0.6 | MIT OR Apache-2.0 | An embedded drawing's class registration on Windows, under HKEY_CURRENT_USER\Software\Classes. Already in the build through Tauri |
+| cfb (Rust, Matthew D. Steele) | 0.16 | MIT | Reads and writes OLE compound files: an Octet drawing embedded in a Word or PowerPoint document (Windows) |
+| uuid (Rust) | 1 | Apache-2.0 OR MIT | A class id in the form an OLE compound file keeps it (used by cfb) |
 | gtk (Rust, gtk-rs project) | 0.18 | MIT | The Linux clipboard (copy and paste, through GTK). Already used by Tauri |
 | open (Rust, Byron) | 5.4 | MIT | Opens web addresses (Search Reaxys, Search PubChem, links) and the feedback draft in the user's own programs. On Windows it calls ShellExecuteExW, not cmd.exe |
 | is-wsl, is-docker (Rust) | 0.4, 0.2 | MIT | Used by open on Linux |

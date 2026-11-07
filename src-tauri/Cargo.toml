@@ -47,6 +47,9 @@ tauri-plugin-single-instance = "2"
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Graphics_Gdi", "Win32_System_DataExchange", "Win32_System_Memory", "Win32_System_Ole", "Win32_UI_WindowsAndMessaging"] }
 webview2-com = "0.39"
+# An embedded drawing's class registration (src/ole.rs): HKEY_CURRENT_USER\Software\Classes.
+# Microsoft's own, MIT OR Apache-2.0, and already in the build through Tauri.
+windows-registry = "0.6"
 
 # Copy and paste on Linux: GTK's clipboard (src/clipboard_linux.rs). Already in the build through Tauri.
 [target.'cfg(target_os = "linux")'.dependencies]

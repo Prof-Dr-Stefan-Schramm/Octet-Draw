@@ -2672,6 +2672,7 @@ dependencies = [
  "tauri-plugin-updater",
  "uuid",
  "webview2-com",
+ "windows-registry",
  "windows-sys 0.61.2",
 ]
 
