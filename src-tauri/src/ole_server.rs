@@ -1184,17 +1184,29 @@ mod tests {
     #[test]
     fn every_object_a_host_is_given_says_so() {
         // Drawing and Factory need a running Tauri app to make, so they cannot be asked the
-        // way Formats is above. What can be checked is that nothing in here is implemented
-        // without saying which apartment it belongs to: the default is the wrong one, and it
-        // fails quietly.
-        let source = include_str!("ole_server.rs");
-        let plain: Vec<&str> = source
-            .lines()
-            .map(str::trim)
-            .filter(|line| line.starts_with("#[implement(") && !line.contains("Agile ="))
+        // way Formats is above. What can be checked is that no COM object anywhere in Octet
+        // is implemented without saying which apartment it belongs to: the default is the
+        // wrong one, and it fails quietly. The whole crate, not just this file, because the
+        // next one may be written somewhere else.
+        let src = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+        let mut plain = Vec::new();
+        let mut files: Vec<_> = std::fs::read_dir(&src)
+            .expect("src is there")
+            .filter_map(|entry| entry.ok().map(|e| e.path()))
+            .filter(|path| path.extension().is_some_and(|ext| ext == "rs"))
             .collect();
+        files.sort();
+        for file in &files {
+            let text = std::fs::read_to_string(file).expect("a source file reads");
+            for line in text.lines().map(str::trim) {
+                if line.starts_with("#[implement(") && !line.contains("Agile =") {
+                    plain.push(format!("{}: {line}", file.file_name().unwrap().to_string_lossy()));
+                }
+            }
+        }
+        assert!(!files.is_empty(), "the source files were found");
         // The one exception is the test stream below, which never leaves this process.
-        assert_eq!(plain, ["#[implement(IStream)]"], "every COM object a host sees needs Agile = false");
+        assert_eq!(plain, ["ole_server.rs: #[implement(IStream)]"], "every COM object a host sees needs Agile = false");
     }
 
     #[test]
