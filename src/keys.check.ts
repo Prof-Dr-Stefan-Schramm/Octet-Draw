@@ -1,6 +1,6 @@
 // Run: node src/keys.check.ts. Fails loudly if shortcut lookup breaks.
 import assert from "node:assert/strict";
-import { actionFor, addsToSelection, clashes, controlTakes, copyDrag, skipsCycle, feedbackChord, keyOf, keymap, menuRuns, textEntry, textKey, tileTo } from "./keys.ts";
+import { actionFor, addsToSelection, clashes, controlTakes, copyDrag, DEFAULT_KEYS, skipsCycle, feedbackChord, keyOf, keymap, menuRuns, textEntry, textKey, tileTo } from "./keys.ts";
 
 const press = (key: string, mods: Partial<{ shiftKey: boolean; altKey: boolean; metaKey: boolean; ctrlKey: boolean }> = {}) =>
   keyOf({ key, shiftKey: false, altKey: false, metaKey: false, ctrlKey: false, ...mods });
@@ -219,3 +219,23 @@ for (const mac of [true, false]) {
   assert.ok(editor.indexOf("if (MAC && e.ctrlKey) {") < at, "the Mac's Control-click goes to the context menu first");
 }
 console.log("keys.check: Ctrl-click adds to the selection on Windows and Linux ok");
+
+// Every tool can be given a shortcut.
+//
+// A tool is reachable by key only if it has an action, because the action is both what a key binds to and what
+// Settings lists for the user to bind by hand. Eight tools had none, so they were the only things in the app a
+// keyboard could not reach and no one could fix that from Settings. Six of them share the specialist slot at the
+// bottom of the toolbar, where only one tool shows at a time, which is why counting the buttons on screen missed
+// them. Read the tools from their own union so a tool added later has to come with its action.
+{
+  const tools = readFileSync(new URL("tools.tsx", import.meta.url), "utf8");
+  const union = tools.match(/^export type Tool = (.+);$/m);
+  assert.ok(union, "found the Tool union");
+  const ids = union[1].split("|").map((part) => part.trim().replace(/^"|"$/g, ""));
+  assert.ok(ids.length > 15 && ids.every((id) => /^[a-z]+$/.test(id)), `read the tools: ${ids.join(" ")}`);
+  const missing = ids.filter((id) => !ACTIONS.some((a) => a.id === `tool.${id}`));
+  assert.deepEqual(missing, [], `every tool needs a tool.<id> action, so a key can reach it: ${missing.join(", ")}`);
+  const unlisted = ids.filter((id) => !(`tool.${id}` in DEFAULT_KEYS));
+  assert.deepEqual(unlisted, [], `every tool needs an entry in DEFAULT_KEYS, even an empty one: ${unlisted.join(", ")}`);
+}
+console.log("keys.check: every tool has an action, so every tool can be given a shortcut ok");

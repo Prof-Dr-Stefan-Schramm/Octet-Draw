@@ -40,6 +40,15 @@ export const RING_TOOLS: Record<string, RingKind> = { benzene: "benzene", cyclop
 // The command for a ring, where it has one: the other way round.
 export const ringCommand = (kind: string): string | undefined =>
   Object.keys(RING_TOOLS).find((command) => RING_TOOLS[command] === kind);
+// The shortcut a palette slot shows in its tooltip. Usually the slot's own tool command, but the Ring tool's command
+// has no key, so it would have shown none: the key belongs to the ring (J for benzene), and the slot shows the key of
+// the ring it is holding. A ring with no command of its own, such as cyclopropane, has no key to show.
+const toolKey = (keys: (command: string) => string | undefined, tool: Tool, ring: string): string | undefined => {
+  const own = keys(`tool.${tool}`);
+  if (own || tool !== "ring") return own;
+  const command = ringCommand(ring);
+  return command ? keys(`tool.${command}`) : undefined;
+};
 
 // Curved arrows come in four sweeps. Their variants are "kind-sweep", for example "fishhook-180"; a bare kind is 120°.
 // ChemDraw's elliptical arcs are "ellipse-cw" and "ellipse-ccw": 270° round an ellipse 0.4 times as wide as it is long.
@@ -777,7 +786,7 @@ export function Palette(p: PaletteProps) {
               aria-label={t.name}
               aria-haspopup={strip ? "menu" : undefined}
               aria-expanded={strip ? open === t.id : undefined}
-              data-key={p.keys(`tool.${t.id}`) ?? (t.id === "ring" ? p.keys(`tool.${ringCommand(p.variants.ring) ?? ""}`) : undefined)}
+              data-key={toolKey(p.keys, t.id, p.variants.ring)}
               // A selection dragged from the canvas onto the Ring or Template tool goes into My templates.
               {...(t.id === "ring" || t.id === "template" ? { "data-drop-set": MY_SET, "data-drop-tool": t.id } : {})}
               onPointerDown={() => {
