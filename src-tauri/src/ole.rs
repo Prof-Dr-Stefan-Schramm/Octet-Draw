@@ -160,6 +160,64 @@ pub fn object_descriptor(w: i32, h: i32) -> Vec<u8> {
     v
 }
 
+/// The class registration, as a flat list of (subkey, value name, data).
+///
+/// Under `HKEY_CURRENT_USER\Software\Classes`, which needs no administrator and no
+/// installer: Windows merges it into `HKEY_CLASSES_ROOT` for this user. An all-users
+/// install can write the same table to `HKEY_LOCAL_MACHINE` instead.
+///
+/// Modelled on what ChemDraw 25.5 registers on the bench machine, which is the shape Word
+/// expects: an out-of-process server with ole32.dll as the in-process handler, `Insertable`
+/// so it appears in Insert > Object, and the two verbs Word shows in the object's menu.
+///
+/// `exe` is the full path to Octet. The server is started with `-Embedding`, which is how
+/// Windows tells a program it was launched to serve an object rather than by a user.
+pub fn registration(exe: &str) -> Vec<(String, Option<&'static str>, String)> {
+    let guid = guid_string(CLSID);
+    let clsid = format!("CLSID\\{guid}");
+    let mut keys = vec![
+        (clsid.clone(), None, USER_TYPE.to_string()),
+        (format!("{clsid}\\LocalServer32"), None, format!("\"{exe}\" -Embedding")),
+        // The standard handler. It draws the cached picture when Octet is not running,
+        // which is what stops an embedded drawing showing as an empty frame.
+        (format!("{clsid}\\InprocHandler32"), None, "ole32.dll".to_string()),
+        (format!("{clsid}\\ProgID"), None, PROGID.to_string()),
+        (format!("{clsid}\\VersionIndependentProgID"), None, "OctetDraw.Drawing".to_string()),
+        (format!("{clsid}\\Insertable"), None, String::new()),
+        (format!("{clsid}\\DefaultIcon"), None, format!("{exe},0")),
+        // AuxUserType\2 is the short name Word puts in its menus, \3 the program's name.
+        (format!("{clsid}\\AuxUserType\\2"), None, "Octet Draw".to_string()),
+        (format!("{clsid}\\AuxUserType\\3"), None, "Octet Draw".to_string()),
+        // The verbs, in the order the object's menu shows them. "0,2" is: no menu flags,
+        // and the verb may be run on an object that is not already active.
+        (format!("{clsid}\\Verb\\0"), None, "&Edit,0,2".to_string()),
+        (format!("{clsid}\\Verb\\1"), None, "&Open,0,2".to_string()),
+        // What the object can give a host: an enhanced metafile of its content.
+        (format!("{clsid}\\DataFormats\\GetSet\\0"), None, "14,1,32,1".to_string()),
+        // No OLEMISC flags: Octet edits in its own window, as ChemDraw does, not in place.
+        (format!("{clsid}\\MiscStatus"), None, "0".to_string()),
+        // The ProgID side, so Insert > Object can find the class by name.
+        (PROGID.to_string(), None, USER_TYPE.to_string()),
+        (format!("{PROGID}\\CLSID"), None, guid.clone()),
+        (format!("{PROGID}\\Insertable"), None, String::new()),
+        ("OctetDraw.Drawing".to_string(), None, USER_TYPE.to_string()),
+        ("OctetDraw.Drawing\\CLSID".to_string(), None, guid),
+    ];
+    keys.sort_by(|a, b| a.0.cmp(&b.0));
+    keys
+}
+
+/// `{XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX}`, as the registry writes a class id.
+pub fn guid_string(b: [u8; 16]) -> String {
+    format!(
+        "{{{:08X}-{:04X}-{:04X}-{:02X}{:02X}-{:02X}{:02X}{:02X}{:02X}{:02X}{:02X}}}",
+        u32::from_le_bytes([b[0], b[1], b[2], b[3]]),
+        u16::from_le_bytes([b[4], b[5]]),
+        u16::from_le_bytes([b[6], b[7]]),
+        b[8], b[9], b[10], b[11], b[12], b[13], b[14], b[15]
+    )
+}
+
 // cfb wants a uuid::Uuid; OLE writes a CLSID in its mixed-endian form, which Uuid handles.
 fn uuid_of(b: [u8; 16]) -> uuid::Uuid {
     uuid::Uuid::from_fields(
@@ -191,6 +249,40 @@ mod tests {
         std::io::Read::read_to_end(&mut s, &mut got).unwrap();
         assert!(got.ends_with(&emf), "the EMF is the tail of the presentation stream");
         assert_eq!(u32::from_le_bytes(got[4..8].try_into().unwrap()), CF_ENHMETAFILE);
+    }
+
+    #[test]
+    fn the_registration_has_what_word_needs_to_activate_an_object() {
+        let keys = registration(r"C:\Program Files\Octet\octet.exe");
+        let at = |k: &str| keys.iter().find(|(n, _, _)| n == k).map(|(_, _, v)| v.clone());
+        let guid = guid_string(CLSID);
+        // The server, started the way Windows starts one.
+        assert_eq!(
+            at(&format!("CLSID\\{guid}\\LocalServer32")).as_deref(),
+            Some(r#""C:\Program Files\Octet\octet.exe" -Embedding"#)
+        );
+        // The standard handler draws the cached picture while Octet is not running.
+        assert_eq!(at(&format!("CLSID\\{guid}\\InprocHandler32")).as_deref(), Some("ole32.dll"));
+        // Insert > Object finds it, by class and by name.
+        assert!(at(&format!("CLSID\\{guid}\\Insertable")).is_some());
+        assert_eq!(at(&format!("{PROGID}\\CLSID")).as_deref(), Some(guid.as_str()));
+        assert_eq!(at(&format!("CLSID\\{guid}\\ProgID")).as_deref(), Some(PROGID));
+        // The verbs the object's menu shows, in order, as ChemDraw registers its own.
+        assert_eq!(at(&format!("CLSID\\{guid}\\Verb\\0")).as_deref(), Some("&Edit,0,2"));
+        assert_eq!(at(&format!("CLSID\\{guid}\\Verb\\1")).as_deref(), Some("&Open,0,2"));
+        // Nothing is written outside the class and its ProgIDs.
+        for (k, _, _) in &keys {
+            assert!(
+                k.starts_with("CLSID\\") || k.starts_with("OctetDraw.Drawing"),
+                "{k} is under the class or its ProgID"
+            );
+        }
+    }
+
+    #[test]
+    fn the_class_id_reads_as_a_guid() {
+        // Fixed for ever once a document holds it: this is a change-detector on purpose.
+        assert_eq!(guid_string(CLSID), "{5E8A3F2D-149C-B247-A671-0E83D5C91140}");
     }
 
     #[test]
