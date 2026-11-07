@@ -318,10 +318,25 @@ pub fn make_eps(tree: &usvg::Tree) -> Vec<u8> {
 // numbers). The drawing itself is still laid down in logical units of 1/20 pt, so the reference resolution costs the
 // geometry no precision; it only decides what the bounds are counted in.
 //
-// It has to be 96, because Word sizes an enhanced metafile from `rclBounds` — device units read as 96 dpi — and not
-// from `rclFrame`, which is physical. At any other reference the two disagree and Word places the picture by the
-// ratio: 1.1.1 recorded against 720 dpi and Word drew every drawing 7.5 times too large (issue 55, and 7.5 is
-// 720/96). `an_emf_is_the_size_it_says_it_is` holds the two together.
+// It has to be 96, because Word sizes an enhanced metafile two different ways and only at 96 dpi do the two agree.
+// Measured in Word 365 16.0.17932 on Windows 11 (issue 55), pasting the same drawing recorded at each reference:
+//
+//                        bounds   rclFrame   Word's scale on paste   at 100% scale
+//   with text, 720 dpi   563 px   56.21 pt   13%                     422.25 pt  (7.51x)
+//   with text,  96 dpi    75 px   56.21 pt   98%                      57.00 pt  (1.01x)
+//   no text,   720 dpi   720 px   72.00 pt   100%                     72.10 pt  (1.00x)
+//   no text,    96 dpi    96 px   72.00 pt   99%                      72.75 pt  (1.01x)
+//
+// A metafile that CONTAINS TEXT is sized from `rclBounds`, read as though the device were 96 dpi: 563 px that way is
+// 5.8646 in, which is 422.25 pt, exactly what Word gave it. One with no text is sized from `rclFrame`, which is
+// physical and right at any reference — which is why 720 dpi looked fine the first time it was tested, with a
+// picture whose text usvg had dropped. Every real drawing has atom labels.
+//
+// So recorded at 720 dpi a drawing still ARRIVES looking right, because Word compensates with a 13% picture scale.
+// What is wrong is the size Word believes it to be. Reset that picture to 100% — which a template, a macro or a
+// journal's submission workflow does — and it is 7.51 times too large, which is 720/96. At 96 dpi the bounds read at
+// 96 dpi ARE the frame, so both of Word's paths give the same answer and there is nothing to get wrong.
+// `an_emf_is_the_size_it_says_it_is` holds the two sizes together.
 //
 // Issue 20 raised this to 720 because some programs draw a metafile into pixels at its reference resolution, and
 // GDI+'s DrawImage was said to do that at 96 dpi: bonds grew fat and a hashed wedge's hashes ran together. Measured
@@ -686,6 +701,14 @@ pub(crate) mod tests {
             // And what Word will do with it: the bounds read at 96 dpi are the picture's true size in pt.
             assert!((bw * 72.0 / 96.0 - f64::from(w)).abs() <= 1.0, "{w} by {h}: Word would place it {} pt wide", bw * 72.0 / 96.0);
         }
+        // A drawing with text in it, which is the case that actually goes wrong: Word sizes a metafile holding text
+        // from the bounds and one holding none from the frame, so only a picture with labels ever showed the
+        // disagreement. L-proline is 56.21 by 36.55 pt, and at 720 dpi Word made it 422.25 pt.
+        let emf = make_emf(&crate::export::tree(PROLINE).unwrap(), None);
+        let v = |at: usize| i32_at(&emf, at);
+        let bw = f64::from(v(16) - v(8) + 1);
+        assert!(!texts(&emf).is_empty(), "the sample has text in it, or this proves nothing");
+        assert!((bw * 72.0 / 96.0 - 56.21).abs() <= 1.0, "L-proline: Word would place it {} pt wide, not 56.21", bw * 72.0 / 96.0);
     }
 
     // What an EMF writes as text: each EXTTEXTOUTW's string, reference point and dx, and the font it is in (face,

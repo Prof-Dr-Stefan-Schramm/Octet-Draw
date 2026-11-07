@@ -59,11 +59,39 @@ Prof. Schramm compared Octet 1.1.0's EMF with ChemDraw 25.5's for Windows on the
   glyph, or right-to-left text. The faces: those every Windows 10 and 11 has (Arial, Times New Roman, Courier New,
   Calibri, Segoe UI and the other core fonts), and Helvetica, Liberation, Arimo, Tinos and Cousine written as the
   Windows font with the same widths (Arial, Times New Roman or Courier New). The EPS keeps all text as outlines.
-- The metafile's reference device is 720 dpi (20 by 15 in). It was a 96 dpi screen. Programs that draw a metafile
-  into pixels at its reference resolution (GDI+'s DrawImage) made bonds fat and ran a hashed wedge's hashes together
-  at 96 dpi. ChemDraw's is about 261 dpi. At 720 dpi a device pixel is exactly 2 logical units (1/20 pt each) and
-  every size in the header is a whole number; a whole A4 page stays under 50 million pixels. Bounds records are in
-  device pixels.
+- The metafile's reference device is 96 dpi (20 by 15 in, 1,920 by 1,440 px). A device pixel is exactly 15 logical
+  units (1/20 pt each) and every size in the header is a whole number. Bounds records are in device pixels, and the
+  drawing is laid down in those logical units whatever the reference is, so the reference costs the geometry no
+  precision: it only decides what the bounds are counted in.
+
+  **Amended 7 November 2026 (issue 55), reversing the 720 dpi this decision first recorded.** It has to be 96,
+  because Word sizes an enhanced metafile two different ways and only at 96 dpi do the two agree. Measured in Word
+  365 16.0.17932 on Windows 11, the same drawing recorded at each reference and pasted:
+
+  | | bounds | `rclFrame` | Word's scale on paste | at 100% scale |
+  | --- | --- | --- | --- | --- |
+  | with text, 720 dpi | 563 px | 56.21 pt | 13% | **422.25 pt (7.51x)** |
+  | with text, 96 dpi | 75 px | 56.21 pt | 98% | 57.00 pt (1.01x) |
+  | no text, 720 dpi | 720 px | 72.00 pt | 100% | 72.10 pt (1.00x) |
+  | no text, 96 dpi | 96 px | 72.00 pt | 99% | 72.75 pt (1.01x) |
+
+  A metafile that **contains text** is sized from `rclBounds`, read as though the device were 96 dpi: 563 px that way
+  is 5.8646 in, which is 422.25 pt, exactly what Word gave it. One with **no text** is sized from the physical
+  `rclFrame`, which is right at any reference. That is why 720 dpi looked fine the first time it was tested — the
+  test picture's text had been dropped by usvg, and every real drawing has atom labels.
+
+  So at 720 dpi a drawing still arrives looking the right size, because Word compensates with a 13% picture scale.
+  What is wrong is the size Word believes it to be. Reset that picture to 100%, which a template, a macro or a
+  journal's submission workflow does, and it is 7.51 times too large, which is 720/96. It was never every paste that
+  was wrong, only the size Word held and the scale it carried to hide it. At 96 dpi the bounds read at 96 dpi *are*
+  the frame, so both of Word's paths agree and there is nothing to get wrong.
+
+  720 was chosen here because some programs draw a metafile into pixels at its reference resolution, and GDI+'s
+  `DrawImage` was said to do that at 96 dpi: bonds fat, a hashed wedge's hashes run together. That was recorded under
+  Not done below as unchecked, and it has now been checked on a Windows bench. **It does not happen.** Drawing the
+  same metafile recorded at 96 and at 720 dpi through `Graphics.DrawImage` at 1x, 2x and 4x gives identical output —
+  six hashes still six, a double bond's two lines still two, the same ink to the pixel. 720 bought nothing findable
+  and cost the picture its true size. ChemDraw's is about 261 dpi, for the record.
 - Every picture's frame fits its ink (Copy and Export, every format alike): a label counts by its glyphs' ink (canvas
   measureText), a stroke by half its width, and the edges are rounded outward to 0.01 pt. Before, labels counted by
   their line boxes and the edges went out to whole points. L-proline went from 58 by 41 pt to 56.21 by 36.55 pt, its ink within 0.01 pt of each edge (ChemDraw:
@@ -94,8 +122,9 @@ CF_METAFILEPICT, "Embed Source", "Native", "OwnerLink", "Object Descriptor", "Ol
 
 ## Not done
 
-- Not checked on Windows: how Word, PowerPoint and LibreOffice draw the text records and the 720 dpi device, and
-  whether GDI+'s DrawImage now keeps the hashes apart.
+- Word and the reference device have now been checked on a Windows bench, and GDI+'s DrawImage keeps the hashes
+  apart at either resolution: see the amendment above, and issue 55. PowerPoint and LibreOffice are still unchecked,
+  and LibreOffice's paste is issue 48.
 
 ## Risks to check
 
