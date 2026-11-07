@@ -128,6 +128,26 @@ assert.deepEqual(runsOfText(by("Singlet oxygen").mol.captions![0]), [["1", "supe
 assert.deepEqual(runsOfText(by("Triplet oxygen").mol.captions![0]), [["3", "super"], ["O", ""], ["2", "sub"]]);
 assert.deepEqual(runsOfText(by("Excited triplet state").mol.captions![0]), [["3", "super"], ["X", ""], ["*", "super"]]);
 assert.deepEqual(runsOfText(by("Excited sensitiser").mol.captions![0]), [["Sens", ""], ["*", "super"]]);
+// A state's number is a real subscript run, never the Unicode subscript character: U+2080
+// and U+2081 are small full-height digits in Arial rather than subscripts, and they stay
+// those characters in CDXML and in Word, where nobody can restyle them.
+for (const name of ["Jablonski diagram", "Jablonski diagram with vibrational levels"]) {
+  for (const [text, letter, index] of [["S0", "S", "0"], ["S1", "S", "1"], ["T1", "T", "1"]]) {
+    const label = by(name).mol.captions!.find((c) => c.text === text) ?? assert.fail(`${name}: no ${text}`);
+    assert.deepEqual(runsOfText(label), [[letter, ""], [index, "sub"]], `${name}: ${text} is a subscript run`);
+  }
+  assert.ok(by(name).mol.captions!.every((c) => !/[₀-ₜ⁰-ⁿ]/.test(c.text)), `${name}: no Unicode sub- or superscript characters`);
+}
+// hν is two physical quantities, so it is set in italic as the literature sets it, with a
+// real Greek nu. The abbreviations beside it are abbreviations, so they stay upright.
+for (const name of ["Reaction arrow, hν", "Absorption (hν)", "Fluorescence", "Phosphorescence"]) {
+  const [label] = by(name).mol.captions!;
+  assert.ok(label.italic, `${name}: hν is italic`);
+  assert.ok(label.text.includes("ν"), `${name}: a Greek nu, not a Latin v`);
+}
+for (const name of ["Reaction arrow, Δ", "Intersystem crossing", "Internal conversion", "Vibrational relaxation", "Energy transfer"]) {
+  assert.ok(!by(name).mol.captions![0].italic, `${name}: upright`);
+}
 // Absorption points up and emission down, or the diagram says the opposite of what it means.
 assert.ok(by("Absorption (hν)").mol.arrows![0].to[1] > by("Absorption (hν)").mol.arrows![0].from[1], "absorption points up");
 for (const name of ["Fluorescence", "Phosphorescence", "Internal conversion", "Vibrational relaxation"]) {
@@ -145,7 +165,7 @@ for (const name of ["Intersystem crossing", "Internal conversion", "Vibrational 
 for (const name of ["Jablonski diagram", "Jablonski diagram with vibrational levels"]) {
   const m = by(name).mol, lines = m.arrows!.filter((a) => a.kind === "line"), heads = m.arrows!.filter((a) => a.kind === "reaction");
   const label = (text: string) => m.captions!.find((c) => c.text === text) ?? assert.fail(`${name}: no ${text}`);
-  const [s0, s1, t1] = ["S₀", "S₁", "T₁"].map(label);
+  const [s0, s1, t1] = ["S0", "S1", "T1"].map(label);
   assert.ok(s1.y > t1.y && t1.y > s0.y, `${name}: S₁ over T₁ over S₀`);
   assert.ok(t1.x > s1.x && t1.x > s0.x, `${name}: the triplet is to the right of the singlets`);
   // The ground state is the widest level and reaches under the triplet column.

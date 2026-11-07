@@ -69,21 +69,31 @@ const level = (x0, x1, y) => ({ kind: "line", from: xy(x0, y), to: xy(x1, y) });
 
 const sup = (text) => ({ text, script: "super" });
 const sub = (text) => ({ text, script: "sub" });
+// A state label: the number is a real subscript run, never the Unicode subscript character.
+// U+2080 and U+2081 look like small full-height digits in Arial rather than subscripts, and
+// they are not subscripts to anything downstream either — they go into CDXML and into Word
+// as the characters they are, so a reader cannot restyle them and a search for "S1" misses
+// them. S, T and the multiplicity of a state are set this way everywhere in the field.
+const state = (letter, index) => [{ text: letter }, sub(index)];
+// Planck's constant and a frequency are both physical quantities, so hv is set in italic, as
+// the literature sets it. The nu is a real Greek nu (U+03BD), not a Latin vee; in italic it
+// reads as the Greek letter it is rather than as a narrow v.
+const QUANTITY = { italic: true };
 
 // A reaction arrow with hν or Δ written over it — the one piece of photochemical notation
 // that goes in nearly every scheme. The label is a condition on the arrow, so Octet keeps it
 // over the arrow's middle when the arrow is moved, lengthened or turned.
-const over = (label, name, also) =>
-  item(name, also, [{ kind: "reaction", from: xy(0, 0), to: xy(2, 0) }], [[label, 1, 0.4, { on: { arrow: 1, side: "above" } }]]);
+const over = (label, name, also, more = {}) =>
+  item(name, also, [{ kind: "reaction", from: xy(0, 0), to: xy(2, 0) }], [[label, 1, 0.4, { on: { arrow: 1, side: "above" }, ...more }]]);
 
 // The vertical transitions of a state diagram, each on its own, to drop into a scheme or
 // beside a structure.
 const transitions = () => [
-  over("hν", "Reaction arrow, hν", "photochemical, irradiation, light, photolysis, hv"),
+  over("hν", "Reaction arrow, hν", "photochemical, irradiation, light, photolysis, hv", QUANTITY),
   over("Δ", "Reaction arrow, Δ", "thermal, heat, delta, reflux"),
-  item("Absorption (hν)", "excitation, photon, light, vertical, hv", [radiative(0, 0, 2)], [["hν", 0.6, 1 - DROP]]),
-  item("Fluorescence", "emission, radiative, singlet, hv", [radiative(0, 2, 0)], [["hν′", 0.65, 1 - DROP]]),
-  item("Phosphorescence", "emission, triplet, radiative, hv", [radiative(0, 2, 0)], [["hν″", 0.65, 1 - DROP]]),
+  item("Absorption (hν)", "excitation, photon, light, vertical, hv", [radiative(0, 0, 2)], [["hν", 0.6, 1 - DROP, QUANTITY]]),
+  item("Fluorescence", "emission, radiative, singlet, hv", [radiative(0, 2, 0)], [["hν′", 0.65, 1 - DROP, QUANTITY]]),
+  item("Phosphorescence", "emission, triplet, radiative, hv", [radiative(0, 2, 0)], [["hν″", 0.65, 1 - DROP, QUANTITY]]),
   item("Intersystem crossing", "ISC, non-radiative, singlet to triplet", [nonRadiative(0, 1, 1.6, 0)], [["ISC", 1.35, 0.85 - DROP]]),
   item("Internal conversion", "IC, non-radiative, same multiplicity", [nonRadiative(0, 2, 0, 0)], [["IC", 0.6, 1 - DROP]]),
   item("Vibrational relaxation", "VR, non-radiative, cascade", [nonRadiative(0, 1, 0, 0)], [["VR", 0.6, 0.5 - DROP]]),
@@ -119,19 +129,19 @@ const jablonski = () => item(
     radiative(4.2, T1, S0), // phosphorescence
   ],
   [
-    ["S₀", -0.75, S0 - DROP],
-    ["S₁", -0.75, S1 - DROP],
-    ["T₁", 6.15, T1 - DROP],
-    ["hν", 0, 1.5 - DROP],
-    ["hν′", 2.5, 1.5 - DROP],
+    [state("S", "0"), -0.75, S0 - DROP],
+    [state("S", "1"), -0.75, S1 - DROP],
+    [state("T", "1"), 6.15, T1 - DROP],
+    ["hν", 0, 1.5 - DROP, QUANTITY],
+    ["hν′", 2.5, 1.5 - DROP, QUANTITY],
     ["ISC", 3.5, 2.65 - DROP],
-    ["hν″", 4.85, 1 - DROP],
+    ["hν″", 4.85, 1 - DROP, QUANTITY],
   ],
 );
 
 // The same with the vibrational sub-levels a fuller diagram shows: three thinner lines over
 // each electronic state, absorption into the top one of S₁ and vibrational relaxation down
-// to its origin, which is what makes the Stokes shift visible. Labelled S₀, S₁ and T₁ only,
+// to its origin, which is what makes the Stokes shift visible. Labelled S0, S1 and T1 only,
 // since a figure this size is relabelled anyway.
 function jablonskiVibrational() {
   const gap = 0.22;
@@ -149,7 +159,7 @@ function jablonskiVibrational() {
       nonRadiative(SING[1], S1, TRIP[0], T1),
       radiative(4.2, T1, S0 + gap),
     ],
-    [["S₀", -0.75, S0 - DROP], ["S₁", -0.75, S1 - DROP], ["T₁", 6.15, T1 - DROP]],
+    [[state("S", "0"), -0.75, S0 - DROP], [state("S", "1"), -0.75, S1 - DROP], [state("T", "1"), 6.15, T1 - DROP]],
   );
 }
 

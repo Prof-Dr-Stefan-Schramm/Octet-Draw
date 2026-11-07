@@ -48,6 +48,14 @@ as horizontal lines, the ground state at the bottom, and the triplet to the righ
 - A caption's `y` is its baseline, so a label meant to sit level with a line is dropped 0.24 bond lengths (about
   half the cap height of 10 pt text at ACS 1996's bond length). Without this the level labels float above their
   lines.
+- **A state's number is a real subscript run**, never the Unicode subscript character. S₀ was written with U+2080
+  at first: Arial draws it as a small full-height digit rather than a subscript, and it stays that character all the
+  way into CDXML and Word, where nobody can restyle it and a search for `S1` does not find it. S, T and the
+  multiplicity are set as runs, the same way ¹O₂ and ³X* are, and the check file holds every label in the set to
+  having no Unicode sub- or superscript character in it at all.
+- **hν is set in italic**, because h and ν are both physical quantities and that is how the literature sets them.
+  The nu is a real Greek nu, U+03BD. The abbreviations beside it — ISC, IC, VR, EnT, Δ — are abbreviations and a
+  symbol, so they stay upright.
 - Search words carry the field's other names for each thing: `ISC`, `EnT`, `Förster`, `Dexter`, `quenching`,
   `Stokes shift`, `S0 S1 T1`, `hv` for people who cannot type ν, and `1O2`, `3X*`, `Sens*` for the species.
 
