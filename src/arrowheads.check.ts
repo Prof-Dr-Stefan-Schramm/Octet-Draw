@@ -2,7 +2,7 @@
 // where they make sense (its heads at the start and end, their shape and size), and keeps them in .oct, CDXML and
 // what is drawn. A catalytic cycle's arrows take a shape and size for all of them.
 import assert from "node:assert/strict";
-import { ALL_ARROW_KINDS, arrowKind, arrowPicks, HEAD_SHAPES, headMenu, arrowShapes, headSize, headsOf, shapesHeads, sizedHead, takesHeads, type Arrow, type ArrowKind, type Mol } from "./render.ts";
+import { ALL_ARROW_KINDS, arrowKind, arrowPicks, HEAD_SHAPES, headMenu, arrowShapes, headSize, headsOf, shapesHeads, sizedHead, takesHeads, waveAlong, type Arrow, type ArrowKind, type Mol } from "./render.ts";
 import { layoutCycles, type Cycle } from "./cycle.ts";
 import { parse, serialize } from "./file.ts";
 import { readFileSync } from "node:fs";
@@ -159,3 +159,48 @@ assert.match(actionsTsx, /if \(p\) return \{ label: p\.label, groups: \[choices\
 assert.match(actionsTsx, /if \(key === "pick:arrow\.kind"\) return \{ label: "Kind", groups: \[kinds\.map\(\(o\) => \(\{ key: `arrow\.kind\.\$\{o\.id\}`/);
 assert.match(actionsTsx, /\{kindChoices\(context\)\.map\(\(o\) => \(/);
 console.log("arrowheads.check: right-click menu ok");
+
+// A wavy shaft arrives at its head straight and on the shaft's own line.
+//
+// A head is drawn from the arrow's line, not from where the wave happens to be, so a wave still swinging where the
+// head begins leaves the head sitting off the shaft, stuck on askew. waveAlong takes a settle distance at each end
+// for this: within it the height is eased away, so the shaft leaves and arrives flat. The arrow passes one
+// wavelength, and only at an end that has a head.
+{
+  const bond = S.bond, amp = 0.06 * bond, wave = 0.2 * bond, run = 3 * bond;
+  const line: [number, number][] = [[0, 0], [run, 0]];
+  const high = (pts: [number, number][]) => Math.max(...pts.map(([, y]) => Math.abs(y)));
+  const nearEnd = (pts: [number, number][], from: number) => pts.filter(([x]) => x >= from);
+
+  // Sampling steps a twelfth of a wavelength, so a peak can be missed by 15 degrees: 0.96 of the height, not 1.
+  const full = 0.96 * amp;
+  const free = waveAlong(line, amp, wave);
+  assert.ok(high(free) >= full, `a wave with no settle is ${amp.toFixed(2)} px high: ${high(free).toFixed(3)}`);
+  assert.ok(high(nearEnd(free, run - wave / 4)) > amp / 2, "with no settle the wave is still swinging at its end");
+
+  const settled = waveAlong(line, amp, wave, [wave, wave]);
+  assert.ok(high(settled) >= full, "a settled wave still reaches its full height in the middle");
+  // Flat where a head goes: within a tenth of a wavelength of either end, under a twentieth of the height. The head
+  // is drawn along the arrow's line, so this is what keeps the two on one axis.
+  const flat = amp / 20, edge = wave / 10;
+  assert.ok(high(nearEnd(settled, run - edge)) < flat, `settled at the end: ${high(nearEnd(settled, run - edge)).toFixed(4)} px`);
+  assert.ok(high(settled.filter(([x]) => x <= edge)) < flat, "and settled at the start");
+  assert.deepEqual(settled[settled.length - 1], [run, 0], "the last point is on the line itself");
+  assert.deepEqual(settled[0], [0, 0], "and so is the first");
+
+  // One end only, as an arrow with a head at one end asks for: that end is flat, the other still waves.
+  const oneEnd = waveAlong(line, amp, wave, [0, wave]);
+  assert.ok(high(nearEnd(oneEnd, run - edge)) < flat, "settled where the head is");
+  assert.ok(high(oneEnd.filter(([x]) => x <= wave / 4)) > amp / 2, "and left alone where there is none");
+
+  // A shaft shorter than the two settles together: neither settle takes more than half of it, so a short wavy arrow
+  // still looks wavy instead of being flattened along its whole length and passing for a plain one. It cannot reach
+  // its full height — on a shaft one wavelength long the sine peaks a quarter of the way in, where the ease is only
+  // part way up — but it keeps two thirds of it. Measured without the cap, a shaft one wavelength long (0.2 bond
+  // lengths) drew at 16% of the height, which on the page is a straight line; with it, 65%. At 0.3 bond lengths it
+  // is 73% against 100%, and from 0.4 up — two settles' worth — the cap does not come into it at all.
+  const short: [number, number][] = [[0, 0], [wave, 0]];
+  const kept = high(waveAlong(short, amp, wave, [wave, wave])) / amp;
+  assert.ok(kept > 0.5, `a shaft one wavelength long still waves: ${(kept * 100).toFixed(0)}% of its height`);
+}
+console.log("arrowheads.check: a wavy shaft meets its head straight and on the shaft's line ok");

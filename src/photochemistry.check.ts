@@ -146,8 +146,10 @@ for (const name of ["Jablonski diagram", "Jablonski diagram with vibrational lev
   }
   assert.ok(by(name).mol.captions!.every((c) => !/[₀-ₜ⁰-ⁿ]/.test(c.text)), `${name}: no Unicode sub- or superscript characters`);
 }
-// hν is two physical quantities, so it is set in italic as the literature sets it, with a
-// real Greek nu. The abbreviations beside it are abbreviations, so they stay upright.
+// hν carries a real Greek nu, in a face that draws it as one and upright. The literature
+// italicises h and ν, both being physical quantities, and this set does not: an italic serif
+// nu leans back towards the Latin v that the Greek letter is here to stop it being mistaken
+// for. The abbreviations beside it are abbreviations, so they are upright anyway.
 for (const name of ["Reaction arrow, hν", "Absorption (hν)", "Fluorescence", "Phosphorescence"]) {
   const [label] = by(name).mol.captions!;
   // A real Greek nu, U+03BD, and a face that draws it as one. Arial — the document font —

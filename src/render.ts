@@ -2259,11 +2259,15 @@ export function dashes(path: P[], on: number, off: number): [P, P][] {
 // begins puts the head off the shaft's axis.
 export function waveAlong(path: P[], amplitude: number, wavelength: number, settle: [number, number] = [0, 0]): P[] {
   const out: P[] = [];
-  const whole = path.slice(1).reduce((sum, p, i) => sum + len(sub(p, path[i])), 0);
+  let whole = 0;
+  for (let i = 0; i + 1 < path.length; i++) whole += len(sub(path[i + 1], path[i]));
+  // Neither settle takes more than half the path, so a shaft shorter than the two of them together still waves at its
+  // full height in the middle instead of being flattened along its whole length.
+  const ends = settle.map((d) => Math.min(d, whole / 2)) as [number, number];
   // Eased with a cosine, not a straight ramp, so the wave does not kink where it starts to flatten.
   const ease = (x: number) => (1 - Math.cos(Math.PI * Math.min(1, Math.max(0, x)))) / 2;
   const held = (along: number) =>
-    (settle[0] > 0 ? ease(along / settle[0]) : 1) * (settle[1] > 0 ? ease((whole - along) / settle[1]) : 1);
+    (ends[0] > 0 ? ease(along / ends[0]) : 1) * (ends[1] > 0 ? ease((whole - along) / ends[1]) : 1);
   let travelled = 0;
   for (let i = 0; i + 1 < path.length; i++) {
     const p = path[i], q = path[i + 1], d = len(sub(q, p));

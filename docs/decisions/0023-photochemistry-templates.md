@@ -53,9 +53,15 @@ as horizontal lines, the ground state at the bottom, and the triplet to the righ
   way into CDXML and Word, where nobody can restyle it and a search for `S1` does not find it. S, T and the
   multiplicity are set as runs, the same way ¹O₂ and ³X* are, and the check file holds every label in the set to
   having no Unicode sub- or superscript character in it at all.
-- **hν is set in italic**, because h and ν are both physical quantities and that is how the literature sets them.
-  The nu is a real Greek nu, U+03BD. The abbreviations beside it — ISC, IC, VR, EnT, Δ — are abbreviations and a
-  symbol, so they stay upright.
+- **hν is set upright in Times New Roman**, the whole label and not only the nu. The nu is a real Greek nu, U+03BD,
+  and Arial — the document font — draws that character as a plain v, so beside the Latin letter the two are one
+  glyph and the notation is lost. Times New Roman draws it Greek and is already one of the fonts Octet offers
+  (`docstyle.ts` FONTS), so the drawing asks for nothing new; setting only the nu in a serif would leave a
+  sans-serif h beside a serif nu. **This departs from the literature knowingly**: h and ν are physical quantities
+  and are normally italicised, but an italic serif nu leans back towards the very v the Greek letter is here to be
+  told apart from, so legibility wins. A user who wants it italic can set it, and Octet's own fonts are a document
+  style away. The abbreviations beside it — ISC, IC, VR, EnT, Δ — are abbreviations and a symbol, so they stay in
+  the document's own upright font.
 - Search words carry the field's other names for each thing: `ISC`, `EnT`, `Förster`, `Dexter`, `quenching`,
   `Stokes shift`, `S0 S1 T1`, `hv` for people who cannot type ν, and `1O2`, `3X*`, `Sens*` for the species.
 
