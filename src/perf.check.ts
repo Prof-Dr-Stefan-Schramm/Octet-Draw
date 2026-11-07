@@ -102,13 +102,20 @@ for (const [what, budget, op] of OPS) {
 
 // Nothing on the page costs nothing.
 //
-// Every operation above runs on each change the editor makes, so a cost inside one that does not depend on what the
-// drawing holds is paid on every interaction, on every drawing, including an empty one. That is the shape of issue 37
-// — a blank document feeling slow — and the budgets above cannot see it: they only ever measure a 1,000-atom drawing,
-// where a fixed millisecond is lost in the noise. Here each one is run on a drawing with nothing in it.
+// A cost inside one of these that does not depend on what the drawing holds is paid every time it runs, however
+// little is on the page — and several of them run on every change the editor makes (render, complete, messy), so
+// that cost lands on every interaction. The budgets above cannot see it: they only ever measure a 1,000-atom
+// drawing, where a fixed millisecond is lost in the noise. That is the shape of issue 37, a blank document feeling
+// slow. Here each operation is run on a drawing with nothing in it.
 //
-// 0.2 ms is about ten times the slowest of these on the bench (toCdxml, at 0.02 ms, which writes a document header
-// whatever the drawing holds), the same way the budgets above are about ten times Sam's Mac.
+// One flat budget rather than a budget each, which is the opposite of what the large drawing gets, and deliberate.
+// Ten times today's figure would put most of these under a microsecond, where the number is real but the margin is
+// not worth defending and a check would fail on a quiet morning rather than on a regression. What is worth catching
+// is an operation that becomes EXPENSIVE on an empty drawing, and a flat budget catches that. 0.2 ms is about ten
+// times the slowest of them on the bench — toCdxml at 0.019 ms, writing a document header whatever the drawing
+// holds, and the only one of the twelve within two orders of the budget — the same way the budgets above are about
+// ten times Sam's Mac. toCdxml runs on Save, Export and Copy rather than on every change, so even that is paid at
+// human speed.
 const EMPTY_BUDGET = 0.2;
 const nothing: Mol = { atoms: [], bonds: [] };
 const none = new Set<number>();
