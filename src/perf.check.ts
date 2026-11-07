@@ -8,8 +8,14 @@
 // - Growth: on a drawing 4 times as large it takes less than 10 times as long. An operation that grows with the size
 //   takes about 4 to 6 times as long; one that grows with the square of the size (a loop over pairs) takes about 16
 //   times, on any computer.
-// This checks the code that the editor runs, without the window. Before a release, also measure the app itself in
-// headless Chrome with a 4x CPU slow-down (Sam's bench: ~/octet-research/tools/perf/bench.mjs).
+// A third test, over all of them: each operation on a drawing with NOTHING in it has to cost nothing, so that no cost
+// is paid on every interaction whatever the drawing holds (issue 37).
+//
+// This checks the code that the editor runs, WITHOUT THE WINDOW — no React, no DOM, no compositing. So it cannot see
+// a slow render, a re-render storm or a slow web view, which is what a user means by "performance is terrible". On the
+// Windows bench a tool switch on a blank document is about 7 ms in a production build and 42 ms in a dev build, none
+// of which this file measures. Before a release, also measure the app itself in headless Chrome with a 4x CPU
+// slow-down (Sam's bench: ~/octet-research/tools/perf/bench.mjs).
 import assert from "node:assert/strict";
 import { atomsIn, bondOrders, complete, fragments, groupSelection } from "./edit.ts";
 import { messy, problems } from "./check.ts";
@@ -93,5 +99,27 @@ for (const [what, budget, op] of OPS) {
   if (t > budget) slow.push(`${what} takes ${t.toFixed(2)} ms, over its budget of ${budget} ms`);
   if (growth > 10) slow.push(`${what} takes ${growth.toFixed(1)} times as long on a drawing 4 times as large`);
 }
+
+// Nothing on the page costs nothing.
+//
+// Every operation above runs on each change the editor makes, so a cost inside one that does not depend on what the
+// drawing holds is paid on every interaction, on every drawing, including an empty one. That is the shape of issue 37
+// — a blank document feeling slow — and the budgets above cannot see it: they only ever measure a 1,000-atom drawing,
+// where a fixed millisecond is lost in the noise. Here each one is run on a drawing with nothing in it.
+//
+// 0.2 ms is about ten times the slowest of these on the bench (toCdxml, at 0.02 ms, which writes a document header
+// whatever the drawing holds), the same way the budgets above are about ten times Sam's Mac.
+const EMPTY_BUDGET = 0.2;
+const nothing: Mol = { atoms: [], bonds: [] };
+const none = new Set<number>();
+const nothingText = serialize(nothing);
+console.log("perf.check: and the same operations on a drawing with nothing in it");
+for (const [what, , op] of OPS) {
+  let t = Infinity;
+  for (let k = 0; k < 3 && t > EMPTY_BUDGET; k++) t = Math.min(t, time(() => op(nothing, none, none, nothingText)));
+  console.log(`  ${what.padEnd(44)} ${t.toFixed(4).padStart(9)} ms empty (budget ${EMPTY_BUDGET})`);
+  if (t > EMPTY_BUDGET) slow.push(`${what} takes ${t.toFixed(3)} ms on an EMPTY drawing, over its budget of ${EMPTY_BUDGET} ms`);
+}
+
 assert.deepEqual(slow, [], slow.join("\n"));
 console.log("perf.check: ok");
