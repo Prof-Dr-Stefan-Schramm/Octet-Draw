@@ -12,7 +12,7 @@
 // selection. A new user has every section open.
 import { readPalettes, readSize, type FloatingPalette, type SavedTemplate, type TemplateSize } from "./templates";
 import type { OwnName } from "./names";
-import { QUICK, readPurposes, type DocStyle, type OwnPurpose, type PurposeKind } from "./docstyle";
+import { MAX_PRESETS, QUICK, readOwnPreset, readPurposes, type DocStyle, type OwnPreset, type OwnPurpose, type PurposeKind } from "./docstyle";
 import { DEFAULT_FILES, type FilePrefs } from "./SettingsWindow";
 import { DPI_MIN, DPI_MAX, PICTURES } from "./export";
 import { WARNING_TYPES, type WarningType } from "./check";
@@ -49,6 +49,8 @@ export type Settings = {
   // Home starts Quick start), the style of Quick start and of each built-in purpose when the user made it their own
   // with "Use for new documents", and the user's own purposes (templates).
   purpose: string; purposeStyles: Partial<Record<PurposeKind | typeof QUICK, DocStyle>>; ownPurposes: OwnPurpose[];
+  // The user's own style presets, offered in Settings > Document beside Octet's journal styles (20 at most).
+  ownPresets: OwnPreset[];
   files: FilePrefs; // export, copy and import preferences
   settingsModule: string; // the Settings module last open
   curvedArrows: string[];
@@ -87,7 +89,7 @@ export type Settings = {
 export type Swatch = { name: string; hex: string };
 export type RulerUnit = "mm" | "cm" | "in" | "pt" | "pc";
 export const RULER_UNITS: [RulerUnit, string][] = [["mm", "Millimetres"], ["cm", "Centimetres"], ["in", "Inches"], ["pt", "Points"], ["pc", "Picas"]];
-const DEFAULTS: Settings = { snap: true, snapGrid: false, guides: { grid: false, rulers: false, crosshair: false }, rulerUnit: "mm", eraser: 0.15, keys: {}, variants: { select: "box", bond: "single", ring: "benzene", template: "lib:Alanine", symbol: "plus", orbital: "p-shaded", arrow: "reaction", cycle: "circle", sequence: "peptide", shape: "box-plain", bracket: "brackets", more: "tlc" }, strips: {}, actions: true, templates: [], pinned: [], actionLayout: {}, layoutVersion: 3, folded: [], panelMenus: false, captionOptionReturn: false, userName: null, tutorialDone: false, seenNotes: "", homeLayout: readLayout([], []), updates: true, warnings: true, warningTypes: {}, checkCopy: false, pairBars: false, outlines: true, windows: true, lastSeen: 0, purpose: QUICK, purposeStyles: {}, ownPurposes: [], files: DEFAULT_FILES, settingsModule: "document", curvedArrows: ["curved-120", "fishhook-120"], libraryRings: [], palettes: [], librarySize: "medium", dictionary: [], templateSets: [], nameHistory: [], paletteWide: false, palette: [], elementColours: {}, properties: false, propertyRows: ["formula", "weight"], nmrMhz: 400, nmrSolvent: "CDCl₃", nmrSolventPeaks: true, nmrDetails: false, nmrLabels: "auto", massSpec: MS_DEFAULTS, scaleLabels: true, onlineSearch: true, fixedLengths: true, fixedAngles: true, sproutRings: false, clickTriple: false, interpretation: false, autoMap: true, stereoParens: true, hideAbs: false, mdlFlags: false, aromaticOnOpen: "", cursor: "auto", selectColour: SELECT_DEFAULT, sequenceLabels: false };
+const DEFAULTS: Settings = { snap: true, snapGrid: false, guides: { grid: false, rulers: false, crosshair: false }, rulerUnit: "mm", eraser: 0.15, keys: {}, variants: { select: "box", bond: "single", ring: "benzene", template: "lib:Alanine", symbol: "plus", orbital: "p-shaded", arrow: "reaction", cycle: "circle", sequence: "peptide", shape: "box-plain", bracket: "brackets", more: "tlc" }, strips: {}, actions: true, templates: [], pinned: [], actionLayout: {}, layoutVersion: 3, folded: [], panelMenus: false, captionOptionReturn: false, userName: null, tutorialDone: false, seenNotes: "", homeLayout: readLayout([], []), updates: true, warnings: true, warningTypes: {}, checkCopy: false, pairBars: false, outlines: true, windows: true, lastSeen: 0, purpose: QUICK, purposeStyles: {}, ownPurposes: [], ownPresets: [], files: DEFAULT_FILES, settingsModule: "document", curvedArrows: ["curved-120", "fishhook-120"], libraryRings: [], palettes: [], librarySize: "medium", dictionary: [], templateSets: [], nameHistory: [], paletteWide: false, palette: [], elementColours: {}, properties: false, propertyRows: ["formula", "weight"], nmrMhz: 400, nmrSolvent: "CDCl₃", nmrSolventPeaks: true, nmrDetails: false, nmrLabels: "auto", massSpec: MS_DEFAULTS, scaleLabels: true, onlineSearch: true, fixedLengths: true, fixedAngles: true, sproutRings: false, clickTriple: false, interpretation: false, autoMap: true, stereoParens: true, hideAbs: false, mdlFlags: false, aromaticOnOpen: "", cursor: "auto", selectColour: SELECT_DEFAULT, sequenceLabels: false };
 export const SETTINGS_KEY = "octet.settings";
 const KEY = SETTINGS_KEY;
 
@@ -142,6 +144,8 @@ export function loadSettings(): Settings {
       decimals: Number.isInteger(saved.decimals) && saved.decimals >= 0 && saved.decimals <= 8 ? saved.decimals : undefined,
       propertyRows: Array.isArray(saved.propertyRows) ? list<string>(saved.propertyRows, (k) => typeof k === "string" && k.length < 20).slice(0, 30) : DEFAULTS.propertyRows,
       elementColours: Object.fromEntries(Object.entries(typeof saved.elementColours === "object" && saved.elementColours ? saved.elementColours : {}).filter(([k, v]) => /^[A-Z][a-z]?$/.test(k) && typeof v === "string" && /^#[0-9a-f]{6}$/i.test(v))) as Record<string, string>,
+      // Each one through readOwnPreset, so a bad value in the file falls back to the default rather than reaching a drawing.
+      ownPresets: (Array.isArray(saved.ownPresets) ? saved.ownPresets : []).map(readOwnPreset).filter((x: OwnPreset | undefined): x is OwnPreset => !!x).slice(0, MAX_PRESETS),
       palette: list<Swatch>(saved.palette, (c) => typeof c === "object" && c !== null && typeof (c as Swatch).name === "string" && /^#[0-9a-f]{6}$/i.test((c as Swatch).hex)).slice(0, 20),
       // Layouts arranged before the panel's sub-menus (17 October 2026) start again from the new defaults.
       actionLayout: saved.layoutVersion === 3 && typeof saved.actionLayout === "object" && saved.actionLayout !== null && !Array.isArray(saved.actionLayout) ? saved.actionLayout : {},

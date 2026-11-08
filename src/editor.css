@@ -2686,6 +2686,12 @@ button.variant.add {
   min-height: 28px;
   margin-bottom: var(--space-1);
 }
+/* Settings > Document > Style: the preset picker with Save as style… and Remove beside it. */
+.preset-aside {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
 .settings-foot {
   display: flex;
   justify-content: flex-end;

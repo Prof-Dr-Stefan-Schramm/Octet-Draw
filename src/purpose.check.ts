@@ -1,7 +1,7 @@
 // Run: node src/purpose.check.ts. Fails loudly if a purpose (Paper, Thesis, Slides, Poster or the user's own template)
 // stops giving its sizes, page and outlines (IDEA-SIZE-1 to 15), or Quick start stops being the seamless default.
 import assert from "node:assert/strict";
-import { DEFAULT_STYLE, PAGES, edgeAt, PRESETS, PURPOSES, QUICK, QUICK_STYLE, forPurpose, outlines, pageSize, pickPage, presetOf, purposeOf, purposeStyle, readPurposes, readStyle, styleFor, withScale } from "./docstyle.ts";
+import { DEFAULT_STYLE, DRAWN_KEYS, MAX_PRESETS, PAGES, edgeAt, PRESETS, PURPOSES, QUICK, QUICK_STYLE, asPreset, forPurpose, isOwnPreset, outlines, pageSize, pickPage, presetAt, presetNames, presetOf, presetValues, purposeOf, purposeStyle, readOwnPreset, readPurposes, readStyle, setOwnPresets, styleFor, withScale } from "./docstyle.ts";
 import { fromCdxml, toCdxml } from "./cdxml.ts";
 import { readFileSync } from "node:fs";
 
@@ -125,5 +125,37 @@ assert.deepEqual(pickPage({ ...DEFAULT_STYLE, landscape: true }, "A3"), { page: 
   assert.deepEqual(purposeOf(read, "poster"), { name: "Poster", kind: "poster" });
   assert.equal(readPurposes({ purpose: "unot" }).purpose, QUICK);
   assert.equal(readPurposes({ ownPurposes: Array.from({ length: 20 }, (_, k) => ({ ...own, id: `u${k}` })) }).ownPurposes.length, 12);
+}
+// Style presets of the user's own: kept at scale 1, found again by their values, and Octet's own never shadowed.
+{
+  const octets = Object.keys(PRESETS);
+  const mine = asPreset({ ...DEFAULT_STYLE, bond: 16.5, labelFont: "Helvetica", labelSize: 9 });
+  setOwnPresets([{ name: "Schramm Lab", style: mine }]);
+  assert.deepEqual(presetNames(), [...octets, "Schramm Lab"], "the user's presets come after Octet's, which keep their order");
+  assert.deepEqual(presetValues("Schramm Lab"), mine);
+  assert.deepEqual([isOwnPreset("Schramm Lab"), isOwnPreset("Nature"), isOwnPreset("gone")], [true, false, false]);
+  // A drawing with those values says so, at its scale: the sizes are held at 100% and presetAt puts the scale back on.
+  const at1 = { ...DEFAULT_STYLE, ...presetAt("Schramm Lab", 1), preset: "Schramm Lab" };
+  assert.equal(presetOf(at1), "Schramm Lab");
+  assert.deepEqual([presetAt("Schramm Lab", 2).bond, presetAt("Schramm Lab", 2).labelFont], [33, "Helvetica"], "the sizes scale, a font does not");
+  assert.equal(presetOf(readStyle(withScale(at1, 2))), "Schramm Lab", "still the preset at 200%");
+  // Saved from a drawing at 200%, it holds the sizes at 100%, so it reads the same whatever scale it was saved at.
+  assert.deepEqual(asPreset({ ...DEFAULT_STYLE, ...presetAt("Schramm Lab", 2), scale: 2 }), mine);
+  // Octet's own names cannot be taken, a blank name is no preset, and 20 is the most kept.
+  setOwnPresets([{ name: "Nature", style: mine }, { name: "   ", style: mine }]);
+  assert.deepEqual(presetValues("Nature"), PRESETS.Nature, "Octet's Nature is not shadowed");
+  assert.deepEqual(presetNames(), octets, "neither of those was kept");
+  setOwnPresets(Array.from({ length: 25 }, (_, k) => ({ name: `Mine ${k}`, style: mine })));
+  assert.equal(presetNames().length - octets.length, MAX_PRESETS);
+  // From settings: the name trimmed and cut to 40 characters, and the values through readStyle, so a hand-edited
+  // settings file cannot carry a bad size into a drawing.
+  assert.equal(readOwnPreset({ name: "  Group talk  ", style: mine })?.name, "Group talk");
+  assert.equal(readOwnPreset({ name: "x".repeat(60), style: mine })?.name, "x".repeat(40));
+  for (const bad of [{ name: "", style: mine }, { style: mine }, { name: 7, style: mine }, "Group talk", null]) assert.equal(readOwnPreset(bad), undefined, JSON.stringify(bad));
+  const sizes = readOwnPreset({ name: "Bad sizes", style: { bond: -5, labelSize: 1e6, labelFont: 7 } })!;
+  assert.deepEqual([sizes.style.bond, sizes.style.labelSize, sizes.style.labelFont], [DEFAULT_STYLE.bond, DEFAULT_STYLE.labelSize, DEFAULT_STYLE.labelFont], "a bad value falls back to Octet's");
+  assert.deepEqual(Object.keys(sizes.style).sort(), [...DRAWN_KEYS].sort(), "a preset holds the drawn values and nothing else");
+  setOwnPresets([]);
+  assert.deepEqual(presetNames(), octets, "none of the user's own: as before");
 }
 console.log("purpose.check: ok");

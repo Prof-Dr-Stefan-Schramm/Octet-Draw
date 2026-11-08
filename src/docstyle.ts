@@ -72,7 +72,7 @@ export type DocStyle = {
   purpose?: string;
 };
 
-type Drawn = Pick<DocStyle, "bond" | "line" | "bold" | "margin" | "hash" | "spacing" | "labelFont" | "labelSize" | "captionFont" | "captionSize">;
+export type Drawn = Pick<DocStyle, "bond" | "line" | "bold" | "margin" | "hash" | "spacing" | "labelFont" | "labelSize" | "captionFont" | "captionSize">;
 // ChemDraw 26.1's pads, with Times New Roman mapped to Arial (Octet uses no serif fonts; the user can pick one).
 export const PRESETS: Record<string, Drawn> = {
   "ACS Document 1996": { bond: 14.4, line: 0.6, bold: 2, margin: 1.6, hash: 2.5, spacing: 18, labelFont: "Arial", labelSize: 10, captionFont: "Arial", captionSize: 10 },
@@ -97,10 +97,26 @@ export const SCALED = ["bond", "line", "bold", "margin", "hash", "labelSize", "c
 const LIMITS: Record<(typeof SCALED)[number], [number, number]> = {
   bond: [0.4, 720], line: [0.01, 60], bold: [0.02, 120], margin: [0, 100], hash: [0.05, 100], labelSize: [0.1, 999], captionSize: [0.1, 999],
 };
+// A style preset of the user's own (CH-34): their name for it, and a preset's values at scale 1. Settings keeps the
+// list; the page hands it over with setOwnPresets when it changes, the way nmr.ts takes its tables, so presetAt and
+// presetOf find them without every caller carrying the list. A name Octet already uses is ignored, so its own
+// presets can never be shadowed.
+export type OwnPreset = { name: string; style: Drawn };
+export const MAX_PRESETS = 20;
+export const DRAWN_KEYS = ["bond", "line", "bold", "margin", "hash", "spacing", "labelFont", "labelSize", "captionFont", "captionSize"] as const;
+let ownPresets: Record<string, Drawn> = {};
+export const setOwnPresets = (list: OwnPreset[]) => {
+  ownPresets = Object.fromEntries(list.filter((x) => x.name.trim() && !(x.name in PRESETS)).slice(0, MAX_PRESETS).map((x) => [x.name, x.style]));
+};
+// Every preset by name, Octet's first, then the user's; and one preset's values, from either.
+export const presetNames = (): string[] => [...Object.keys(PRESETS), ...Object.keys(ownPresets)];
+export const presetValues = (name: string): Drawn | undefined => PRESETS[name] ?? ownPresets[name];
+export const isOwnPreset = (name: string): boolean => name in ownPresets;
+
 const round = (n: number) => Math.round(n * 1e4) / 1e4;
-// A preset's values at a scale.
+// A preset's values at a scale. An unknown name gives nothing to change, as it did when Octet's were the only ones.
 export const presetAt = (name: string, scale: number): Drawn => {
-  const p = { ...PRESETS[name] };
+  const p = { ...presetValues(name) } as Drawn;
   for (const k of SCALED) p[k] = round(p[k] * scale);
   return p;
 };
@@ -120,7 +136,7 @@ export function withScale(s: DocStyle, want: number): DocStyle {
     if (v > 0) scale = Math.min(Math.max(scale, LIMITS[k][0] / v), LIMITS[k][1] / v);
   }
   scale = Math.round(scale * 1e9) / 1e9;
-  const name = presetOf(s), next = { ...s, scale, ...(name in PRESETS ? presetAt(name, scale) : {}) };
+  const name = presetOf(s), next = { ...s, scale, ...(presetValues(name) ? presetAt(name, scale) : {}) };
   if (!(name in PRESETS)) for (const k of SCALED) next[k] = round(s[k] * (scale / s.scale));
   return { ...next, preset: presetOf(next) };
 }
@@ -175,10 +191,26 @@ export function elementColours(token?: (name: string) => string): Record<string,
   return by;
 }
 
+// A preset of the user's own as settings hold it: the name cut to 40 characters, and the values put through
+// readStyle, so a hand-edited settings file cannot carry a bad size into a drawing. Undefined for anything else.
+export const readOwnPreset = (v: unknown): OwnPreset | undefined => {
+  const o = (typeof v === "object" && v !== null ? v : {}) as { name?: unknown; style?: unknown };
+  if (typeof o.name !== "string" || !o.name.trim()) return undefined;
+  const full = readStyle({ ...DEFAULT_STYLE, ...(typeof o.style === "object" && o.style !== null ? o.style : {}) });
+  return { name: o.name.trim().slice(0, 40), style: Object.fromEntries(DRAWN_KEYS.map((k) => [k, full[k]])) as Drawn };
+};
+// The values a style would keep as a preset: its drawn sizes brought back to scale 1, so it reads the same whatever
+// scale it was saved at (presetAt puts the scale back on).
+export const asPreset = (s: DocStyle): Drawn => {
+  const scale = s.scale || 1, out = Object.fromEntries(DRAWN_KEYS.map((k) => [k, s[k]])) as Drawn;
+  for (const k of SCALED) out[k] = round(out[k] / scale);
+  return out;
+};
+
 // The preset a style matches at its scale, if any.
 export function presetOf(s: DocStyle): string {
   const same = (a: unknown, b: unknown) => (typeof a === "number" && typeof b === "number" ? Math.abs(a - b) <= 1e-4 + 1e-6 * Math.abs(b) : a === b);
-  return Object.keys(PRESETS).find((name) => { const p = presetAt(name, s.scale ?? 1); return (Object.keys(p) as (keyof Drawn)[]).every((k) => same(p[k], s[k])); }) ?? "Custom";
+  return presetNames().find((name) => { const p = presetAt(name, s.scale ?? 1); return (Object.keys(p) as (keyof Drawn)[]).every((k) => same(p[k], s[k])); }) ?? "Custom";
 }
 
 // Read a style from a file or settings, keeping only valid values (anything else falls back to the default).

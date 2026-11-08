@@ -14,7 +14,7 @@ import { listen } from "./listen";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { chemicalText, labelSmiles, GROUPS } from "./labels";
 import { analyse, chiralFlagOnly, structures, expandWithOrigins, stereoFacts, stereoLabels, smilesWeight, toMolfile, toReaction, toSdf, toInchiKey, type RxnStep, type Structure, cipOf, cleanUp, MOST_CLEAN, expandLabels, fragmentMasses, mapReaction, importStructure, toInchi, toInchiAux, measurer, parseStructure, ready, STYLE, textExtent, textWidth, toSmiles } from "./chem";
-import { MAX_PRINT_PAGES, MAX_PURPOSES, PURPOSES, QUICK, edgeAt, pagesOver, fontStack, pageSize, frameStyle, forPurpose, outlines as pageOutlines, purposeOf, readStyle, roundPt, sameStyle, styleFor, withScale, elementColours, COLOURS, FONTS, HIGHLIGHT_COLOURS, RING_FILLS, sizesAt, darkColour, type DocStyle, type Guides, type OwnPurpose, type PurposeKind } from "./docstyle";
+import { MAX_PRESETS, MAX_PRINT_PAGES, MAX_PURPOSES, PURPOSES, QUICK, asPreset, isOwnPreset, setOwnPresets, edgeAt, pagesOver, fontStack, pageSize, frameStyle, forPurpose, outlines as pageOutlines, purposeOf, readStyle, roundPt, sameStyle, styleFor, withScale, elementColours, COLOURS, FONTS, HIGHLIGHT_COLOURS, RING_FILLS, sizesAt, darkColour, type DocStyle, type Guides, type OwnPreset, type OwnPurpose, type PurposeKind } from "./docstyle";
 import { gridLines, gridNudge, gridOf, shownStep, snapToGrid } from "./grid";
 import { RULER, Rulers } from "./Rulers";
 import { Scrollbars } from "./Scrollbars";
@@ -712,6 +712,13 @@ export default function Editor() {
     } catch (e) {
       setNotice(failure(`Octet cannot save ${set} as a ChemDraw template.`, e));
     }
+  }
+  // The user's own style presets reach docstyle.ts, which presetOf and presetAt read, before anything in this render
+  // (or in Settings, which renders under it) asks for a preset by name.
+  const presetsFor = useRef<OwnPreset[]>(undefined);
+  if (presetsFor.current !== settings.ownPresets) {
+    presetsFor.current = settings.ownPresets;
+    setOwnPresets(settings.ownPresets);
   }
   // The user's own dictionary (Structure > Add Structure to Dictionary): names.ts gets the names whenever they change,
   // and names drawn before are drawn again, so a name renamed, removed or given a new structure is never drawn from
@@ -1506,6 +1513,21 @@ export default function Editor() {
     return s.ownPurposes.some((p) => p.id === id) ? { ...s, ownPurposes: s.ownPurposes.map((p) => (p.id === id ? { ...p, style: kept } : p)) }
       : { ...s, purposeStyles: { ...s.purposeStyles, [id]: kept } };
   });
+  // Settings > Document > Style > "Save as style…": the drawn sizes (brought back to scale 1, so the preset reads the
+  // same whatever scale it was saved at) become a style preset of the user's own, offered beside Octet's journal
+  // styles from then on. The same name again saves over it. The open drawing takes the name at once, so the picker
+  // shows it instead of Custom.
+  const savePreset = (name: string) => {
+    const own = { name, style: asPreset(style) };
+    setSettings((s) => ({ ...s, ownPresets: s.ownPresets.some((x) => x.name === name) ? s.ownPresets.map((x) => (x.name === name ? own : x)) : [...s.ownPresets, own].slice(0, MAX_PRESETS) }));
+    set({ ...doc, style: { ...style, preset: name } }, true);
+  };
+  // One of their own goes. A drawing using it keeps its sizes and falls back to Custom, since the sizes live in the
+  // drawing, not in the preset.
+  const removePreset = (name: string) => {
+    setSettings((s) => ({ ...s, ownPresets: s.ownPresets.filter((x) => x.name !== name) }));
+    if (style.preset === name) set({ ...doc, style: { ...style, preset: "Custom" } }, true);
+  };
   // A template of the user's own goes from Home, File > New For and Settings; New then starts Quick start if it started that one.
   const removePurpose = (id: string) => setSettings((s) => ({ ...s, ownPurposes: s.ownPurposes.filter((p) => p.id !== id), purpose: s.purpose === id ? QUICK : s.purpose }));
   // A template made from an experiment page keeps its details and text (experiment.ts templateOf); one made from
@@ -8866,6 +8888,8 @@ export default function Editor() {
           onExportNames={() => void exportNames()}
           onImportNames={() => void importNames()}
           onApplyFile={TAURI && !madeTemplate ? () => void applyStyleFile() : undefined}
+          onSavePreset={settings.ownPresets.length < MAX_PRESETS || isOwnPreset(style.preset) ? savePreset : undefined}
+          onRemovePreset={removePreset}
           keys={settings.keys}
           onKeys={(keys) => setSettings((s) => ({ ...s, keys }))}
           files={settings.files}

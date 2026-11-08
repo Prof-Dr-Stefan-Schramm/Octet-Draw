@@ -15,7 +15,7 @@ import { RULER_UNITS, type RulerUnit, type Swatch } from "./settings";
 import { SELECT_DEFAULT } from "./selectcolour";
 import { EXPORT_FORMATS, PICTURES, type ExportFormat } from "./export";
 import { BACKDROPS, DpiField } from "./ExportDialog";
-import { BACKGROUNDS, COLOURS, elementColours, FONTS, GRID_IN, GRID_MM, PAGE_NAMES, PAGES, PRESETS, PURPOSES, pageSize, pickPage, presetAt, presetOf, withScale, type DocStyle, type PageName } from "./docstyle";
+import { BACKGROUNDS, COLOURS, elementColours, FONTS, GRID_IN, GRID_MM, PAGE_NAMES, PAGES, PRESETS, PURPOSES, isOwnPreset, pageSize, pickPage, presetAt, presetNames, presetOf, presetValues, withScale, type DocStyle, type PageName } from "./docstyle";
 import { ACTIONS, clashes, keyOf, keymap, label as keyLabel, type Keymap } from "./keys";
 import { WARNING_TYPES, type WarningType } from "./check";
 
@@ -54,6 +54,8 @@ type Props = {
   onRenameTemplate: (id: string, name: string) => void;
   onRemoveTemplate: (id: string) => void;
   onApplyFile?: () => void; // the open drawing takes another drawing's style (File > Apply Settings From File…)
+  onSavePreset?: (name: string) => void; // the drawn sizes as a style preset of the user's own; unset when they have as many as Octet keeps
+  onRemovePreset?: (name: string) => void; // one of their own presets goes
   keys: Keymap; // the user's changes to the shortcuts
   onKeys: (keys: Keymap) => void;
   files: FilePrefs;
@@ -422,6 +424,7 @@ export function SettingsWindow(p: Props) {
   const [recording, setRecording] = useState<{ id: string; index: number }>();
   const [note, setNote] = useState<{ id: string; text: string; undo: Keymap }>();
   const [naming, setNaming] = useState<string>(); // the name typed for a new template, while its dialog is open
+  const [namingStyle, setNamingStyle] = useState<string>(); // the same for a style preset of the user's own
   const main = useRef<HTMLDivElement>(null);
   const map = keymap(p.keys);
   const style = p.style;
@@ -432,7 +435,7 @@ export function SettingsWindow(p: Props) {
     if (leaving) return;
     const key = (e: KeyboardEvent) => {
       if (!top()) return;
-      if (naming !== undefined) return; // the new template's dialog has the keys
+      if (naming !== undefined || namingStyle !== undefined) return; // an open dialog has the keys
       if (recording) {
         e.preventDefault();
         e.stopPropagation();
@@ -459,14 +462,14 @@ export function SettingsWindow(p: Props) {
     };
     addEventListener("keydown", key, true);
     return () => removeEventListener("keydown", key, true);
-  }, [recording, query, map, p, leaving, naming]);
+  }, [recording, query, map, p, leaving, naming, namingStyle]);
   // The search takes the focus; making a template, its first setting does (the template, in For).
   useEffect(() => {
     const body = main.current?.querySelector(".settings-body");
     (p.template ? body?.querySelector<HTMLElement>("[aria-checked='true']") ?? body?.querySelector<HTMLElement>("button, input") : search.current)?.focus();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const presets: [string, string][] = [...Object.keys(PRESETS).map((x): [string, string] => [x, x]), ...(style.preset === "Custom" ? [["Custom", "Custom"] as [string, string]] : [])];
+  const presets: [string, string][] = [...presetNames().map((x): [string, string] => [x, x]), ...(style.preset === "Custom" ? [["Custom", "Custom"] as [string, string]] : [])];
   const files = p.files, setFiles = (patch: Partial<FilePrefs>) => p.onFiles({ ...files, ...patch });
 
   const defs: Def[] = useMemo(() => {
@@ -618,7 +621,15 @@ export function SettingsWindow(p: Props) {
         {!query && p.preview}
         {sections(module, list).map((s) => (
           <Section key={s} title={s} defs={list.filter((x) => x.module === module && x.section === s)}
-            aside={s === "Style" ? <Select label="Style preset" value={style.preset} options={presets} onChange={(v) => v in PRESETS && p.onStyle({ ...style, ...presetAt(v, style.scale), preset: v })} /> : undefined} />
+            aside={s === "Style" ? (
+              <span className="preset-aside">
+                <Select label="Style preset" value={style.preset} options={presets} onChange={(v) => presetValues(v) && p.onStyle({ ...style, ...presetAt(v, style.scale), preset: v })} />
+                {/* The sizes as they are, kept under a name of the user's own and offered in the list from then on
+                    (ChemDraw keeps a style in a .cds file; Octet keeps it in Settings, where the list is). */}
+                {p.onSavePreset && <button className="text-button" onClick={() => setNamingStyle(isOwnPreset(style.preset) ? style.preset : "")}>Save as style…</button>}
+                {isOwnPreset(style.preset) && p.onRemovePreset && <button className="text-button" onClick={() => p.onRemovePreset!(style.preset)}>Remove</button>}
+              </span>
+            ) : undefined} />
         ))}
         {!query && (
           <div className="settings-foot">
@@ -692,6 +703,17 @@ export function SettingsWindow(p: Props) {
         return (
           <Dialog title="Save as template" action="Save" onClose={() => setNaming(undefined)} onAction={() => { if (ok) { p.onSavePurpose?.(name); setNaming(undefined); } }}>
             <label className="dialog-row"><span>Name</span><span className="unit-field text"><input aria-label="Name" value={naming} maxLength={40} spellCheck={false} onChange={(e) => setNaming(e.target.value)} /></span></label>
+          </Dialog>
+        );
+      })()}</Exit>
+      <Exit>{namingStyle !== undefined && (() => {
+        // A style name of the user's own: not empty, and not one of Octet's presets or "Custom", which the list uses
+        // for a style that matches none. The same name again saves over it.
+        const name = namingStyle.trim();
+        const ok = !!name && name !== "Custom" && !Object.keys(PRESETS).some((t) => t.toLowerCase() === name.toLowerCase());
+        return (
+          <Dialog title="Save as style" action="Save" onClose={() => setNamingStyle(undefined)} onAction={() => { if (ok) { p.onSavePreset?.(name); setNamingStyle(undefined); } }}>
+            <label className="dialog-row"><span>Name</span><span className="unit-field text"><input aria-label="Name" value={namingStyle} maxLength={40} spellCheck={false} onChange={(e) => setNamingStyle(e.target.value)} /></span></label>
           </Dialog>
         );
       })()}</Exit>
