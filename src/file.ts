@@ -197,8 +197,9 @@ export function parse(text: string): Mol {
       || (a.attach !== undefined && typeof a.attach !== "boolean" && a.attach !== "diamond" && a.attach !== "star") || (a.bead !== undefined && typeof a.bead !== "boolean") || (a.map !== undefined && !int(a.map, 1, 9999))
       || (a.enhanced !== undefined && !(typeof a.enhanced === "string" && /^(abs|&[1-9]\d?|or[1-9]\d?)$/.test(a.enhanced))) || badColour(a.colour) || (a.z !== undefined && !num(a.z)) || (a.depth !== undefined && a.depth !== false) || (a.shade !== undefined && a.shade !== true) || (a.cip !== undefined && a.cip !== true) || badColour(a.halo) || badColour(a.fill) || (a.circle !== undefined && a.circle !== true) || (a.shown !== undefined && a.shown !== true)
       || [a.number, a.hiddenNumber].some((x) => x !== undefined && !(typeof x === "string" && /^[\w'′*-]{1,8}$/.test(x))) || !isScale(a.scale)
-      // A written label's runs: its text, with only bold, italic, underline and superscript or subscript.
-      || (a.runs !== undefined && (typeof a.text !== "string" || !readRuns(a.runs, a.text)?.every((r) => Object.keys(r).every((k) => ["text", "bold", "italic", "underline", "script"].includes(k)))))) throw new Error("This drawing is damaged.");
+      // A written label's runs: its text, with only bold, italic, underline, superscript or subscript, and colour
+      // (issue 64). A label is never partly another font or size.
+      || (a.runs !== undefined && (typeof a.text !== "string" || !readRuns(a.runs, a.text)?.every((r) => Object.keys(r).every((k) => ["text", "bold", "italic", "underline", "script", "colour"].includes(k)))))) throw new Error("This drawing is damaged.");
     const atom: Atom = { label: a.label, location: [a.x as number, a.y as number, (a.z as number | undefined) ?? 0] };
     // depth: false (older files: a 3D structure drawn flat) is how such a structure is drawn now.
     if (a.shade) atom.shade = true;

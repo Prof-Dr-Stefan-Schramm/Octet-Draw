@@ -841,7 +841,7 @@ function drawn(mol: Mol, s: Style, measure: (text: string, face?: Face) => Ink, 
       }
       return [];
     }
-    const look = { ...(a.font ? { font: a.font } : {}), ...(a.bold ? { bold: true } : {}), ...(a.italic ? { italic: true } : {}), ...(a.underline ? { underline: true } : {}) };
+    const look = { ...(a.font ? { font: a.font } : {}), ...(a.bold ? { bold: true } : {}), ...(a.italic ? { italic: true } : {}), ...(a.underline ? { underline: true } : {}), ...(a.colour ? { colour: a.colour } : {}) };
     const shape: Piece[] = [];
     capAt[i] = M('H').ascent;
     // A written label with some characters bold, italic or underlined (its runs): each character's style, by its place
@@ -856,7 +856,9 @@ function drawn(mol: Mol, s: Style, measure: (text: string, face?: Face) => Ink, 
       for (let k = 0; k < text.length; k++) {
         const st = styled[at + k], last = out[out.length - 1];
         if (last && k && styled[at + k - 1] === st) { last.text += text[k]; continue; }
-        out.push({ text: text[k], look: { ...look, ...(st?.bold ? { bold: true } : {}), ...(st?.italic ? { italic: true } : {}), ...(st?.underline ? { underline: true } : {}) }, ...(st?.script && f === 1 ? { script: st.script } : {}) });
+        // A character's own colour (issue 64) over the label's, as its bold or italic is. Colour is not measured, so it
+        // stays out of fc below: a red N takes up what a black N does.
+        out.push({ text: text[k], look: { ...look, ...(st?.bold ? { bold: true } : {}), ...(st?.italic ? { italic: true } : {}), ...(st?.underline ? { underline: true } : {}), ...(st?.colour ? { colour: st.colour } : {}) }, ...(st?.script && f === 1 ? { script: st.script } : {}) });
       }
       return out.map(({ script, ...p }) => {
         const fc = p.look.font || p.look.bold || p.look.italic ? { font: p.look.font, bold: p.look.bold, italic: p.look.italic } : undefined;

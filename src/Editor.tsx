@@ -851,7 +851,7 @@ export default function Editor() {
   // double-click when the first click drew the selection over what the second click presses.
   const lastPick = useRef<{ on: string; time: number }>(undefined);
   // A label's own bold, italic and underline, as a run style (undefined when it has none).
-  const ownStyle = (a: Atom): RunStyle | undefined => (a.bold || a.italic || a.underline ? { ...(a.bold ? { bold: true } : {}), ...(a.italic ? { italic: true } : {}), ...(a.underline ? { underline: true } : {}) } : undefined);
+  const ownStyle = (a: Atom): RunStyle | undefined => (a.bold || a.italic || a.underline || a.colour ? { ...(a.bold ? { bold: true } : {}), ...(a.italic ? { italic: true } : {}), ...(a.underline ? { underline: true } : {}), ...(a.colour ? { colour: a.colour } : {}) } : undefined);
   const editLabel = (atom: number) => {
     const a = doc.atoms[atom], value = a.text ?? (a.label === "C" ? "" : a.label), own = ownStyle(a);
     // The label's own style goes on each run, so the box shows it and it can come off a part.
@@ -6626,8 +6626,14 @@ export default function Editor() {
     if (command === "delete" && context.kind === "grid") return runAction("grid.remove");
     if (command.startsWith("colour.")) {
       const hex = command.slice(7), ink = hex.toLowerCase() === "#000000" ? undefined : hex;
-      // A label being typed takes the colour when its box closes.
-      if (editing) return setEditing({ ...editing, colour: hex });
+      // A label being typed: on the characters selected (issue 64, as a caption's runs take a colour), else the whole
+      // label takes it when its box closes. A character in the label's own colour has none of its own.
+      if (editing) {
+        const [s, e] = labelApi.current?.range() ?? [0, 0];
+        if (s === e) return setEditing({ ...editing, colour: hex });
+        const own = (editing.colour === "element" ? undefined : editing.colour) ?? doc.atoms[editing.atom]?.colour ?? style.colour;
+        return styleLabel((st) => ({ ...st, colour: hex.toLowerCase() === own.toLowerCase() ? undefined : hex }));
+      }
       if (context.kind === "grid" && gridPick) return changeGrid(gridPick.arrow, () => ({ colour: ink }));
       if (context.kind === "caption" && context.mode !== "picked") return runAction(`caption.colour.${hex}`);
       if (context.kind === "spot" && spotPick) return set(editSpot(doc, spotPick.plate, spotPick.index, () => ({ colour: ink })), true);
@@ -8528,8 +8534,11 @@ export default function Editor() {
         const ownSize = (x: Atom) => { const v = Math.round(((editing.size ?? 0) / scaleOf(x)) * 100) / 100; return Math.abs(v - style.labelSize) < 0.01 ? undefined : v; };
         const dress = (m: Mol): Mol => ({ ...m, atoms: m.atoms.map((x, i) => {
           if (!ids.includes(i)) return x;
-          const { bold: _b, italic: _i, underline: _u, runs: _r, ...rest } = x;
-          return { ...rest, ...(st.bold ? { bold: true } : {}), ...(st.italic ? { italic: true } : {}), ...(st.underline ? { underline: true } : {}),
+          const { bold: _b, italic: _i, underline: _u, runs: _r, colour: _c, ...rest } = x;
+          // A colour every character shares is the label's own (issue 64); black is the ink, so it takes the colour off.
+          // A colour chosen with nothing selected (tint above) is the whole label's and comes first.
+          const hue = chosen || !st.colour ? x.colour : st.colour.toLowerCase() === "#000000" ? undefined : st.colour;
+          return { ...rest, ...(hue ? { colour: hue } : {}), ...(st.bold ? { bold: true } : {}), ...(st.italic ? { italic: true } : {}), ...(st.underline ? { underline: true } : {}),
             ...(editing.font ? { font: editing.font === style.labelFont ? undefined : editing.font } : {}), ...(editing.size ? { size: ownSize(x) } : {}) };
         }) });
         // The label's runs (its characters' own styles); a raised or lowered part is drawn, not read (issue 44).
@@ -8555,7 +8564,7 @@ export default function Editor() {
             pending={editing.pending}
             api={labelApi}
             look={(r) => ({ fontWeight: r.bold ? "bold" : "", fontStyle: r.italic ? "italic" : "", textDecoration: r.underline ? "underline" : "",
-              verticalAlign: r.script === "sub" ? "sub" : r.script === "super" ? "super" : "", fontSize: r.script ? "75%" : "" })}
+              verticalAlign: r.script === "sub" ? "sub" : r.script === "super" ? "super" : "", fontSize: r.script ? "75%" : "", color: r.colour ?? "" })}
             style={{ left: view.x + ax * L * view.zoom, top: view.y - ay * L * view.zoom - 0.6 * size - 2, fontSize: size, fontFamily: fontStack(editing.font ?? a.font ?? style.labelFont),
               color: (chosen === "element" ? by[editing.value.trim()] : chosen) ?? a.colour }}
             onRuns={(runs, rebuild) => setEditing((w) => w && { ...w, runs, value: plainOf(runs), ...(rebuild ? { version: (w.version ?? 0) + 1, caret: rebuild, pending: undefined } : {}) })}

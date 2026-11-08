@@ -385,8 +385,8 @@ export function toCdxml(input: Mol, style: DocStyle, opts: CdxmlOptions = {}): s
     return `<s font="${font(s.font)}" size="${fmtSize(s.size)}"${c !== undefined ? ` color="${c}"` : ""}${s.face ? ` face="${s.face}"` : ""}>${escText(text)}</s>`;
   };
   const face = (s: RunStyle) => (s.bold ? 1 : 0) | (s.italic ? 2 : 0) | (s.underline ? 4 : 0) | (s.script === "sub" ? 0x20 : s.script === "super" ? 0x40 : 0);
-  // A written label's text from place at, split where its characters' own bold, italic and underline change (its runs,
-  // as ChemDraw's label <s> runs), each run with the label's face besides.
+  // A written label's text from place at, split where its characters' own bold, italic, underline or colour change (its
+  // runs, as ChemDraw's label <s> runs), each run with the label's face and colour besides.
   const labelText = (a: Atom, text: string, at: number, s: { font: string; size: number; colour?: string; face: number }) => {
     const per = a.text && a.runs && plainOf(a.runs) === a.text ? a.runs.flatMap((r) => r.text.split("").map(() => r)) : undefined;
     if (!per) return run(text, s);
@@ -395,7 +395,7 @@ export function toCdxml(input: Mol, style: DocStyle, opts: CdxmlOptions = {}): s
       while (e < text.length && per[at + e] === per[at + k]) e++;
       // A character in superscript or subscript (issue 44) is that, in place of Formula.
       const own = per[at + k] ?? {};
-      out += run(text.slice(k, e), { ...s, face: (own.script ? s.face & ~0x60 : s.face) | face(own) });
+      out += run(text.slice(k, e), { ...s, ...(own.colour ? { colour: own.colour } : {}), face: (own.script ? s.face & ~0x60 : s.face) | face(own) });
     }
     return out;
   };
@@ -1543,9 +1543,19 @@ export function fromCdxml(input: string | Xml): CdxmlRead {
       if (font && font !== style.labelFont) a.font = font;
       if (size && size >= 0.1 && size <= 999) { labelSizes.set(i, size); if (Math.abs(size - style.labelSize) > 0.01) a.size = size; }
     }
-    // Each run's bold, italic and underline, and its superscript or subscript (face 0x40 or 0x20; 0x60 is Formula).
-    const runs = t?.kids.filter((k) => k.name === "s").map((k): TextRun => { const f = int(k.attrs.face) ?? 0; return { text: k.text, ...(f & 1 ? { bold: true } : {}), ...(f & 2 ? { italic: true } : {}), ...(f & 4 ? { underline: true } : {}),
-      ...((f & 0x60) === 0x40 ? { script: "super" as const } : (f & 0x60) === 0x20 ? { script: "sub" as const } : {}) }; });
+    // Each run's bold, italic and underline, its superscript or subscript (face 0x40 or 0x20; 0x60 is Formula), and its
+    // colour (issue 64: the N of NMe2 in red keeps its red). Where some part of the label is coloured, a part written
+    // black keeps its black, so it is drawn black and not in the label's colour; a label black throughout takes no
+    // colour at all and is left to the document's ink.
+    // The colour a run is drawn in: its own where it has one, else the label's (the node's), else the document's ink.
+    // A run drawn in the label's own colour keeps none of its own, as a caption's runs do, so a label of one colour
+    // stays one colour and a round trip changes nothing.
+    const own = colourOf(n.attrs.color), ink = (own ?? "#000000").toLowerCase();
+    const hue = (k: Xml) => (int(k.attrs.color) !== undefined ? colourOf(k.attrs.color) ?? "#000000" : own ?? "#000000");
+    const ss = t?.kids.filter((k) => k.name === "s") ?? [];
+    const runs = t ? ss.map((k): TextRun => { const f = int(k.attrs.face) ?? 0, c = hue(k);
+      return { text: k.text, ...(f & 1 ? { bold: true } : {}), ...(f & 2 ? { italic: true } : {}), ...(f & 4 ? { underline: true } : {}),
+      ...((f & 0x60) === 0x40 ? { script: "super" as const } : (f & 0x60) === 0x20 ? { script: "sub" as const } : {}), ...(c.toLowerCase() !== ink ? { colour: c } : {}) }; }) : undefined;
     if (t) labels.push({ i, text: t.kids.filter((k) => k.name === "s").map((k) => k.text).join(""), type, isotope, plain: t.attrs.InterpretChemically !== undefined && !yes(t.attrs.InterpretChemically),
       just: t.attrs.LabelJustification ?? t.attrs.Justification, stack: t.attrs.LabelAlignment, turn: t.attrs.RotationAngle, runs });
     else if (type === "GenericNickname" && n.attrs.GenericNickname) labels.push({ i, text: n.attrs.GenericNickname, type });
@@ -1842,7 +1852,7 @@ export function fromCdxml(input: string | Xml): CdxmlRead {
         const per = (l.runs ?? []).flatMap((r) => cleanText(r.text).split("").map((ch) => ({ ch, r })));
         let j = 0;
         const st = labelStyle(normalise(text.split("").map((ch): TextRun => { while (j < per.length && per[j].ch !== ch) j++; const r = per[j++]?.r; return { ...(r ? styleOf(r) : {}), text: ch }; })));
-        if (st.runs) { delete a.bold; delete a.italic; delete a.underline; Object.assign(a, st); }
+        if (st.runs || st.colour) { delete a.bold; delete a.italic; delete a.underline; Object.assign(a, st); if (a.colour === "#000000") delete a.colour; }
         // A raised or lowered part is not read (chemicalText): the label attaches through what is.
         if (a.runs?.some((r) => r.script)) a.label = anchorElement(chemicalText(a.text, a.runs)!) ?? "C";
       }
