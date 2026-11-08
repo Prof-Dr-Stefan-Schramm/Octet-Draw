@@ -49,6 +49,17 @@ assert.ok(at(fresh, SWITCH) < at(fresh, "wait for 0 ethanol in the drawing"));
 const spectrum = step("Each part of a page spectrum");
 const ACTIONS = "WebDriver: POST /session/SESSION/actions", COPY = "wait for application/x-octet+json on the clipboard";
 const menu = (name: string) => spectrum.findIndex((l) => l.startsWith("$ ") && l.endsWith(name));
+// File > Close Window by the name the platform gives it, as drive.mjs asks for it: on Windows
+// it is the system's own item, which muda names Close. The drive prints a menu item's words
+// as it passes them and quotes only the ones with a space in them, so "Close Window" is
+// quoted where Close is not, and the name has to be built the same way to be found.
+//
+// Looking for 'File "Close Window"' here regardless meant this whole file failed on Windows
+// before it reached a single assertion about the app — and a check file stops at its first
+// failure, so every assertion below it was dead there too. That is how a broken closeDrawing
+// got through a full local run of the suite on the Windows bench.
+const quoted = (name: string) => (name.includes(" ") ? `"${name}"` : name);
+const CLOSE = `File ${quoted(process.platform === "win32" ? "Close" : "Close Window")}`;
 const after = (from: number, line: string) => { const k = spectrum.indexOf(line, from + 1); assert.ok(k > from, `no "${line}" after line ${from} in:\n${spectrum.join("\n")}`); return k; };
 const pasted = at(spectrum, "wait for octane-3,5-dione in the drawing"), predicted = after(pasted, "wait for the predicted spectrum");
 assert.ok(menu("Edit Paste") < pasted && pasted < menu("Structure Predict*") && menu("Structure Predict*") < predicted);
@@ -67,7 +78,7 @@ const red = menu("Colour Red"), mouse = spectrum.flatMap((l, k) => (k > red && k
 const undo = spectrum.findIndex((l, k) => k > red && l.startsWith("$ ") && l.endsWith("Edit Undo"));
 assert.ok(mouse.length === 3 && after(mouse[2], COPY) < undo && undo < own, `the resize in:\n${spectrum.join("\n")}`);
 const question = after(cdxml, "wait for the question");
-assert.ok(menu('File "Close Window"') > cdxml && menu('File "Close Window"') < question && after(question, "wait for the window to close") < after(question, SWITCH));
+assert.ok(menu(CLOSE) > cdxml && menu(CLOSE) < question && after(question, "wait for the window to close") < after(question, SWITCH));
 // Close Window on the first drawing (issue 38): Home in the same window, then Quick start and a paste there, so Exit asks.
 const back = step("File > Close Window on the first drawing");
 assert.ok(at(back, "wait for the question") < at(back, "wait for Home in the first drawing's window") && at(back, "wait for Home in the first drawing's window") < at(back, "wait for the drawing"));
