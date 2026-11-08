@@ -1,7 +1,7 @@
 import { Fragment, memo, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState, useSyncExternalStore } from "react";
 import {
   ArrowClockwise, ArrowCounterClockwise, ArrowsOutSimple, Atom as AtomIcon, Dna, Graph as GraphIcon, SelectionInverse, Cube, Flask, Circle, Square, BoundingBox, SelectionSlash, AlignLeft, AlignRight, AlignTop, AlignBottom,
-  AlignCenterHorizontal, AlignCenterVertical, ArrowsOutLineHorizontal, ArrowsOutLineVertical, Eraser, FileArrowDown, FileArrowUp, FilePlus, FlipHorizontal, FlipVertical, FloppyDisk, FolderOpen, FrameCorners,
+  AlignCenterHorizontal, AlignCenterVertical, ArrowsOutLineHorizontal, ArrowsOutLineVertical, Eraser, FileArrowDown, FileArrowUp, FileImage, FilePlus, FlipHorizontal, FlipVertical, FloppyDisk, FolderOpen, FrameCorners,
   GearSix, Keyboard, Lasso, MagicWand, MagnifyingGlassMinus, MagnifyingGlassPlus, Selection, SelectionAll, SlidersHorizontal, TextAlignCenter, TextAlignJustify, TextAlignLeft, TextAlignRight, TextAa,
   TextB, TextItalic, TextT, TextUnderline, Warning, Stack, StackSimple, ArrowsDownUp, FileText, CaretDown, ClockCounterClockwise, X, Info, Printer, Export as ExportIcon, Hash, ArrowsInSimple, Table,
   FileDashed, ArrowsLeftRight, Angle, CornersOut, Faders, FloppyDiskBack, Broom, Files, Unite, MagnetStraight, Paragraph, Resize, Ruler, GridFour, CrosshairSimple, Swatches, DotsNine, CompassTool, ArrowsVertical,
@@ -1475,6 +1475,18 @@ export default function Editor() {
       setNotice(failure("Octet cannot read this file.", e));
     }
   }
+  // File > Insert… (ChemDraw's File > Insert): a picture or a drawing picked from a file dialog goes into the open
+  // drawing. The file goes the road a dropped one goes (src-tauri/src/open.rs), so dropFiles places it: centred on the
+  // point given, selected, in one undo step, a picture at 1 pt per pixel. The menu names no point, so it is the middle
+  // of the canvas as it is shown — the part of the page the user is looking at, not the page's own middle.
+  async function insertFile() {
+    // Home has no drawing to insert into; menuRuns already keeps the command off there, and this says so here too.
+    if (!TAURI || home) return;
+    const box = svg.current?.getBoundingClientRect();
+    const at: [number, number] = box ? [box.left + box.width / 2, box.top + box.height / 2] : [innerWidth / 2, innerHeight / 2];
+    try { await invoke<boolean>("pick_insert_file", { at }); }
+    catch (e) { setNotice(failure("Octet cannot insert this file.", e)); }
+  }
   // Settings > Document > For, and For in the command palette: the open drawing takes a purpose's sizes and page in one
   // undo step. The sizes it holds in points go with the scale (decision 0007).
   const applyPurpose = (id: string) => {
@@ -2273,6 +2285,7 @@ export default function Editor() {
     print: () => void printDrawing(),
     print_selection: () => void printDrawing(true),
     apply_style_file: () => void applyStyleFile(),
+    insert_file: () => void insertFile(),
     about: () => setAbout(true),
     // Atom Properties (Structure menu): the selected atom's element or label, charge, isotope and radical.
     atom_properties: () => atomProperties([...selection][0] ?? hovers.get().atom),
@@ -6468,7 +6481,7 @@ export default function Editor() {
     save: ["Save", `${MOD}S`, <FloppyDisk size={18} />], save_as: ["Save as…", `⇧${MOD}S`, <FloppyDiskBack size={18} />],
     copy_smiles: ["Copy as SMILES", `⌥${MOD}C`, <CopySimple size={18} />], copy_inchi: ["Copy as InChI", "", <IdentificationBadge size={18} />], copy_inchikey: ["Copy as InChIKey", "", <Key size={18} />],
     copy_cdxml: ["Copy as CDXML text", `${MOD}D`, <FileCode size={18} />], copy_mol: ["Copy as MOL text", `⌥${MOD}O`, <FileTxt size={18} />], copy_mol_v2000: ["Copy as MOL V2000 text", `⇧⌥${MOD}O`, <Notepad size={18} />],
-    export: ["Export…", EXPORT_KEYS, <ExportIcon size={18} />], print: ["Print…", `${MOD}P`, <Printer size={18} />], print_selection: ["Print selection…", "", <SelectionForeground size={18} />], apply_style_file: ["Apply settings from file…", "", <PaintRoller size={18} />], page_setup: ["Page setup…", `⇧${MOD}P`, <FileDashed size={18} />],
+    export: ["Export…", EXPORT_KEYS, <ExportIcon size={18} />], print: ["Print…", `${MOD}P`, <Printer size={18} />], print_selection: ["Print selection…", "", <SelectionForeground size={18} />], apply_style_file: ["Apply settings from file…", "", <PaintRoller size={18} />], insert_file: ["Insert…", "", <FileImage size={18} />], page_setup: ["Page setup…", `⇧${MOD}P`, <FileDashed size={18} />],
     about: ["About Octet Draw", "", <Info size={18} />], check_updates: ["Check for updates…", "", <CloudArrowDown size={18} />], report_problem: ["Report a problem…", "", <Bug size={18} />], tutorial: ["Tutorial", "", <GraduationCap size={18} />], atom_properties: ["Atom properties…", "", <Faders size={18} />], bond_properties: ["Bond properties…", "", <FadersHorizontal size={18} />],
     bracket_properties: ["Bracket properties…", "", <BracketsRound size={18} />], rlogic: ["R-Logic query…", "", <TreeStructure size={18} />],
     add_multicentre: ["Add multi-centre attachment", "", <Asterisk size={18} />], add_variable: ["Add variable attachment", "", <AsteriskSimple size={18} />],

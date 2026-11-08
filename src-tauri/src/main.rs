@@ -254,6 +254,11 @@ const OPEN: (&str, &[&str]) = ("Drawings", &["oct", "cdxml", "cdx", "octet"]);
 // File > Open also opens measured spectra (JCAMP-DX and SPC), which go into the drawing that is open (src/jcamp.ts),
 // and ChemDraw template files (.ctp, and .cts stationery), whose panes become a set of templates (src/ctp.ts).
 const OPEN_ALL: (&str, &[&str]) = ("Drawings, spectra and templates", &["oct", "cdxml", "cdx", "octet", "jdx", "dx", "jcamp", "spc", "ctp", "cts"]);
+// File > Insert…: what it offers. Pictures first, as ChemDraw's Insert does, then drawings; a PDF or an EMF goes in
+// as the drawing in it, as dropping one does. Only these two: a structure file is Import a Structure…, and a spectrum
+// or a template file is File > Open, each of which says so in its own name.
+const INSERT: (&str, &[&str]) = ("Pictures and drawings", &["png", "jpg", "jpeg", "gif", "bmp", "tif", "tiff", "webp", "pdf", "emf", "oct", "cdxml", "cdx", "octet"]);
+const INSERT_PICTURES: (&str, &[&str]) = ("Pictures", &["png", "jpg", "jpeg", "gif", "bmp", "tif", "tiff", "webp", "pdf", "emf"]);
 // A ChemDraw template file: read, but never a drawing Octet saves over or lists on Home.
 pub fn is_template_file(path: &Path) -> bool {
     path.extension().and_then(|e| e.to_str()).is_some_and(|e| e.eq_ignore_ascii_case("ctp") || e.eq_ignore_ascii_case("cts"))
@@ -344,6 +349,23 @@ async fn pick_style_file(app: AppHandle) -> Result<Option<String>, String> {
         return Err("This file is larger than 64 MB. Octet cannot open it.".into());
     }
     read_text_or_cdx(&path).map(Some).map_err(|_| "Octet can only take settings from a drawing (Octet, CDXML or CDX).".to_string())
+}
+
+// File > Insert… (ChemDraw's File > Insert): a picture or a drawing to put into the drawing that is open. The file
+// takes the same road a dropped one does (open.rs), so it lands the way a drop lands — centred on `at`, selected, one
+// step to undo, a picture at 1 pt per pixel. `at` is the point in the window to centre it on, in CSS pixels: the
+// middle of the canvas, since the menu names no point itself.
+#[tauri::command]
+async fn pick_insert_file(app: AppHandle, window: tauri::Window, at: (f64, f64)) -> Result<bool, String> {
+    let Some(file) = app.dialog().file().add_filter(INSERT.0, INSERT.1).add_filter(INSERT_PICTURES.0, INSERT_PICTURES.1).blocking_pick_file() else {
+        return Ok(false);
+    };
+    let path = file.into_path().map_err(|e| e.to_string())?;
+    if fs::metadata(&path).map_err(|e| e.to_string())?.len() > MAX_BYTES {
+        return Err("This file is larger than 64 MB. Octet cannot insert it.".into());
+    }
+    open::offer(&app, [path], Some((window.label().to_string(), at.0, at.1)));
+    Ok(true)
 }
 
 // Opens one of Octet's own links in the browser (or, for feedback, the mail app). The page names it; only these fixed
@@ -544,6 +566,7 @@ fn menu(app: &AppHandle, palette: &[String], text: &(Vec<String>, Vec<f64>), ove
         &item("open", "Open…", "CmdOrCtrl+O")?,
         &open_recent,
         &item("import", "Import a Structure…", "")?,
+        &item("insert_file", "Insert…", "")?,
         &sep()?,
         &item("save", "Save", "CmdOrCtrl+S")?,
         &item("save_as", "Save As…", "CmdOrCtrl+Shift+S")?,
@@ -986,7 +1009,7 @@ fn main() {
         .manage(TextLists::default())
         .manage(Purposes::default())
         .manage(TemplateSets::default())
-        .invoke_handler(tauri::generate_handler![recent::recent_list, recent::recent_thumb, recent::recent_remove, recent::open_recent, file_changed, recent::experiment_note, recent::experiment_list, recent::experiment_remove, home::home_read, home::home_write, home::home_pick_drawings, home::home_pick_picture, home::thumb_save, home::thumb_load, home::thumb_drop, revert_drawing, menu_items, set_menu_keys, set_online_search, search::search_online, pubchem::pubchem_structure, open_link, open_licences, reveal_file, open_drawing, pick_style_file, save_drawing, set_check, set_palette, set_text_lists, set_purposes, set_template_sets, import_structure, print_page, clipboard::copy_to_clipboard, clipboard::read_clipboard, export::export_file, export::system_fonts, #[cfg(feedback)] feedback::snapshot, #[cfg(feedback)] feedback::send_feedback, update::update_check, update::update_install, recovery::recovery_write, recovery::recovery_clear, recovery::recovery_list, recovery::recovery_open, recovery::recovery_discard, crashlog::log_error, crashlog::crash_report, crashlog::show_log, quit::set_edited, quit::quit_answer, open::take_opened, windows::open_window, windows::close_window, windows::window_start, windows::window_info, windows::window_empty, windows::window_list, windows::window_show, windows::show_home])
+        .invoke_handler(tauri::generate_handler![recent::recent_list, recent::recent_thumb, recent::recent_remove, recent::open_recent, file_changed, recent::experiment_note, recent::experiment_list, recent::experiment_remove, home::home_read, home::home_write, home::home_pick_drawings, home::home_pick_picture, home::thumb_save, home::thumb_load, home::thumb_drop, revert_drawing, menu_items, set_menu_keys, set_online_search, search::search_online, pubchem::pubchem_structure, open_link, open_licences, reveal_file, open_drawing, pick_style_file, pick_insert_file, save_drawing, set_check, set_palette, set_text_lists, set_purposes, set_template_sets, import_structure, print_page, clipboard::copy_to_clipboard, clipboard::read_clipboard, export::export_file, export::system_fonts, #[cfg(feedback)] feedback::snapshot, #[cfg(feedback)] feedback::send_feedback, update::update_check, update::update_install, recovery::recovery_write, recovery::recovery_clear, recovery::recovery_list, recovery::recovery_open, recovery::recovery_discard, crashlog::log_error, crashlog::crash_report, crashlog::show_log, quit::set_edited, quit::quit_answer, open::take_opened, windows::open_window, windows::close_window, windows::window_start, windows::window_info, windows::window_empty, windows::window_list, windows::window_show, windows::show_home])
         .setup(|app| {
             let handle = app.handle();
             // Files named when Octet starts (Explorer and file managers pass them as arguments).
