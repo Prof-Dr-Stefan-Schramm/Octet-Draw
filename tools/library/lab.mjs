@@ -97,6 +97,8 @@ const open = (ps) => ["open", ps];
 const closed = (ps) => ["closed", ps];
 const line = (x0, y0, x1, y1) => ["line", [{ at: at(x0, y0) }, { at: at(x1, y1) }]];
 const detail = ([kind, ps, more = {}]) => [kind, ps, more, true]; // left out of the icon
+// glassware.mjs builds its items from the same pieces, so both halves of the Lab shelf are made the same way.
+export { item, open, closed, fill, solid, line, detail };
 
 // Round-bottom flask: a sphere, a neck with a lip, and liquid in the bottom of the sphere.
 function roundBottomFlask() {
