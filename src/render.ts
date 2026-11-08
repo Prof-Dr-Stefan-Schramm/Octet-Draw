@@ -1981,15 +1981,20 @@ export function arrowPath(a: Arrow, k: number): P[] {
   return Array.from({ length: n + 1 }, (_, i) => (i === 0 ? S : i === n ? T : [O[0] + r * Math.cos(a0 + (sweep * i) / n), O[1] + r * Math.sin(a0 + (sweep * i) / n)] as P));
 }
 
-// How much of its own size a straight arrow's head is drawn at: ChemDraw keeps a head to two thirds of the arrow.
-// Arcs and pen curves keep their whole head (a curve's ends can be close together).
-const headFit = (a: Arrow, s: Style, k: number) => (a.bend || a.kind === "curve" ? 1 : Math.min(1,(2 * Math.hypot(a.to[0] - a.from[0], a.to[1] - a.from[1]) * k) / 3 / (headSize(a).length * s.line || 1)));
+// How long a path is, in the units of its own points.
+const alongPath = (pts: P[]) => pts.slice(1).reduce((sum, p, i) => sum + len(sub(p, pts[i])), 0);
+// How much of its own size an arrow's head is drawn at: ChemDraw keeps a head to two thirds of the arrow. `along` is
+// how far the shaft runs in px, measured round an arc or a pen curve rather than end to end, so a loop keeps its whole
+// head and a short arc keeps its head inside its own curve.
+const headFit = (a: Arrow, s: Style, along: number) => Math.min(1, (2 * along) / 3 / (headSize(a).length * s.line || 1));
+const straightAlong = (a: Arrow, k: number) => Math.hypot(a.to[0] - a.from[0], a.to[1] - a.from[1]) * k;
 // An arrow as filled polygons in px (y down). Heads are drawn as ChemDraw draws them, at their size (headSize) in
 // line widths: the tip, the barbs their length back and their width off the shaft, and the notch between.
 export function arrowShapes(a: Arrow, s: Style, k: number): P[][] {
   const f = scaleOf(a);
   if (f !== 1) s = { ...s, line: s.line * f, bold: s.bold * f, bond: s.bond * f };
-  const size = headSize(a), fit = headFit(a, s, k);
+  const path = arrowPath(a, k);
+  const size = headSize(a), fit = headFit(a, s, alongPath(path));
   const hw = s.line / 2, H = size.length * s.line * fit, C = size.centre * s.line * fit, W = size.width * s.line * fit;
   const out: P[][] = [];
   const bar = (p: P, q: P, w = hw) => { const u = unit(sub(q, p)), n = perp(u); out.push([add(p, mul(n, w)), add(q, mul(n, w)), add(q, mul(n, -w)), add(p, mul(n, -w))]); };
@@ -2027,7 +2032,10 @@ export function arrowShapes(a: Arrow, s: Style, k: number): P[][] {
   const shape = a.head ?? "solid";
   const head = (pts: P[], half?: "left" | "right") => {
     const T = pts[pts.length - 1], back = cut(pts, H).pop()!, u = unit(sub(T, back)), n = perp(u);
-    const base = add(T, mul(u, -H)), notch = add(T, mul(u, -C));
+    // On a curved shaft the base and the notch sit on the shaft itself, their own distance back along it. Taken along
+    // the chord instead they leave the curve, and the shaft then runs out beside the head as a second curve (#63).
+    const bent = pts.length > 2;
+    const base = bent ? back : add(T, mul(u, -H)), notch = bent ? cut(pts, C).pop()! : add(T, mul(u, -C));
     const barbs = half ? [half === "left" ? -1 : 1] : [1, -1];
     if (shape === "angled") { for (const side of barbs) bar(T, add(base, mul(n, side * W))); return; }
     if (shape === "hollow") {
@@ -2043,7 +2051,7 @@ export function arrowShapes(a: Arrow, s: Style, k: number): P[][] {
   };
   // How far a head takes over the shaft: to its notch (solid), its base (hollow), or not at all (angled).
   const takes = (h: Head) => (h === "none" ? 0 : shape === "angled" ? hw : shape === "hollow" ? H : h === "full" ? C : 0);
-  const path = arrowPath(a, k), [S, T] = [path[0], path[path.length - 1]];
+  const [S, T] = [path[0], path[path.length - 1]];
   // A closed curve ends where it starts: its marks have no direction to go by, and it needs none.
   const u: P = len(sub(T, S)) > 1e-9 ? unit(sub(T, S)) : [1, 0], n = perp(u);
   if (takesHeads(a)) {
@@ -2104,7 +2112,7 @@ export function headBarb(a: Arrow, s: Style, k: number): P | undefined {
   if (scaleOf(a) !== 1) s = { ...s, line: s.line * scaleOf(a) };
   const end = headsOf(a).end, S: P = [a.from[0] * k, -a.from[1] * k], T: P = [a.to[0] * k, -a.to[1] * k];
   if (a.bend || end === "none" || !(takesHeads(a)) || a.kind === "curve" || len(sub(T, S)) < 1e-9) return undefined;
-  const u = unit(sub(T, S)), size = headSize(a), f = headFit(a, s, k);
+  const u = unit(sub(T, S)), size = headSize(a), f = headFit(a, s, straightAlong(a, k));
   return add(add(T, mul(u, -size.length * s.line * f)), mul(perp(u), (end === "left" ? -1 : 1) * size.width * s.line * f));
 }
 
@@ -2114,7 +2122,7 @@ export function blockOutline(a: Arrow, s: Style, k: number): P[] {
   if (scaleOf(a) !== 1) s = { ...s, line: s.line * scaleOf(a) };
   const S: P = [a.from[0] * k, -a.from[1] * k], T: P = [a.to[0] * k, -a.to[1] * k];
   if (len(sub(T, S)) < 1e-9) return [];
-  const u = unit(sub(T, S)), n = perp(u), size = headSize(a), fit = headFit(a, s, k);
+  const u = unit(sub(T, S)), n = perp(u), size = headSize(a), fit = headFit(a, s, straightAlong(a, k));
   const H = size.length * s.line * fit, C = size.centre * s.line * fit, o = ((a.shaft ?? size.length) * s.line) / 2;
   const t = C > 0 ? Math.min(1, Math.max(0, 1 - o / C)) : 1, back = H - t * (H - C);
   const at = (along: number, across: number): P => add(add(T, mul(u, -along)), mul(n, across));
