@@ -23,10 +23,18 @@ const SOLVENT: Record<string, string> = {
 };
 // A solvent's codes go in its table when it has at least two shifts for them, and their median there differs from
 // the median in every solvent by at least this much (ppm). The difference is shrunk towards the median in every
-// solvent as n / (n + 3) for n shifts in the solvent, so a few shifts move a prediction only a little. ¹H has no
-// solvent table: on the held-out tenth (18 October 2026) it made ¹H shifts in a known solvent worse (MAE 0.238 to
-// 0.240 ppm, 1,730 shifts; on O, N and S 1.23 to 1.27 ppm, 67 shifts), and ¹³C better (2.118 to 2.078 ppm, 6,147).
-const SOLVENT_DIFF: Record<Nucleus, number> = { "13C": 0.5, "1H": Infinity }, SHRINK = 3;
+// solvent as n / (n + 3) for n shifts in the solvent, so a few shifts move a prediction only a little.
+// ¹H had no solvent table until 8 November 2026, because on the held-out tenth it costs a little accuracy. It is in
+// now: chemists expect the solvent to move a ¹H prediction, and a picker that changes nothing reads as broken.
+// The threshold is 0.1 ppm, measured against 0.025, 0.05, 0.2 and 0.3 on the held-out tenth. All of them cost about
+// the same (MAE 0.236 ppm from every solvent, 0.237 to 0.238 with the table, over 1,701 shifts), so the choice is
+// coverage, not accuracy: 0.1 moves the most signals, while every shift it moves, it moves by at least 0.1 ppm
+// (40 Hz at 400 MHz), which is a change you can see rather than noise. On the 65 hydrogens on O, N and S it costs
+// more (1.186 to 1.230 ppm); those are the protons whose solvent shift chemists most want, and whose measured
+// spread is widest. What limits this is nmrshiftdb2's solvent-tagged data, not the threshold: of 16 common
+// compounds, the same 5 move at 0.1 as at 0.2, but more of their signals do.
+// ¹³C stays at 0.5 ppm, where the solvent table makes it better (2.119 to 2.079 ppm, 6,148 shifts).
+const SOLVENT_DIFF: Record<Nucleus, number> = { "13C": 0.5, "1H": 0.1 }, SHRINK = 3;
 const CHARGE: Record<number, number> = { 1: 3, 2: 2, 3: 1, 5: -1, 6: -2, 7: -3 };
 
 // One SD record: the molfile (V2000) as a graph with hydrogen counts, and its measured ¹H and ¹³C spectra.

@@ -59,13 +59,18 @@ const ethanol = graph(["C", "C", "O"], [[0, 1, 1], [1, 2, 1]]);
 assert.deepEqual(predict(ethanol, "1H", "D₂O")!.signals.map((s) => s.group), ["CH2", "CH3"]);
 assert.deepEqual(predict(ethanol, "1H", "CD₃OD")!.signals.map((s) => s.group), ["CH2", "CH3"]);
 assert.deepEqual(predict(ethanol, "1H", "CDCl₃")!.signals.map((s) => s.group), ["CH2", "OH", "CH3"]);
-// ¹³C shifts measured in the solvent asked for, where the table has them; none without a solvent. ¹H has no solvent
-// table (it made ¹H worse on held-out spectra).
+// Shifts measured in the solvent asked for, where the table has them; none without a solvent. Both nuclei have a
+// solvent table (data/nmr/README.md): ¹³C since the table was first built, ¹H since 8 November 2026.
 const phenol = graph(["C", "C", "C", "C", "C", "C", "O"], [[0, 1, 2], [1, 2, 1], [2, 3, 2], [3, 4, 1], [4, 5, 2], [5, 0, 1], [0, 6, 1]]);
 const inWater = predict(phenol, "13C", "D₂O")!;
 assert.ok(inWater.signals.some((s) => s.solvent === "D₂O"));
 assert.ok(predict(phenol, "13C")!.signals.every((s) => !s.solvent));
-assert.ok(predict(phenol, "1H", "DMSO-d₆")!.signals.every((s) => !s.solvent));
+assert.ok(predict(phenol, "1H", "DMSO-d₆")!.signals.every((s) => !s.solvent || s.solvent === "DMSO-d₆"));
+// Asked for no solvent, a ¹H prediction never comes from a solvent's table.
+assert.ok(predict(phenol, "1H")!.signals.every((s) => !s.solvent));
+// Phenol's OH is one the ¹H solvent table reaches, so the solvent moves it: the point of having the table at all.
+const ohIn = (solvent?: string) => predict(phenol, "1H", solvent)!.signals.find((s) => s.group === "OH")?.shift;
+assert.ok(Math.abs(ohIn("CDCl₃")! - ohIn("DMSO-d₆")!) > 0.1, "phenol OH moves between CDCl₃ and DMSO-d₆");
 assert.match(detailsTable(inWater), /\tD₂O\t/);
 assert.match(detailsTable(predict(phenol, "13C")!), /\tany solvent\t/);
 // η ligands (Cp and arene rings on a metal). However a ring is drawn, its atoms give the same codes: with two double
