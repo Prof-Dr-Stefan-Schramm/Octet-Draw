@@ -40,6 +40,8 @@ async function same(text: string, what: string) {
   for (const [k, n] of s.names) assert.equal(t.smiles(t.nameCompound(k)), s.smiles[n], `${what}: name ${k}`);
   for (const [k, n] of s.first) if (k) assert.equal(t.smiles(t.nameCompound(k, true)), s.smiles[n], `${what}: marked ${k}`);
   for (const [k, n] of s.cas) assert.equal(t.smiles(t.casCompound(k)), s.smiles[n], `${what}: CAS ${k}`);
+  // And back: the compound a CAS number gives lists that number itself (casOf, for the Properties panel).
+  for (const [k] of s.cas) assert.ok(t.casOf(t.casCompound(k)).includes(k), `${what}: CAS ${k} back again`);
   for (const [k, n] of s.keys) assert.equal(t.smiles(t.keyCompound(k)), s.smiles[n], `${what}: InChIKey ${k}`);
   assert.equal(t.size, s.shown.length, `${what}: names for suggestions`);
   s.shown.forEach(([name, n], i) => { assert.equal(t.written(i), name); assert.equal(t.lower(i), s.lower[i]); assert.equal(t.compound(i), n); });
@@ -71,6 +73,11 @@ assert.equal(t.casCompound("1-1-1"), -1, "a line with no SMILES is left out");
 assert.equal(t.nameCompound(commonKey("no such name")), -1);
 assert.equal(t.nameCompound(""), -1);
 assert.equal([...t.withGram(" ba")].length, 3, "banana banana has the trigram twice, BANANA once");
+// A compound's own CAS numbers, in the order the table has them: the first is the one Wikidata marks as preferred.
+assert.deepEqual(t.casOf(t.nameCompound(commonKey("ethanol"))), ["64-17-5"]);
+assert.deepEqual(t.casOf(t.nameCompound(commonKey("isopropanol"))), ["67-63-0", "64-17-5"], "both, in the table's order");
+assert.deepEqual(t.casOf(t.nameCompound(commonKey("filler 7"))), [], "a compound with no CAS number has none");
+assert.deepEqual(t.casOf(-1), [], "and no compound has none");
 
 // The real dictionary: the same answers as strings, and read in less than half their time (both measured now).
 const file = new URL("../data/names/dictionary.tsv.gz", import.meta.url);

@@ -10,6 +10,7 @@ export type Calculated = {
   tpsa: number; henry?: number; pka: { atom: number; kind: string; pka: number; sd: number }[];
   joback?: { tb: number; tm: number; tc: number; pc: number; vc: number; hf: number; gf: number };
   logS?: number;
+  cas?: string; // looked up, not calculated: the dictionary's number for this structure (src/dictionary.ts)
 };
 // method: how the value is found, and the source, for the report. places: the decimals set for the masses (unset:
 // 4 for the exact mass, 2 for the molecular weight and m/z). predicted: a model's estimate of a measured property,
@@ -28,6 +29,8 @@ const CRIPPEN = "Wildman–Crippen atom contributions (Wildman and Crippen, J. C
 export const PROPERTY_ROWS: Row[][] = [
   [
     { key: "formula", name: "Formula", method: "Molecular formula of the drawn structure, with its implicit hydrogens (Indigo).", value: (s) => s.formula },
+    { key: "cas", name: "CAS number", method: "CAS Registry Number from the compound's entry in Octet's dictionary (built from Wikidata), matched by InChIKey. Looked up, not calculated: a structure the dictionary does not hold has none, and no model can give one.",
+      value: (_, c) => c?.cas },
     { key: "exact", name: "Exact mass", method: "Monoisotopic mass: the most abundant isotope of each element (Indigo).", value: (s, _, d) => (Number.isFinite(s.exact) ? massText(s, "exact", d ?? 4) : undefined) },
     { key: "weight", name: "Molecular weight", method: "Average mass from the standard atomic weights (Indigo).", value: (s, _, d) => massText(s, "weight", d ?? 2) },
     { key: "mz", name: "m/z", method: "Isotope pattern from the isotope masses and abundances in NIST Atomic Weights and Isotopic Compositions (Coursey et al., NIST, 2015); the six most intense peaks, relative to the largest.",

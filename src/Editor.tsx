@@ -92,7 +92,7 @@ import { cursorColour, dragCursor, drawCursors, type Cursors } from "./cursor";
 import { CURSORS, handlePoint, isCorner, percentOf, resizeBy, sideAt, SIDES, type Box as RBox, type Side } from "./resize";
 import { abbreviationOf, cleanOwnName, loadNames, mergeOwnNames, nameToSmiles, nameToAtoms, namesStarting, ownName, ownNamesFile, readOwnNamesFile, renameOwnName, setOwnNames, suggestName, knownName, looksLikeSmiles, withOwnName, withoutOwnName, type OwnName } from "./names";
 import { isTemplateFile, readTemplateFile, writeTemplateFile } from "./ctp";
-import { casProblem, nameList } from "./dictionary";
+import { casProblem, dictionaryCas, loadDictionary, nameList } from "./dictionary";
 import { PEPTIDE, peptideProblem } from "./peptide";
 import { relabel, residueName, residuesOf, SEQ_ENDS, sequenceParts, sequenceText, type SeqKind, type SeqParts } from "./sequence";
 import { NUCLEIC, nucleicProblem } from "./nucleic";
@@ -5822,6 +5822,16 @@ export default function Editor() {
   }, [sweep, selection]);
   const propertySelection = !sweep ? selection : paused?.sweep === sweep ? paused.selection : undefined;
   const lastProperties = useRef<{ atoms: number[][]; values: PropertyValues }>(undefined);
+  // The CAS row reads the dictionary, which is loaded on demand (names.ts asks for it when a name is typed). Opening
+  // the Properties panel asks for it as well, so the row is there without typing a name first; until it is in, the row
+  // has no value and the panel leaves it out.
+  const [dictionaryIn, setDictionaryIn] = useState(false);
+  useEffect(() => {
+    if (!settings.properties || dictionaryIn) return;
+    let gone = false;
+    void loadDictionary().then(() => { if (!gone) setDictionaryIn(true); }, () => undefined);
+    return () => { gone = true; };
+  }, [settings.properties, dictionaryIn]);
   const properties = useMemo(() => {
     if (!loaded || !settings.properties) return undefined;
     if (!propertySelection) return lastProperties.current;
@@ -5830,14 +5840,28 @@ export default function Editor() {
     const ids = propertySelection.size ? [...propertySelection].filter((i) => i < doc.atoms.length).sort((a, b) => a - b) : own ? [...own].sort((a, b) => a - b) : chem.mol.atoms.map((_, i) => i);
     const base = propertySelection.size ? subset(doc, propertySelection) : own ? subset(chem.mol, own) : chem.mol, groups = fragments(base), found = structures(base, groups);
     if (!found) return undefined;
-    const kept = groups.map((g, k) => ({ atoms: g.map((i) => ids[i]), s: found[k] })).filter((x) => x.s).slice(0, 12);
+    const kept = groups.map((g, k) => ({ atoms: g.map((i) => ids[i]), part: g, s: found[k] })).filter((x) => x.s).slice(0, 12);
+    // The CAS number is looked up, not calculated: the structure's InChIKey against the dictionary. A structure
+    // Indigo cannot write an InChIKey for simply has none.
+    const cas = new Map<Structure, string>();
+    if (dictionaryIn) {
+      for (const x of kept) {
+        try {
+          const number = dictionaryCas(toInchiKey(subset(base, new Set(x.part))));
+          if (number) cas.set(x.s!, number);
+        } catch { /* no key, no number */ }
+      }
+    }
     // Octet's own calculators, once for each structure's values; pKa sites above 13 (alcohols, amides) are left out.
     const calc = (s: Structure, g: Graph) => {
       if (!calculated.has(s)) { const p = calculate(g); calculated.set(s, { ...p, pka: p.pka.filter((x) => x.pka < 13), logS: s.logP !== undefined ? logS(s.logP, s.weight, p) : undefined }); }
-      return calculated.get(s);
+      const own = calculated.get(s);
+      // cas is not kept in `calculated`: that cache is keyed by Structure, and chem.ts hands back the same Structure
+      // object, so a number looked up before the dictionary was in would stick for the rest of the session.
+      return own && { ...own, cas: cas.get(s) };
     };
     return { atoms: kept.map((x) => x.atoms), values: propertyValues(kept.map((x) => x.s!), calc, settings.decimals) };
-  }, [loaded, settings.properties, settings.decimals, doc, chem, propertySelection, picked]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [loaded, settings.properties, settings.decimals, doc, chem, propertySelection, picked, dictionaryIn]); // eslint-disable-line react-hooks/exhaustive-deps
   lastProperties.current = properties;
   // The Mass spec panel (MassSpec.tsx): the structure it analyses (the one with an atom it opened on, as the drawing
   // changes). Its fragmentation lines are the drawing's cut lines.

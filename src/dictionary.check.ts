@@ -8,7 +8,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { gunzipSync } from "node:zlib";
 import { DRUGS } from "./drugs.ts";
 import { attachOpsin, looksLikeSmiles, nameToSmiles, namesStarting, suggestName } from "./names.ts";
-import { attachDictionary, casProblem, casValid, dictionarySmiles, nameList, peptideName } from "./dictionary.ts";
+import { attachDictionary, casProblem, casValid, dictionaryCas, dictionarySmiles, nameList, peptideName } from "./dictionary.ts";
 import { condensedSmiles } from "./condensed.ts";
 
 const dir = new URL("./vendor/opsin/", import.meta.url), table = new URL("../data/names/dictionary.tsv.gz", import.meta.url);
@@ -66,6 +66,13 @@ const CAS: Record<string, string> = {
   "103-90-2": "RZVAJINKPMORJF-UHFFFAOYSA-N",
 };
 for (const [cas, want] of Object.entries(CAS)) { assert.ok(casValid(cas), cas); assert.equal(read(cas), want, cas); }
+// The other way round, for the Properties panel's CAS number row: a structure's InChIKey gives the number the
+// dictionary holds for that compound, the one Wikidata marks as preferred. Looked up, never worked out, so a compound
+// the dictionary does not hold has none at all rather than a guess.
+for (const [cas, key] of Object.entries(CAS)) assert.equal(dictionaryCas(key), cas.replace(/[^0-9-]/g, ""), key);
+assert.equal(dictionaryCas("  bsynrymutxbxsq-uhfffaoysa-n  "), "50-78-2", "a key in lower case, with spaces round it");
+assert.equal(dictionaryCas("AAAAAAAAAAAAAA-AAAAAAAAAA-A"), undefined, "a compound the dictionary does not hold");
+assert.equal(dictionaryCas(""), undefined);
 // Reagents with their CAS numbers from the FDA's UNII list (5 November 2026): endo and exo carbic anhydride with their
 // stereo, DMAP and DABCO.
 const UNII: Record<string, string> = {

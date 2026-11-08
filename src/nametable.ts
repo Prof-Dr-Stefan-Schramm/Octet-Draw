@@ -245,6 +245,14 @@ export class NameTable {
   smiles(n: number): string | undefined {
     return n < 0 ? undefined : this.text(...this.fieldOf(n, 0));
   }
+  // Compound n's CAS registry numbers (field 2), in the order the table has them: the first is the one Wikidata
+  // marks as preferred. Empty for a compound with none. The other way round from casCompound.
+  casOf(n: number): string[] {
+    if (n < 0) return [];
+    const out: string[] = [];
+    this.each(this.fieldOf(n, 2), (a, b) => out.push(this.text(a, b)));
+    return out;
+  }
 
   // ——— Suggestions ———
   // Built in a worker thread when there is one (nametable.worker.ts), so the page does no more work than the lookups

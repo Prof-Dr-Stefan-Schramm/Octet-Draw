@@ -65,6 +65,14 @@ function casNumber(text: string): string | undefined {
 const INCHIKEY = /^(?:InChIKey=)?([A-Z]{14}-[A-Z]{10}-[A-Z])$/i;
 export const inchiKeyOf = (text: string): string | undefined => INCHIKEY.exec(text.trim())?.[1].toUpperCase();
 
+// The CAS registry number for a structure, by its InChIKey: the dictionary's first one for that compound, which is the
+// number Wikidata marks as preferred. Undefined for a compound the dictionary does not have, and while the dictionary
+// is still loading — there is nothing to fall back on, since a CAS number cannot be worked out from a structure.
+export function dictionaryCas(inchiKey: string): string | undefined {
+  if (!table || !inchiKey) return undefined;
+  return table.casOf(table.keyCompound(inchiKey.trim().toUpperCase()))[0];
+}
+
 // SMILES for a name from the dictionary, a CAS number, an InChIKey the dictionary has, a condensed formula (PhCH2OH),
 // a peptide sequence (Ala-Gly-Ser) or an amino acid written "alpha alanine". Undefined for anything else. read: OPSIN,
 // for the systematic name of a peptide.
