@@ -39,6 +39,10 @@ jobs:
       - run: npm ci
       - name: Type check and check files
         run: npm test
+      # What an interaction costs in a real browser, which the check files cannot see (scripts/ui-perf.mjs). The
+      # machine's own Chrome measures it, headless.
+      - name: The window's budgets
+        run: node scripts/ui-perf.mjs
       - name: Rust tests
         run: cargo test --manifest-path src-tauri/Cargo.toml
       - name: npm audit
