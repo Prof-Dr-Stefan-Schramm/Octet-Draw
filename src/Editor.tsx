@@ -5098,6 +5098,9 @@ export default function Editor() {
     if (id === "atom.sproutlabel" && atom !== undefined) return sproutLabel([atom]);
     if (id === "charge.plus" && atom !== undefined) return set(addCharge(doc, atom, 1));
     if (id === "charge.minus" && atom !== undefined) return set(addCharge(doc, atom, -1));
+    // The same charge the Symbols tool's circled plus and minus give (issue 60), so a key can reach them too.
+    if (id === "charge.circledplus" && atom !== undefined) return set(addSymbol(doc, atom, "circledPlus"));
+    if (id === "charge.circledminus" && atom !== undefined) return set(addSymbol(doc, atom, "circledMinus"));
     if (kind === "subst" && atom !== undefined) return set(stepSubstituents(doc, atom, arg as "free" | "upto" | "exactly" | "lower"));
     if (kind === "menu") return commands.current[id.slice(5)]?.(); // a menu command on a key (Settings)
     if (kind === "action") { runAction(id.slice(7)); return; } // an Actions panel action on a key (Settings)
@@ -6951,6 +6954,7 @@ export default function Editor() {
       // ChemDraw's Repeat Last Label: the last label typed, on this atom.
       if (command === "repeat_label" && lastLabel.current) return set(setLabel(doc, i, lastLabel.current), true);
       if (command === "charge.plus" || command === "charge.minus") return set(addCharge(doc, i, command === "charge.plus" ? 1 : -1), true);
+      if (command === "charge.circledplus" || command === "charge.circledminus") return set(addSymbol(doc, i, command === "charge.circledplus" ? "circledPlus" : "circledMinus"), true);
     }
     if (context.kind === "bond") {
       const bi = doc.bonds.findIndex((b) => selection.has(b.atoms[0]) && selection.has(b.atoms[1])), arg = command.split(".")[1];

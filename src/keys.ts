@@ -33,6 +33,10 @@ export const ACTIONS: Action[] = [
   { id: "atom.nickname", name: "Choose a nickname for the atom", group: "Atoms", place: "atom" },
   { id: "charge.plus", name: "Add a positive charge", group: "Atoms", place: "atom" },
   { id: "charge.minus", name: "Add a negative charge", group: "Atoms", place: "atom" },
+  // The circled charges the Symbols tool draws, on a key as well (issue 60). ChemDraw has no key for these at all:
+  // its hotkey table has one CHARGE command, on + and -, and nothing circled, so these take no key by default.
+  { id: "charge.circledplus", name: "Add a circled positive charge", group: "Atoms", place: "atom" },
+  { id: "charge.circledminus", name: "Add a circled negative charge", group: "Atoms", place: "atom" },
   group("chain", "Add a bond (zig-zag)"), group("other", "Add a bond the other way"), group("acetyl", "Add an acetyl, or make C=O"),
   group("phenyl", "Add a phenyl"), group("wedgeMe", "Add a wedged methyl"), group("hashMe", "Add a hashed methyl"),
   group("cyclohexyl", "Add a cyclohexyl"), group("cyclopentyl", "Add a cyclopentyl"), group("cyclobutyl", "Add a cyclobutyl"),
@@ -101,7 +105,7 @@ export const DEFAULT_KEYS: Record<string, string[]> = {
   "label.Me": ["m"], "label.Et": ["e"], "label.Ph": ["shift+p"], "label.Ac": ["shift+a"], "label.OMe": ["shift+o"], "label.CO2Me": ["shift+e"],
   "label.CF3": ["shift+f"], "label.NO2": ["shift+n"], "label.N3": ["shift+z"], "label.MgBr": ["shift+m"], "label.Fmoc": ["shift+q"],
   "label.Cbz": ["shift+h"], "label.Boc": ["y", "shift+y"], "label.D": ["d"], "label.R": ["r"], "label.X": ["x"], "atom.attach": ["."], "atom.number": ["'"], "atom.properties": ["/", "?"], "atom.nickname": ["="], "select.here": ["g"],
-  "charge.plus": ["+"], "charge.minus": ["-"],
+  "charge.plus": ["+"], "charge.minus": ["-"], "charge.circledplus": [], "charge.circledminus": [],
   "group.chain": ["1"], "group.other": ["0"], "group.acetyl": ["2"], "group.phenyl": ["3", "a"], "group.wedgeMe": ["4"], "group.hashMe": ["5"],
   "group.cyclohexyl": ["6"], "group.cyclopentyl": ["7"], "group.methylidene": ["8"], "group.dimethyl": ["9"], "group.alkyne": ["z"],
   "group.cpLigand": ["j"], "group.phenylLigand": ["shift+j"],

@@ -27,6 +27,9 @@ export const ESCAPES: Record<string, string> = {
   to: "→", rightarrow: "→", gets: "←", leftarrow: "←", leftrightarrow: "↔", rightleftharpoons: "⇌", uparrow: "↑", downarrow: "↓",
   // Marks on a species or a state.
   ddagger: "‡", dagger: "†", bullet: "•", ast: "✱",
+  // Circled charges (issue 60), so one can stand on its own in a caption, away from any atom: a charge written beside
+  // a species, over a bracket, or in a mechanism's key. On an atom they are the Symbols tool's, not these.
+  oplus: "⊕", ominus: "⊖",
 };
 
 // Each name to replace in `text`: where its backslash is, how many characters go, and what comes instead. As many of

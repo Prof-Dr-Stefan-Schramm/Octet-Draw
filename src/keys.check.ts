@@ -16,6 +16,17 @@ assert.equal(actionFor(map, "h", "bond"), "bond.hashwedge");
 assert.equal(actionFor(map, "w", "bond"), "bond.wedge");
 assert.equal(actionFor(map, "shift+w", "bond"), "bond.hashwedge");
 assert.equal(actionFor(map, "w", "atom"), "element.N");
+// Issue #60: the circled charges the Symbols tool draws can be put on a key, over an atom, as the plain charges are.
+// They have none by default: ChemDraw's hotkey table has one charge command, on + and -, and nothing circled, so
+// there is no default of its to follow. ( and ) are free for them, and clash with nothing where an atom is.
+assert.ok(!map["charge.circledplus"]?.length && !map["charge.circledminus"]?.length);
+assert.equal(actionFor(keymap({ "charge.circledplus": ["("] }), "(", "atom"), "charge.circledplus");
+assert.equal(actionFor(keymap({ "charge.circledminus": [")"] }), ")", "atom"), "charge.circledminus");
+assert.deepEqual(clashes(map, "charge.circledplus", "("), []);
+assert.deepEqual(clashes(map, "charge.circledminus", ")"), []);
+// The plain charges keep ChemDraw's + and -.
+assert.equal(actionFor(map, "+", "atom"), "charge.plus");
+assert.equal(actionFor(map, "-", "atom"), "charge.minus");
 // Hollow wedge and dative take a key but have none by default, as in ChemDraw.
 assert.ok(!map["bond.hollow"]?.length && !map["bond.dative"]?.length);
 assert.equal(actionFor(keymap({ "bond.hollow": ["shift+v"] }), "shift+v", "bond"), "bond.hollow");
@@ -219,3 +230,14 @@ for (const mac of [true, false]) {
   assert.ok(editor.indexOf("if (MAC && e.ctrlKey) {") < at, "the Mac's Control-click goes to the context menu first");
 }
 console.log("keys.check: Ctrl-click adds to the selection on Windows and Linux ok");
+
+// Issue #60: a circled charge from a key is the Symbols tool's own mark, not a second way of making one, so the atom
+// comes out the same whichever way it was put there. Both ways the command can be run reach addSymbol.
+{
+  const editor = readFileSync(new URL("Editor.tsx", import.meta.url), "utf8");
+  for (const [id, kind] of [["charge.circledplus", "circledPlus"], ["charge.circledminus", "circledMinus"]] as const)
+    assert.ok(editor.includes(`if (id === "${id}" && atom !== undefined) return set(addSymbol(doc, atom, "${kind}"));`), `${id} on a key adds the ${kind} mark`);
+  assert.ok(editor.includes(`if (command === "charge.circledplus" || command === "charge.circledminus") return set(addSymbol(doc, i,`),
+    "the Atoms menu and the command palette add the same mark");
+}
+console.log("keys.check: circled charges on a key ok");

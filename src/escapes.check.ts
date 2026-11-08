@@ -12,6 +12,9 @@ for (const [typed, kept] of [
   ["\\delta+", "δ+"], ["h\\nu", "hν"], ["\\Delta G\\ddagger", "Δ G‡"], ["\\lambda_max", "λ_max"], ["A \\to B", "A → B"], ["\\alpha-D-glucose", "α-D-glucose"],
   ["\\leq", "≤"], ["x \\leq 5", "x ≤ 5"], ["\\neq", "≠"], ["\\geq", "≥"], ["\\cdots", "⋯"], ["\\pm", "±"], ["\\mu", "μ"], ["\\AA", "Å"], ["25 \\degree C", "25 ° C"],
   ["\\Delta T", "Δ T"], ["\\Delta{}T", "ΔT"], ["\\sum", "∑"], ["\\Sigma", "Σ"],
+  // Issue 60: a circled charge standing on its own, away from any atom. The Character Map has had both all along;
+  // these are the names for typing them, so the two ways to type a character agree.
+  ["\\oplus", "⊕"], ["\\ominus", "⊖"], ["R\\oplus + X\\ominus", "R⊕ + X⊖"],
   // Stays as typed: not a name (exactly), a path, a doubled backslash.
   ["\\DeltaT", "\\DeltaT"], ["\\leqq", "\\leqq"], ["\\number", "\\number"], ["C:\\new\\data", "C:\\new\\data"], ["\\temp\\pictures", "\\temp\\pictures"],
   ["\\\\delta", "\\\\delta"], ["\\", "\\"], ["\\constructor", "\\constructor"], ["\\toString", "\\toString"], ["no backslash", "no backslash"],
@@ -68,6 +71,8 @@ for (const [group, cs] of CHAR_GROUPS) {
   assert.equal(new Set(cs).size, cs.length, `${group}: each character once`);
   for (const ch of cs) assert.ok(charName(ch) !== ch && charName(ch).length > 2, `${ch} has a name`);
 }
+// Issue 60: the circled charges are in the map and have a name to type them by, so neither way is the only way.
+for (const ch of "⊕⊖") assert.ok(all.includes(ch) && Object.values(ESCAPES).includes(ch), `${ch} is in the map and has a name`);
 assert.equal(charName("δ"), "Greek delta");
 assert.equal(charName("Δ"), "Greek capital delta");
 assert.equal(charName("₂"), "Subscript two");
