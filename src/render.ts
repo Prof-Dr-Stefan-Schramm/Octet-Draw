@@ -451,6 +451,7 @@ export type Annotation = { keyword: string; content: string };
 export type Grid = {
   arrow: number; typed: Record<string, Partial<Record<"mass" | "moles" | "equiv" | "volume" | "density" | "molarity" | "purity" | "measured", number>>>; limiting?: string;
   hidden?: { rows?: string[]; cols?: string[] }; colour?: string; layout?: "rows";
+  literature?: Record<string, number>; // each product's yield in the literature (by its key), a fraction
 };
 // A group (Object > Group): atoms and other objects (captions, arrows, shapes, cycles, by id) that select and move as
 // one. Groups nest: a group lists everything in it, the groups inside it too (edit.ts, tidyGroups). An integral group

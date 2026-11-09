@@ -69,7 +69,8 @@ import { FeedbackLink } from "./FeedbackLink";
 import { createPortal, flushSync } from "react-dom";
 import { CARRY_CDXML, copyToClipboard, exportFile, glyphInk, MDL, pasteRefused, pictureAs, readClipboard, standaloneSvg, inkOfText, UI, type ExportFormat } from "./export";
 import { FULL, kindOf, MAX_PICTURE, pictureBytes, pictureMol, readPicture } from "./picture";
-import { conditionItems, formatAmount, formulaWeight, inert, keyColumns, parseAmount, solve, type Field } from "./stoich";
+import { abbreviationNames, COEFFICIENT, coefficientOf, conditionItems, CONDITION_WORDS, writeCoefficient, type CoefSpot, formatAmount, inert, keyColumns, parseAmount, readReagent, solve, textWeight, type Field, type Typed } from "./stoich";
+import ABBREVIATIONS from "./abbreviations.json";
 import { FIELDS as DETAILS, detailsLayout, detailsOf, experimentPage, experimentsCsv, growScheme, inSpan, markupCaption, markupRuns, newExperiment, newGrids, schemeLanding, schemeSpan, templateOf, withDetails, type Details, type ExperimentEntry } from "./experiment";
 import { nextCompound, renumber, romanNumbers, setRoman } from "./numbering";
 import { logS, properties as calculate } from "./props";
@@ -440,15 +441,38 @@ function contractLabelText(want: string): string | undefined {
 }
 // The stoichiometry grid's rows, as ChemDraw's: what each component is, then amounts. shown: rows that appear only
 // once one of these was typed somewhere; product: rows for products (true) or reactants (false) only. Equivalents are
-// a product's coefficient too, as ChemDraw's product column has them.
+// a product's coefficient too, as ChemDraw's product column has them. Volume and Density always show, so a liquid can
+// be measured out by volume (issue 135); a product's Expected mass can be typed, as the mass wanted (issue 136).
 const GRID_ROWS: { id: string; name: string; field?: Field; product?: boolean; shown?: Field[] }[] = [
   { id: "formula", name: "Formula" }, { id: "mw", name: "MW" }, { id: "limiting", name: "Limiting?", product: false },
   { id: "equiv", name: "Equivalents", field: "equiv" }, { id: "mass", name: "Mass", field: "mass", product: false }, { id: "moles", name: "Moles", field: "moles", product: false },
-  { id: "volume", name: "Volume", field: "volume", product: false, shown: ["volume", "density", "molarity"] }, { id: "density", name: "Density", field: "density", product: false, shown: ["density"] },
+  { id: "volume", name: "Volume", field: "volume", product: false }, { id: "density", name: "Density", field: "density", product: false },
   { id: "molarity", name: "Molarity", field: "molarity", product: false, shown: ["molarity"] }, { id: "purity", name: "Purity", field: "purity", shown: ["purity"] },
-  { id: "expected", name: "Expected mass", product: true }, { id: "expectedMoles", name: "Expected moles", product: true },
+  { id: "expected", name: "Expected mass", field: "mass", product: true }, { id: "expectedMoles", name: "Expected moles", product: true },
   { id: "measured", name: "Measured mass", field: "measured", product: true }, { id: "yield", name: "Yield", product: true },
+  // The yield the literature reports, typed, and the yield as a fraction of it (shown once a literature yield is typed).
+  { id: "literature", name: "Literature yield", product: true }, { id: "ofLiterature", name: "Yield / literature", product: true },
 ];
+// A reagent written as text, for the grid: Octet's reagent abbreviations by name (THF, DMAP, Pd(OAc)2), and a caption's
+// text with its raised characters as superscripts (SO4 with a raised 2− is SO4²⁻), so a raised charge reads as one.
+const ABBREVIATIONS_BY_NAME = abbreviationNames(ABBREVIATIONS as Record<string, string>);
+const RAISED: Record<string, string> = { "0": "⁰", "1": "¹", "2": "²", "3": "³", "4": "⁴", "5": "⁵", "6": "⁶", "7": "⁷", "8": "⁸", "9": "⁹", "+": "⁺", "-": "⁻", "−": "⁻" };
+const raisedText = (c: Caption) => (c.runs ? c.runs.map((r) => (r.script === "super" ? Array.from(r.text, (ch) => RAISED[ch] ?? ch).join("") : r.text)).join("") : c.text);
+// A reagent's formula and molar mass from its name: written as a formula, an ion, a word or an abbreviation
+// (stoich.ts textWeight), then as a label (MeOH, Et3N), then by Octet's names (pyridine, sodium hydroxide) once they
+// have loaded. What a name reads as is kept, as each edit asks again.
+const NAMED = new Map<string, string | undefined>();
+function reagentWeight(name: string, names: boolean): { formula: string; weight: number } | undefined {
+  const known = textWeight(name, ABBREVIATIONS_BY_NAME), label = known ? undefined : labelSmiles(name);
+  if (known) return known;
+  const read = label ? smilesWeight(label) : undefined;
+  if (read || !names || !wordy(name)) return read;
+  if (!NAMED.has(name)) { if (NAMED.size > 500) NAMED.clear(); NAMED.set(name, nameToSmiles(name)); }
+  const smiles = NAMED.get(name);
+  return smiles ? smilesWeight(smiles) : undefined;
+}
+// Text that may name a reagent (three letters or more, and not how a reaction is run: reflux, rt, overnight).
+const wordy = (name: string) => /\p{L}{3}/u.test(name) && !CONDITION_WORDS.test(name.trim());
 
 // A pen point: a corner, or (dragged out) a smooth point with its incoming handle mirroring its outgoing one.
 const penPoint = (at: P, out?: P): CurvePoint => (out ? { at, c1: [2 * at[0] - out[0], 2 * at[1] - out[1]], c2: out } : { at });
@@ -5518,33 +5542,61 @@ export default function Editor() {
     const steps = interpret(m, r, captionBox);
     if (!steps.length) return [];
     // label: what names it in a table of rows, its compound number or the text it is written as.
-    const parts: { product: boolean; what: string; formula: string; mw: number; x: number; low: number; label?: string }[] = [];
-    // conditions: only text with a molar mass makes a column ("0 °C" and "2 h" do not).
+    // coef: its coefficient in the scheme; hint: what its text says of its amount (stoich.ts readReagent); side: written
+    // over or under an arrow.
+    // spot: where its coefficient is written, for one in the equation (see writeCoefficient).
+    const parts: { product: boolean; what: string; formula: string; mw: number; x: number; low: number; label?: string; coef?: number; hint?: Typed; side?: boolean; spot?: CoefSpot }[] = [];
+    // Coefficients written in the scheme (issue 133): a number on its own just before a structure or text in the row
+    // (2 A + B → C), or one tied to a structure on its left, as a number typed close by is. Not a compound number
+    // (bold), and not a number with nothing after it in the row. The number has no column of its own.
+    let wantsNames = false; // text that may be a reagent's name, before Octet's names have loaded
+    const coefs = new Map<string, number>(), coefIds = new Map<string, number>(), counted = new Set<number>(), partKey = (p: Part) => (p.kind === "structure" ? `s${p.atoms[0]}` : `t${p.id}`);
+    const bare = (id: number) => { const c = m.captions?.find((x) => x.id === id); return c && !isNumber(c) ? coefficientOf(c.text) : undefined; };
+    r.steps.forEach((s, k) => {
+      const next = r.steps[k + 1], v = s.kind === "text" ? bare(s.id) : undefined;
+      if (s.kind === "text" && v !== undefined && next && (next.kind === "structure" || next.kind === "text")) { coefs.set(partKey(next), v); coefIds.set(partKey(next), s.id); counted.add(s.id); }
+      if (s.kind !== "structure" || coefs.has(partKey(s))) return;
+      for (const id of s.carry?.captions ?? []) {
+        const b = captionBox(id), w = bare(id);
+        if (w !== undefined && b && b[2] <= s.box[0] + 0.2 && b[3] > (s.box[1] + s.box[3]) / 2 - 0.2 && b[1] < (s.box[1] + s.box[3]) / 2 + 0.2) { coefs.set(partKey(s), w); coefIds.set(partKey(s), id); break; }
+      }
+    });
+    // conditions: only text with a molar mass makes a column ("0 °C" and "2 h" do not). Text is read as reagents are
+    // written (issues 131, 132): "K2CO3 (2 eq.)", "cat. H2SO4", "1 M NaOH", H+, OH−, THF, water.
     const add = (p: Part, product: boolean, conditions = false) => {
-      const x = (p.box[0] + p.box[2]) / 2, low = p.box[1];
-      if (p.kind === "structure") { const a = analyse(pickAtoms(m, p.atoms))?.[0], n = m.captions?.find((c) => isNumber(c) && c.under?.some((i) => p.atoms.includes(i)))?.text; parts.push({ product, what: a?.formula ?? "?", formula: a?.formula ?? "", mw: a?.weight ?? 0, x, low, label: n }); return; }
-      const text = m.captions?.find((c) => c.id === p.id)?.text ?? "", items = conditions ? conditionItems(text) : [text.trim()];
+      const x = (p.box[0] + p.box[2]) / 2, low = p.box[1], coef = coefs.get(partKey(p)), coefId = coefIds.get(partKey(p));
+      const spot: CoefSpot = { box: p.box, ...(coefId !== undefined ? { coefId } : {}), ...(p.kind === "text" ? { textId: p.id } : {}) };
+      if (p.kind === "structure") { const a = analyse(pickAtoms(m, p.atoms))?.[0], n = m.captions?.find((c) => isNumber(c) && c.under?.some((i) => p.atoms.includes(i)))?.text; parts.push({ product, what: a?.formula ?? "?", formula: a?.formula ?? "", mw: a?.weight ?? 0, x, low, label: n, ...(coef !== undefined && !conditions ? { coef } : {}), ...(conditions ? { side: true } : { spot }) }); return; }
+      if (counted.has(p.id)) return;
+      const c = m.captions?.find((x) => x.id === p.id), text = c ? raisedText(c) : "", items = conditions ? conditionItems(text) : [text.trim()];
       items.forEach((item, k) => {
-        const plain = item.replace(/^\d+\s+(?=\S)/, ""), weight = formulaWeight(plain), smiles = weight === undefined ? labelSmiles(plain) : undefined, read = smiles ? smilesWeight(smiles) : undefined;
+        const reagent = readReagent(item), read = reagent && reagentWeight(reagent.name, namesLoaded), plain = item.replace(/^\d+\s+(?=\S)/, "");
+        if (!read && reagent && !namesLoaded && wordy(reagent.name)) wantsNames = true;
         // The atmosphere's gas (N2, Ar, air) is not a reagent: it has no column.
-        if (conditions && ((!weight && !read) || inert(item))) return;
-        parts.push({ product, what: `"${item}"`, formula: weight ? plain.replace(/\s+/g, "") : read?.formula ?? "", mw: weight ?? read?.weight ?? 0, x: x + k * 0.01, low, label: plain });
+        if (conditions && (!read || inert(item) || inert(reagent!.name))) return;
+        // Over or under the arrow, a number in front is how many equivalents ("2 HCl"): such a reagent is not in the equation.
+        const own = reagent?.coefficient ?? coef, given = conditions && own !== undefined && reagent?.hint.equiv === undefined ? { ...reagent?.hint, equiv: own } : reagent?.hint;
+        const hint = given && Object.keys(given).length ? given : undefined;
+        // In the row, the key leaves out the coefficient, so values typed stay when it changes ("HCl" to "2 HCl").
+        const what = conditions ? item : item.replace(COEFFICIENT, "");
+        parts.push({ product, what: `"${what}"`, formula: read?.formula ?? "", mw: read?.weight ?? 0, x: x + k * 0.01, low, label: plain, ...(own !== undefined && !conditions ? { coef: own } : {}), ...(hint ? { hint } : {}), ...(conditions ? { side: true } : { spot }) });
       });
     };
     steps[0].reactants.forEach((p) => add(p, false));
     for (const st of steps) for (const p of [...st.above, ...st.below]) add(p, false, true);
     steps[steps.length - 1].products.forEach((p) => add(p, true));
     if (!parts.length) return [];
-    const keyed = keyColumns(parts, g.typed, g.limiting), all = keyed.cols, hidden = g.hidden ?? {};
+    const keyed = keyColumns(parts, g.typed, g.limiting), all = keyed.cols.map((c) => ({ ...c, literature: g.literature?.[c.key] as number | undefined })), hidden = g.hidden ?? {};
     const solved = solve(all, keyed.limiting), limiting = keyed.limiting ?? all.find((c) => !c.product)?.key;
     // The grid takes its arrow's scale (decision 0007). Columns stand under what they are, a column's width apart.
     const f = scaleOf(m.arrows?.find((a) => a.id === g.arrow) ?? {}), width = 3.4 * f;
     const cols = all.filter((c) => !hidden.cols?.includes(c.key)).sort((p, q) => p.x - q.x).map((c) => ({ ...c }));
     cols.forEach((c, k) => { if (k && c.x < cols[k - 1].x + width) c.x = cols[k - 1].x + width; });
     if (!cols.length) return [];
-    const used = (fd: Field) => cols.some((c) => c.typed[fd] !== undefined), products = cols.some((c) => c.product);
-    // As rows, Volume, Density, Molarity and Purity show only when used, on an experiment page too, so the table fits the page.
-    const rows = GRID_ROWS.filter((row) => !hidden.rows?.includes(row.id) && (row.product ? products : row.shown && (!expPage || g.layout === "rows") ? row.shown.some(used) : true));
+    const used = (fd: Field) => cols.some((c) => c.typed[fd] !== undefined || c.hint?.[fd] !== undefined), products = cols.some((c) => c.product);
+    // As rows, Molarity and Purity show only when used (typed, or given in a reagent's text), on an experiment page too,
+    // so the table fits the page.
+    const rows = GRID_ROWS.filter((row) => !hidden.rows?.includes(row.id) && (row.id === "ofLiterature" ? cols.some((c) => c.literature) : row.product ? products : row.shown && (!expPage || g.layout === "rows") ? row.shown.some(used) : true));
     // Below the components and the numbers under them.
     const under = (m.captions ?? []).filter((c) => c.under?.some((i) => r.atoms.includes(i))).map((c) => placed.find((p) => p.id === c.id)).filter(Boolean).map((p) => -p!.box[3] / L);
     const top = Math.min(...cols.map((c) => c.low), ...under) - 0.9 * f, rh = (style.captionSize * pt * 0.9 * 1.6 * f) / L;
@@ -5581,8 +5633,10 @@ export default function Editor() {
         y -= 0.5 * rh;
       }
     } else cells = rows.flatMap((row, k) => cols.map((c) => ({ key: c.key, row: row.id, x: c.x, y: top - k * rh, w: width, product: c.product })));
-    return [{ arrow: g.arrow, all, cols, rows, solved, limiting, top, rh, left, width, start: left - names - 0.2 * f, f, colour: g.colour, hiding: !!(hidden.rows?.length || hidden.cols?.length), cells, texts, rules }];
-  }); }, [loaded, doc, drawing, placed, exporting, expPage]); // eslint-disable-line react-hooks/exhaustive-deps
+    return [{ arrow: g.arrow, all, cols, rows, solved, limiting, top, rh, left, width, start: left - names - 0.2 * f, f, colour: g.colour, hiding: !!(hidden.rows?.length || hidden.cols?.length), cells, texts, rules, wantsNames }];
+  }); }, [loaded, doc, drawing, placed, exporting, expPage, namesLoaded]); // eslint-disable-line react-hooks/exhaustive-deps
+  // A reagent written as a name (pyridine, sodium hydroxide) is read once Octet's names have loaded: they load then.
+  useEffect(() => { if (!namesLoaded && gridViews.some((v) => v.wantsNames)) void loadNames().then(() => setNamesLoaded(true), () => {}); }, [gridViews, namesLoaded]);
   type GridView = (typeof gridViews)[number];
   // A reagent table's box: from its row names to its last column, from its top to its last row.
   function tableSpan(v: GridView): number[] {
@@ -5613,9 +5667,11 @@ export default function Editor() {
     if (row.id === "mw") return { text: c.mw ? formatAmount(c.mw, "mw") : "" };
     if (row.id === "limiting") return { text: c.product ? "" : v.limiting === c.key ? "Yes" : "" };
     if (row.product !== c.product && row.product !== undefined) return { text: "" };
-    if (row.id === "expected") return { text: formatAmount(s?.expectedMass, "mass") };
+    if (row.id === "expected") return { text: formatAmount(s?.expectedMass, "mass"), typed: c.typed.mass !== undefined };
     if (row.id === "expectedMoles") return { text: formatAmount(s?.expectedMoles, "moles") };
     if (row.id === "yield") return { text: formatAmount(s?.yield, "yield") };
+    if (row.id === "literature") return { text: formatAmount(s?.literature, "yield"), typed: s?.literature !== undefined };
+    if (row.id === "ofLiterature") return { text: formatAmount(s?.ofLiterature, "yield") };
     if (!row.field || (c.product && !["purity", "measured", "equiv"].includes(row.field))) return { text: "" };
     return { text: formatAmount(s?.[row.field as keyof typeof s] as number | undefined, row.field), typed: c.typed[row.field] !== undefined };
   };
@@ -5633,34 +5689,61 @@ export default function Editor() {
   useEffect(() => { if (selection.size || picked.size) setGridPick(undefined); }, [selection, picked]);
   // A grid changed: its typed values and limiting reactant saved under each column's key as the grid now reads them
   // (keyColumns), so values matched by order are kept by key from now on.
-  const changeGrid = (arrow: number, change: (g: Grid, v: GridView) => Partial<Grid>) => {
+  // A coefficient's text size, in bond lengths.
+  const coefficientBox = () => ({ size: (style.captionSize * pt) / L });
+  // draw: a change to the drawing in the same step (a coefficient written in front of a compound).
+  const changeGrid = (arrow: number, change: (g: Grid, v: GridView) => Partial<Grid> & { draw?: (m: Mol) => Mol }) => {
     const g = doc.grids?.find((x) => x.arrow === arrow), v = gridViews.find((x) => x.arrow === arrow);
     if (!g || !v) return;
     const now: Grid = { ...g, typed: Object.fromEntries(v.all.filter((c) => Object.keys(c.typed).length).map((c) => [c.key, c.typed])), limiting: v.limiting };
-    set({ ...doc, grids: doc.grids!.map((x) => (x === g ? { ...now, ...change(now, v) } : x)) }, true);
+    const { draw, ...grid } = change(now, v), m = draw ? draw(doc) : doc;
+    set({ ...m, grids: (m.grids ?? []).map((x) => (x.arrow === g.arrow ? { ...now, ...grid } : x)) }, true);
   };
   // Typing in a cell: the unit says what it is (250 mg a mass, 0.5 mL a volume, 1.2 eq equivalents), a bare number is
   // the row's own quantity, and an empty cell clears it. A reactant's mass, moles, volume or equivalents replaces the
   // others (they are four ways to say how much); a product's equivalents are its coefficient. Limiting? sets the
-  // limiting reactant.
+  // limiting reactant. A product's Expected mass is the mass wanted (issue 136): one thing sets the scale, so it clears
+  // the reactants' amounts, and a reactant's amount typed clears it. Equivalents typed for a compound of the equation are
+  // written in front of it in the scheme (its coefficient; none for 1), so the scheme and the table say the same; a
+  // reagent over the arrow keeps them in the table.
   function commitGridCell(typed: string) {
     const w = gridEdit, text = expandEscapes(typed, keptText(gridEdit?.value)); // 5 \mu{}L is 5 μL (escapes.ts)
     setGridEdit(undefined);
     if (!w) return;
     const row = GRID_ROWS.find((r) => r.id === w.row)!;
     if (row.id === "limiting") return w.product ? undefined : changeGrid(w.arrow, () => ({ limiting: w.key }));
+    // A literature yield: a percentage (85 or 85%); empty clears it.
+    if (row.id === "literature") {
+      if (!w.product) return;
+      const value = text.trim() ? parseAmount(text.replace(/%?\s*$/, "%"), "purity") : undefined;
+      if (text.trim() && !(value !== undefined && value > 0 && value <= 1)) return setNotice("Type the yield the literature reports, such as 85%.", "info");
+      return changeGrid(w.arrow, (g) => { const { [w.key]: _, ...rest } = g.literature ?? {}, literature = value !== undefined ? { ...rest, [w.key]: value } : rest; return { literature: Object.keys(literature).length ? literature : undefined }; });
+    }
     if (!row.field) return;
     const field0 = row.field;
-    changeGrid(w.arrow, (g) => {
-      const typed = { ...(g.typed[w.key] ?? {}) };
+    changeGrid(w.arrow, (g, v) => {
+      const typed = { ...(g.typed[w.key] ?? {}) }, spot = v.all.find((c) => c.key === w.key)?.spot;
+      if (!text.trim() && field0 === "equiv" && spot) { delete typed.equiv; return { typed: { ...g.typed, [w.key]: typed }, draw: (m) => writeCoefficient(m, spot, 1, coefficientBox()) }; }
       if (!text.trim()) delete typed[field0];
       else {
-        const fields: Field[] = w.product ? ["measured", "purity", "equiv"] : [field0, "mass", "moles", "volume", "equiv", "density", "molarity", "purity"];
-        const bare = /^\s*[\d.,]+(e[+-]?\d+)?\s*$/i.test(text), field = bare ? (w.product && field0 !== "purity" && field0 !== "equiv" ? "measured" : field0) : fields.find((fd) => parseAmount(text, fd) !== undefined);
+        const fields: Field[] = w.product ? (row.id === "expected" ? ["mass"] : ["measured", "purity", "equiv"]) : [field0, "mass", "moles", "volume", "equiv", "density", "molarity", "purity"];
+        const bare = /^\s*[\d.,]+(e[+-]?\d+)?\s*$/i.test(text), field = bare ? (w.product && field0 !== "purity" && field0 !== "equiv" && field0 !== "mass" ? "measured" : field0) : fields.find((fd) => parseAmount(text, fd) !== undefined);
         const value = field && parseAmount(text, field);
-        if (!field || value === undefined) { setNotice("Type an amount with its unit, such as 250 mg, 1.2 eq or 0.5 mL.", "info"); return {}; }
-        if (!w.product && ["mass", "moles", "volume", "equiv"].includes(field)) for (const fd of ["mass", "moles", "volume", "equiv"] as Field[]) delete typed[fd];
+        if (!field || value === undefined) { setNotice(row.id === "expected" ? "Type the mass of product wanted, such as 5 g or 500 mg." : "Type an amount with its unit, such as 250 mg, 1.2 eq or 0.5 mL.", "info"); return {}; }
+        // The limiting reactant's equivalents are its coefficient, not an amount, so its amount stays when they are typed.
+        const how: Field[] = g.limiting === w.key ? ["mass", "moles", "volume"] : ["mass", "moles", "volume", "equiv"];
+        if (!w.product && how.includes(field)) for (const fd of how) delete typed[fd];
         typed[field] = value;
+        if (field === "equiv" && spot && value > 0) { delete typed.equiv; return { typed: { ...g.typed, [w.key]: typed }, draw: (m) => writeCoefficient(m, spot, value, coefficientBox()) }; }
+        // The scale: a product's mass wanted, or a reactant's amount, and not both.
+        const target = w.product && field === "mass", amount = !w.product && ["mass", "moles", "volume"].includes(field);
+        if (target || amount) {
+          const others = Object.fromEntries(Object.entries(g.typed).filter(([k]) => k !== w.key).map(([k, t]) => {
+            const drop: Field[] = target ? (k.startsWith("r") ? ["mass", "moles", "volume"] : ["mass"]) : k.startsWith("p") ? ["mass"] : [];
+            return [k, Object.fromEntries(Object.entries(t).filter(([fd]) => !drop.includes(fd as Field)))];
+          }));
+          return { typed: { ...others, [w.key]: typed } };
+        }
       }
       return { typed: { ...g.typed, [w.key]: typed } };
     });
@@ -8282,9 +8365,9 @@ export default function Editor() {
           // Double-click a stoichiometry cell to type in it (Limiting? sets the limiting reactant at once).
           const gc = tool !== "erase" ? gridCellAt(toDoc(e.clientX, e.clientY)) : undefined;
           if (gc && gc.row === "limiting") { if (!gc.product) changeGrid(gc.arrow, () => ({ limiting: gc.key })); return; }
-          if (gc && !["name", "formula", "mw", "expected", "expectedMoles", "yield"].includes(gc.row)) {
+          if (gc && !["name", "formula", "mw", "expectedMoles", "yield", "ofLiterature"].includes(gc.row) && (!["expected", "literature"].includes(gc.row) || gc.product)) {
             const v = gridViews.find((x) => x.arrow === gc.arrow)!, c = v.cols.find((x) => x.key === gc.key)!, row = GRID_ROWS.find((r) => r.id === gc.row)!;
-            return setGridEdit({ ...gc, value: c.typed[row.field as Field] !== undefined ? gridText(v, c, row).text : "" });
+            return setGridEdit({ ...gc, value: (row.id === "literature" ? c.literature !== undefined : c.typed[row.field as Field] !== undefined) ? gridText(v, c, row).text : "" });
           }
           // Double-click a TLC spot, or its Rf value, to type its Rf (ChemDraw's Set Rf; the spot moves to it).
           const plate = tool !== "erase" ? plateAt(toDoc(e.clientX, e.clientY)) : undefined;
