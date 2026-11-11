@@ -61,7 +61,7 @@ repository is public, so ChemDraw's own code and assets stay out of it.
   files or data. Write our own code.
 - Never touch licence or activation code.
 - Use only files you created yourself as test files.
-- Do not use "ChemDraw" in Octet's name or logo. Every comparison in
+- Do not use "ChemDraw" in Octet's name. Every comparison in
   marketing must be true.
 
 ## Open decisions
