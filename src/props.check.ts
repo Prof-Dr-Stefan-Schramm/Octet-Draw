@@ -110,6 +110,43 @@ for (const [name, logP, weight, want] of [
   near(logS(logP, weight, properties(mol(row[1], row[2]))), want, 0.001, `${name} logS`);
 }
 
+// H-bond donors and acceptors by RDKit 2026.03's NumHBD and NumHBA patterns (Lipinski.cpp; worked out by hand from
+// the patterns as ReShiki compiles them), and rings as bonds − atoms + parts. ChEMBL's values (RDKit) agree for
+// aspirin 1/3, ibuprofen 1/1 and sulfanilamide 2/3; for caffeine ChEMBL gives 6 acceptors, from an older RDKit whose
+// pattern still counted an aromatic N with three neighbours (N-methyl), which the 2026.03 pattern does not.
+const HBOND: Record<string, [number, number, number]> = {
+  "ethanol": [1, 1, 0], "acetic acid": [1, 1, 0], "benzene": [0, 0, 1], "toluene": [0, 0, 1], "phenol": [1, 1, 1],
+  "aniline": [1, 1, 1], "pyridine": [0, 1, 1], "pyrrole": [1, 0, 1], "imidazole": [1, 1, 1], "furan": [0, 1, 1],
+  "thiophene": [0, 1, 1], "naphthalene": [0, 0, 2], "indole": [1, 0, 2], "quinoline": [0, 1, 2], "purine": [1, 3, 2],
+  "azulene": [0, 0, 2], "2-pyridone": [1, 1, 1], "caffeine": [0, 3, 2], "aspirin": [1, 3, 1], "ibuprofen": [1, 1, 1],
+  "paracetamol": [2, 2, 1], "nicotine": [0, 2, 2], "glycine": [2, 2, 0], "glycine zwitterion": [1, 2, 0],
+  "nitrobenzene": [0, 2, 1], "acetonitrile": [0, 1, 0], "DMSO": [0, 1, 0], "cyclohexane": [0, 0, 1],
+  "hexane": [0, 0, 0], "benzoic acid": [1, 1, 1], "morpholine": [1, 2, 1], "acetone": [0, 1, 0],
+  "2-methylphenol": [1, 1, 1], "aziridine": [1, 1, 1], "oxirane": [0, 1, 1], "sulfanilamide": [2, 3, 1],
+  "5-methyltetrazole": [1, 3, 1], "guanidine": [3, 1, 0], "benzamidine": [2, 1, 1],
+  "methanesulfonic acid": [1, 2, 0], "methylphosphonic acid": [2, 1, 0], "acetohydroxamic acid": [2, 2, 0],
+  "succinimide": [1, 2, 1], "ethanethiol": [1, 1, 0], "triethylamine": [0, 1, 0], "benzaldehyde": [0, 1, 1],
+  "ethyl acetate": [0, 2, 0], "N-methylacetamide": [1, 1, 0], "trifluorotoluene": [0, 0, 1],
+  "tert-butylbenzene": [0, 0, 1],
+};
+for (const [name, atoms, bonds] of MOLECULES) {
+  const p = properties(mol(atoms, bonds)), want = HBOND[name];
+  assert.ok(want, `${name} has H-bond and ring values`);
+  assert.deepEqual([p.donors, p.acceptors, p.rings], want, `${name} donors, acceptors, rings`);
+}
+// ReShiki's amide rule test: acetamide has 1 donor and 1 acceptor with RDKit's rules (2 and 2 with Lipinski's).
+const acetamide = properties(mol("N C O C", "0-1 1=2 1-3"));
+assert.deepEqual([acetamide.donors, acetamide.acceptors], [1, 1]);
+// An ammonium ion is a donor, not an acceptor. RDKit's patterns take an O with one H or none, so water counts as
+// neither.
+const ammonium = properties(mol("C N+", "0-1")), water = properties(mol("O", ""));
+assert.deepEqual([ammonium.donors, ammonium.acceptors], [1, 0]);
+assert.deepEqual([water.donors, water.acceptors], [0, 0]);
+// Rings: a cage counts its ring closures (cubane 5; RDKit's symmetrised set gives 6), and
+// separate structures add their own rings (benzene and cyclopropane: 2), with an atom on its own adding none.
+assert.equal(properties(mol("C C C C C C C C", "0-1 1-2 2-3 3-0 4-5 5-6 6-7 7-4 0-4 1-5 2-6 3-7")).rings, 5);
+assert.equal(properties(mol("C C C C C C C C C O", "0-1 1=2 2-3 3=4 4-5 5=0 6-7 7-8 8-6")).rings, 2);
+
 // Drawn H atoms count as the hydrogens of their neighbour, and results keep the drawing's atom numbers.
 const drawn = mol("H C C O H", "0-1 1-2 2-3 3-4");
 drawn.atoms[1].h = 2;
@@ -117,6 +154,7 @@ const ethanol = properties(drawn);
 near(ethanol.tpsa, 20.23, 0.01, "ethanol with drawn H, tPSA");
 assert.deepEqual(ethanol.pka.map((s) => [s.atom, s.kind]), [[3, "alcohol"]]);
 assert.equal(aromaticAtoms(drawn).length, 5);
+assert.deepEqual([ethanol.donors, ethanol.acceptors, ethanol.rings], [1, 1, 0], "ethanol with drawn H, donors, acceptors, rings");
 // Charged and pentavalent nitro groups are the same group.
 assert.deepEqual(properties(mol("O N C C C C C C O", "0=1 1-2 2=3 3-4 4=5 5-6 6=7 7-2 1=8")).joback, properties(mol("O- N+ C C C C C C O", "0-1 1-2 2=3 3-4 4=5 5-6 6=7 7-2 1=8")).joback);
 // An element Joback has no group for, or a label Octet could not read ("*"), gives no Joback estimate.

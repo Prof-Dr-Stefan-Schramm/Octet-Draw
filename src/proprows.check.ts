@@ -21,6 +21,18 @@ assert.match(row(three, "mz")![0]!, /^180\.042 \(100\.0%\)/);
 assert.deepEqual(row(three, "logp"), ["1.31"]);
 assert.deepEqual(row(propertyValues([aspirin], undefined, 0), "weight"), ["180"]);
 
+// H-bond donors, acceptors and rings follow tPSA, from Octet's own calculators, with no decimals; they are not
+// predicted, and the methods say whose counts they are and how Lipinski's differ.
+const drawn: Structure = { ...aspirin, graph: { atoms: [], bonds: [] } }; // the calculators below stand in for props.ts
+const counts = propertyValues([drawn], () => ({ tpsa: 63.6, pka: [], donors: 1, acceptors: 3, rings: 1 }));
+assert.deepEqual(counts[0].map((r) => r.key).slice(-4), ["tpsa", "hbd", "hba", "rings"]);
+assert.deepEqual(["hbd", "hba", "rings"].map((k) => row(counts, k)), [["1"], ["3"], ["1"]]);
+assert.equal(row(propertyValues([drawn], () => ({ tpsa: 0, pka: [], donors: 0, acceptors: 0, rings: 0 })), "rings")?.[0], "0");
+assert.equal(row(standard, "hbd"), undefined, "no row without Octet's calculators");
+for (const k of ["hbd", "hba"]) assert.match(PROPERTY_ROWS[0].find((r) => r.key === k)!.method, /RDKit's NumHBD and NumHBA.*Lipinski's rule of five/);
+const countLines = propertyReport(counts).split("\n");
+assert.ok(countLines.includes("H-bond donors\t1") && countLines.includes("H-bond acceptors\t3") && countLines.includes("Rings\t1"));
+
 // Every row says how its value is found.
 for (const r of PROPERTY_ROWS.flat()) assert.ok(r.method.length > 10, `${r.key} has a method`);
 

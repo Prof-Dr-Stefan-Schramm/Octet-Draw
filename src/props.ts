@@ -1,5 +1,8 @@
+// H-bond donor and acceptor counts adapted from ReShiki (https://github.com/Ameyanagi/ReShiki),
+// crates/chemistry/src/descriptors.rs, MIT OR Apache-2.0, © 2026 Ameyanagi and ReShiki contributors.
 // Chemical property calculators on the namer's graph (Kekulé bonds, implicit hydrogen counts): tPSA, Joback estimates,
-// rotatable bonds and ESOL logS, and typical pKa values of ionisable groups. Rings and aromaticity come from rings.ts.
+// rotatable bonds and ESOL logS, typical pKa values of ionisable groups, H-bond donors and acceptors, and the ring
+// count. Rings and aromaticity come from rings.ts.
 import type { Graph } from "./naming.ts";
 import { aromaticAtoms, rings } from "./rings.ts";
 
@@ -11,6 +14,9 @@ export type Properties = {
   pka: { atom: number; kind: string; pka: number; sd: number }[]; // ionisable groups with typical pKa (Dimorphite-DL site table)
   rotatable: number; // rotatable bonds (for ESOL)
   aromaticProportion: number; // aromatic heavy atoms / heavy atoms (for ESOL)
+  donors: number; // H-bond donors (RDKit NumHBD)
+  acceptors: number; // H-bond acceptors (RDKit NumHBA)
+  rings: number; // rings in the smallest set of smallest rings
 };
 
 type Bond = { j: number; k: number; order: number };
@@ -87,6 +93,48 @@ function rotatable(c: Ctx): number {
     if (a < b && order === 1 && !c.ringBond[k] && !tail(a) && !tail(b) && (!amide(a) || !amide(b))) n++;
   }));
   return n;
+}
+
+// H-bond donors and acceptors as RDKit's NumHBD and NumHBA count them (RDKit 2026.03, Lipinski.cpp, BSD-3-Clause,
+// © 2004-2013 Greg Landrum and Rational Discovery LLC; their SMARTS re-expressed as atom tests, as ReShiki's
+// descriptors.rs uses them). Not Lipinski's own counts (every N–H and O–H hydrogen; every N and O atom): acetamide
+// has 1 donor and 1 acceptor here, 2 and 2 by Lipinski. "Aliphatic" is not aromatic; a single or double bond is not
+// an aromatic one; valence is the sum of bond orders plus hydrogens, the degree is the neighbours plus hydrogens.
+const valence = (c: Ctx, i: number) => c.nb[i].reduce((s, x) => s + x.order, 0) + c.h[i];
+// Donors: [N&!H0&v3, N&!H0&+1&v4, O&H1&+0, S&H1&+0, n&H1&+0].
+function donors(c: Ctx): number {
+  return c.el.filter((el, i) => {
+    const h = c.h[i], q = c.q[i], v = valence(c, i);
+    if (c.arom[i]) return el === "N" && h === 1 && q === 0;
+    return el === "N" ? h > 0 && (v === 3 || (q === 1 && v === 4)) : (el === "O" || el === "S") && h === 1 && q === 0;
+  }).length;
+}
+// Acceptors: [$([O,S;H1;v2]-[!$(*=[O,N,P,S])]), $([O,S;H0;v2]), $([O,S;-]), $([N;v3;!$(N-*=!@[O,N,P,S])]),
+// $([nH0&X2,o,s;+0])]: an O or S that is not the OH or SH of an acid, an N that is not an amide's (or a sulfonamide's,
+// or any N on an atom with a double bond out of a ring to O, N, P or S), and a pyridine-type N, furan O or thiophene S.
+function acceptors(c: Ctx): number {
+  const aliphatic = (j: number, ...els: string[]) => !c.arom[j] && els.includes(c.el[j]);
+  const single = (i: number) => c.nb[i].filter((x) => x.order === 1 && !c.aromBond[x.k]);
+  const doubleTo = (j: number, ringToo: boolean) => c.nb[j].some((x) => x.order === 2 && !c.aromBond[x.k] && (ringToo || !c.ringBond[x.k]) && aliphatic(x.j, "O", "N", "P", "S"));
+  return c.el.filter((el, i) => {
+    const h = c.h[i], q = c.q[i], v = valence(c, i);
+    if (c.arom[i]) return q === 0 && ((el === "N" && h === 0 && c.nb[i].length === 2) || el === "O" || el === "S");
+    if (el === "O" || el === "S") return (h === 1 && v === 2 && single(i).some((x) => !doubleTo(x.j, true))) || (h === 0 && v === 2) || q === -1;
+    return el === "N" && v === 3 && !single(i).some((x) => doubleTo(x.j, false));
+  }).length;
+}
+// Rings: the smallest set of smallest rings, as many as bonds − atoms + separate parts (the ring closures). A cage
+// counts fewer rings than it has faces: cubane 5, where RDKit's symmetrised set gives 6.
+function ringCount(c: Ctx): number {
+  const seen = c.el.map(() => false);
+  let parts = 0;
+  c.el.forEach((_, s) => {
+    if (seen[s]) return;
+    parts++;
+    seen[s] = true;
+    for (const stack = [s]; stack.length;) for (const x of c.nb[stack.pop()!]) if (!seen[x.j]) { seen[x.j] = true; stack.push(x.j); }
+  });
+  return c.nb.reduce((s, bs) => s + bs.length, 0) / 2 - c.el.length + parts;
 }
 
 // ESOL aqueous solubility, log10 of mol/L (Delaney 2004, doi:10.1021/ci034243x), with Walters' coefficients refitted
@@ -412,5 +460,6 @@ function pka(c: Ctx): Properties["pka"] {
 // Every calculator's result for one structure. ESOL needs logP and weight as well: see logS.
 export function properties(g: Graph): Properties {
   const c = context(g), heavy = c.el.length;
-  return { tpsa: tpsa(c), joback: joback(c), pka: pka(c), rotatable: rotatable(c), aromaticProportion: heavy ? c.arom.filter(Boolean).length / heavy : 0 };
+  return { tpsa: tpsa(c), joback: joback(c), pka: pka(c), rotatable: rotatable(c), aromaticProportion: heavy ? c.arom.filter(Boolean).length / heavy : 0,
+    donors: donors(c), acceptors: acceptors(c), rings: ringCount(c) };
 }
