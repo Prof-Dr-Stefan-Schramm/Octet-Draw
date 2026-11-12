@@ -1,13 +1,15 @@
 // The user's own templates for the Ring and Template tools, added by name or from the drawing. Each is kept as an
 // .octet file in the settings (Octet's clipboard format), so it keeps everything that was selected (text, arrows,
 // shapes, curves, groups, colours) and loading one goes through the same checks as opening a file. set: the named
-// set it is in (the library's own category); unset is My templates.
+// set it is in (the library's own category); unset is My templates. attach: the template atom or bond it attaches by,
+// and how it joins (attach.ts), as the user chose it last.
+import { readAttach, type Attach } from "./attach.ts";
 import { normalise } from "./edit.ts";
 import { parse, serialize } from "./file.ts";
 import type { Mol } from "./render.ts";
 
-export type Template = { id: string; name: string; mol: Mol; set?: string };
-export type SavedTemplate = { id: string; name: string; file: string; set?: string };
+export type Template = { id: string; name: string; mol: Mol; set?: string; attach?: Attach };
+export type SavedTemplate = { id: string; name: string; file: string; set?: string; attach?: Attach };
 export const MY_SET = "My templates";
 // The tool a template is used with: the Ring tool (its Templates row) or the Template tool.
 export type TemplateTool = "ring" | "template";
@@ -75,7 +77,8 @@ export function loadTemplates(saved: unknown): Template[] {
     try {
       if (typeof t?.id !== "string" || typeof t.name !== "string" || typeof t.file !== "string") return [];
       const mol = readKept(t.file), set = typeof t.set === "string" && setName(t.set) && setName(t.set) !== MY_SET ? setName(t.set) : undefined;
-      return hasContent(mol) ? [{ id: t.id, name: t.name.slice(0, 80), mol, ...(set ? { set } : {}) }] : [];
+      const attach = readAttach(mol, t.attach);
+      return hasContent(mol) ? [{ id: t.id, name: t.name.slice(0, 80), mol, ...(set ? { set } : {}), ...(attach ? { attach } : {}) }] : [];
     } catch {
       return [];
     }
@@ -88,7 +91,7 @@ export const newTemplate = (name: string, mol: Mol, set?: string): SavedTemplate
 // What the library changes, as kept in the settings: the user's templates and their named sets (My templates is
 // always first and is not listed), and the floating palettes open. Each change gives the settings back unchanged when
 // it cannot be made.
-export type Kept = { templates: SavedTemplate[]; templateSets: string[]; palettes?: FloatingPalette[] };
+export type Kept = { templates: SavedTemplate[]; templateSets: string[]; palettes?: FloatingPalette[]; favourites?: string[] };
 // The set a template goes into: one of the user's sets, else My templates.
 const into = (s: Kept, set?: string) => (set && s.templateSets.includes(set) ? set : undefined);
 // A template in a set (none: My templates).
@@ -129,11 +132,17 @@ export const templateToStart = <S extends Kept>(s: S, id: string): S => {
 };
 export const templateToEnd = <S extends Kept>(s: S, id: string): S => placeTemplate(s, id);
 // A template's drawing changed (Edit, then Save): its name, set and place stay. A drawing with nothing in it changes
-// nothing.
+// nothing. Its chosen attachment goes (its atoms may be numbered another way now); how it joins stays.
 export const updateTemplate = <S extends Kept>(s: S, id: string, mol: Mol): S => {
   if (!hasContent(mol) || !s.templates.some((t) => t.id === id)) return s;
   const file = serialize(normalise(mol));
-  return { ...s, templates: s.templates.map((t) => (t.id === id ? { ...t, file } : t)) };
+  return { ...s, templates: s.templates.map((t) => { if (t.id !== id) return t; const { attach, ...rest } = t; return { ...rest, file, ...(attach?.mode ? { attach: { mode: attach.mode } } : {}) }; }) };
+};
+// The attachment the user chose for one of their templates, kept with it (none: Automatic, as a new template).
+export const setTemplateAttach = <S extends Kept>(s: S, id: string, attach: Attach | undefined): S => {
+  const keep = attach && (attach.anchor || (attach.mode && attach.mode !== "auto")) ? attach : undefined;
+  if (!s.templates.some((t) => t.id === id && JSON.stringify(t.attach) !== JSON.stringify(keep))) return s;
+  return { ...s, templates: s.templates.map((t) => { if (t.id !== id) return t; const { attach: _, ...rest } = t; return keep ? { ...rest, attach: keep } : rest; }) };
 };
 // A copy of one of the user's templates, just after it in its set, named "… copy".
 export const duplicateTemplate = <S extends Kept>(s: S, id: string): S => {
@@ -142,7 +151,17 @@ export const duplicateTemplate = <S extends Kept>(s: S, id: string): S => {
   const t = s.templates[k], copy = { ...t, id: newId(), name: `${t.name.slice(0, 75)} copy` };
   return { ...s, templates: [...s.templates.slice(0, k + 1), copy, ...s.templates.slice(k + 1)] };
 };
-export const removeTemplate = <S extends Kept>(s: S, id: string): S => ({ ...s, templates: s.templates.filter((t) => t.id !== id) });
+// A template removed; it is no longer a favourite.
+export const removeTemplate = <S extends Kept>(s: S, id: string): S =>
+  ({ ...s, templates: s.templates.filter((t) => t.id !== id), ...(s.favourites?.includes(templateKind(id)) ? { favourites: s.favourites.filter((k) => k !== templateKind(id)) } : {}) });
+
+// ——— Favourites ———
+// Templates the user starred (their kinds: lib:…, custom:…, name:…), in the order starred: the library's Favourites set.
+export const MOST_FAVOURITES = 500;
+export const toggleFavourite = (favs: string[], kind: string): string[] => (favs.includes(kind) ? favs.filter((k) => k !== kind) : [...favs, kind].slice(-MOST_FAVOURITES));
+export const readFavourites = (v: unknown): string[] =>
+  Array.isArray(v) ? [...new Set(v.filter((k): k is string => typeof k === "string" && k.length <= 300 && /^(lib|custom|name):./.test(k)))].slice(0, MOST_FAVOURITES) : [];
+export const FAVOURITES = "Favourites";
 // A name a new set can take: not empty, not My templates, not one the user has.
 export const freeSetName = (s: Kept, name: string) => { const n = setName(name); return !!n && n !== MY_SET && !s.templateSets.includes(n); };
 export const addSet = <S extends Kept>(s: S, name: string): S => (freeSetName(s, name) && s.templateSets.length < 50 ? { ...s, templateSets: [...s.templateSets, setName(name)] } : s);

@@ -8,6 +8,7 @@ import { ARROW_SIZES, curvePath, headOfLength, SWEEPS, type ArrowKind, type Arro
 import { ARROWS, BONDS, SHAPES, type BondKind } from "./kinds";
 import { closePalette, kindName, legible, MY_SET, ringsOnly, templateKind, type FloatingPalette, type Template, type TemplateSize } from "./templates";
 import type { TemplateActions, TemplateSetActions, TemplateTool } from "./TemplateLibrary";
+import type { Attach } from "./attach";
 import { LIBRARY, libraryItem, type LibraryItem } from "./library";
 import { FloatingTemplates, LibraryPanel } from "./TemplateLibrary";
 import { columnsFor, DEFAULT_COLUMNS, Menu, menuWidth, type MenuItem } from "./Menu";
@@ -478,6 +479,12 @@ type PaletteProps = {
   librarySize: TemplateSize;
   onLibrarySize: (size: TemplateSize) => void;
   onSaveSet: (set: string) => void;
+  // Starred templates (their kinds) and a star put on or off; where a template attaches and how it joins (attach.ts),
+  // by its kind, and a change to it.
+  favourites: string[];
+  onFavourite: (kind: string) => void;
+  attachOf: (kind: string) => Attach;
+  onAttach: (kind: string, attach: Attach) => void;
   onUndo: () => void;
   onRedo: () => void;
   onDrop: (x: number, y: number) => void; // an option, now in hand, was let go here on the canvas (px)
@@ -571,13 +578,20 @@ export function Palette(p: PaletteProps) {
     sets: p.templateSets, onSets: p.onTemplateSets, onCopy: (kind, set) => p.onCopy(kind, set, tool), onNewSet: p.onNewSet,
     onRemove: (kind) => { const t = template(kind); if (t) p.onRemoveTemplate(t.id); },
     onEdit: (kind) => { setOpen(undefined); p.onEditTemplate(kind, tool); }, onDuplicate: p.onDuplicate, onPlace: p.onPlace, onToStart: p.onToStart, onToEnd: p.onToEnd,
-    onKeepOpen: (set) => { setOpen(undefined); p.onKeepOpen(set, tool); }, onSaveSet: p.onSaveSet,
+    onKeepOpen: (set) => { setOpen(undefined); p.onKeepOpen(set, tool); }, onSaveSet: p.onSaveSet, favourites: p.favourites, onFavourite: p.onFavourite,
     ...(tool === "ring" ? { kept: p.libraryRings, onKeep: (kind: string, on: boolean) => (on ? keep("ring", kind) : unkeep("ring", kind)) } : {}),
   });
   // Add with nothing selected starts a pick on the canvas: the library closes out of its way.
+  // The library also shows the starred templates, and the template in hand drawn large to choose where it attaches.
   const own = (tool: TemplateTool) => ({ ...actions(tool), tool, reveal: p.reveal?.tool === tool ? p.reveal : undefined, size: p.librarySize, onSize: p.onLibrarySize,
     onAdd: (set: string) => { if (!p.canAddSelection) setOpen(undefined); p.onAdd(set, tool); },
-    onRename: p.onRename, find: p.findNamed });
+    onRename: p.onRename, find: p.findNamed, favouriteItems, attach: attachFor(p.variants[tool]) });
+  const favouriteItems = p.favourites.flatMap((kind): LibraryItem[] => {
+    const t = mine.find((x) => x.kind === kind) ?? libraryItem(kind), m = !t ? p.named(kind) : undefined;
+    return t ? [t] : m ? [{ kind, name: kindName(kind) ?? kind, category: "", mol: m }] : [];
+  });
+  const templateMol = (kind: string) => template(kind)?.mol ?? libraryItem(kind)?.mol ?? p.named(kind);
+  const attachFor = (kind: string) => { const mol = templateMol(kind); return mol ? { mol, value: p.attachOf(kind), onChange: (a: Attach) => p.onAttach(kind, a) } : undefined; };
   // A floating palette's templates: a set of the user's, or one of Octet's.
   const setTemplates = (set: string): LibraryItem[] => (set === MY_SET || p.templateSets.includes(set) ? mine.filter((t) => t.category === set) : LIBRARY.find((c) => c.name === set)?.items ?? []);
   // Palettes closing (by their button, View > Templates, or Home opening): kept a moment, so each leaves with its motion

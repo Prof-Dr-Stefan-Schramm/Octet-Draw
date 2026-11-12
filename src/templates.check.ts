@@ -403,6 +403,180 @@ console.log(`templates: the labels of all ${items.filter((t) => t.mol.atoms.leng
   console.log("templates: the nucleobases face one way (sugar's N down, Watson-Crick edge right) ok");
 }
 
+// ——— Where a template attaches, and how it joins (attach.ts, ReShiki WP06) ———
+// Ported as behaviour from ReShiki's tests/templates.rs, tests/template_library.rs and placement_parity_tests.rs, with
+// Octet's own templates (furan, benzene, purine, adenine, glucose from library.json).
+const { addTemplate, pos } = await import("./edit.ts");
+const { anchorLabel, attachTemplate, chooseAnchor, chooseMode, outwardDirections, readAttach, templateLocants } = await import("./attach.ts");
+const { setTemplateAttach, toggleFavourite, readFavourites, removeTemplate: dropTemplate } = await import("./templates.ts");
+{
+  const lib = (name: string) => libraryItem(`lib:${name}`)!.mol;
+  const fur = lib("Furan"), ben = lib("Benzene"), pur = lib("Purine"), ade = lib("Adenine"), glc = lib("α-D-Glucopyranose"), pyr = lib("Pyridine"), cp = lib("Cyclopentane");
+  const ok = (r: ReturnType<typeof attachTemplate>, what: string) => r.mol ?? assert.fail(`${what}: ${r.refusal}`);
+  const no = (r: ReturnType<typeof attachTemplate>, why: RegExp, what: string) => { assert.equal(r.mol, undefined, `${what} is refused`); assert.match(r.refusal!, why, what); };
+  const at = (name: string, el?: string) => (m: typeof fur) => m.atoms.findIndex((x, i) => templateLocants(m)[i] === name && (!el || x.label === el));
+  const bonded = (m: Mol, i: number, j: number) => m.bonds.some((b) => b.atoms.includes(i) && b.atoms.includes(j));
+  const cos = (m: Mol, c: number, a: number, b: number) => { const p = pos(m, c), u = [pos(m, a)[0] - p[0], pos(m, a)[1] - p[1]], v = [pos(m, b)[0] - p[0], pos(m, b)[1] - p[1]]; return (u[0] * v[0] + u[1] * v[1]) / Math.hypot(...u) / Math.hypot(...v); };
+  const same = (a: Mol, b: Mol, n: number) => a.atoms.slice(0, n).every((x, i) => Math.hypot(x.location[0] - b.atoms[i].location[0], x.location[1] - b.atoms[i].location[1]) < 1e-9);
+
+  // The locants the picker names atoms by: Octet's namer's numbers, and a sugar's carbohydrate numbers.
+  assert.deepEqual(templateLocants(fur), ["1", "2", "3", "4", "5"]);
+  assert.equal(anchorLabel(fur, { atom: at("3")(fur) }), "Attach at C-3");
+  assert.equal(anchorLabel(fur, { bond: fur.bonds.findIndex((b) => b.atoms.includes(at("2")(fur)) && b.atoms.includes(at("3")(fur))) }), "Attach at C-2–C-3");
+  assert.equal(anchorLabel(ade, { atom: at("9")(ade) }), "Attach at N-9");
+  assert.equal(anchorLabel(glc, { atom: at("1", "C")(glc) }), "Attach at C-1", "glucose's anomeric carbon is C-1, not oxane's C-2");
+  assert.equal(anchorLabel(glc, { atom: 0 }), "Attach at O-1");
+  assert.equal(anchorLabel(fur, undefined), "Automatic attachment");
+  assert.equal(anchorLabel(lib("Alcohol"), { atom: 0 }), "Attach at atom 1 (R)", "no locants: the place in the template");
+  assert.equal(anchorLabel(fur, { atom: 9 }), "Automatic attachment", "an anchor out of range is no anchor");
+
+  // Old templates place exactly as before: Automatic with no anchor is addTemplate, on an atom, a bond and a point.
+  const methylcyclohexane: Mol = { atoms: [...[0, 1, 2, 3, 4, 5].map((k) => atom("C", Math.cos((k * Math.PI) / 3), Math.sin((k * Math.PI) / 3))), atom("C", 2, 0)], bonds: [0, 1, 2, 3, 4, 5].map((k) => bond(k, (k + 1) % 6)).concat([bond(0, 6)]) };
+  for (const t of items.filter((x) => x.mol.atoms.length && x.mol.atoms.length < 40)) for (const target of [{ atom: 6 }, { atom: 2 }, { bond: 1 }, { point: [5, 5] as [number, number] }]) {
+    assert.deepEqual(attachTemplate(methylcyclohexane, t.mol, { ...target, mode: "auto" }).mol, addTemplate(methylcyclohexane, t.mol, target), `${t.name} on ${JSON.stringify(target)} as before`);
+  }
+
+  // Connect with a bond (tests/templates.rs explicit_atom_connection_keeps_both_rings_and_exact_source_atom): each furan
+  // carbon joins a benzene carbon by a new single bond. 11 atoms, 12 bonds, benzene unchanged, the bond to exactly that
+  // atom; the O has no free valence and is refused, the drawing unchanged.
+  const phenylfurans = [1, 2, 3, 4].map((k) => {
+    const m = ok(attachTemplate(ben, fur, { atom: 0, anchor: { atom: k }, mode: "connect" }), `furan atom ${k}`);
+    assert.equal(m.atoms.length, 11);
+    assert.equal(m.bonds.length, 12);
+    assert.ok(same(m, ben, 6), "the benzene stays where it was");
+    assert.ok(bonded(m, 0, 6 + k), "the new bond goes to the chosen furan atom");
+    assert.equal(m.bonds[m.bonds.length - 1].type, 1);
+    return m;
+  });
+  no(attachTemplate(ben, fur, { atom: 0, anchor: { atom: 0 }, mode: "connect" }), /no free valence/, "furan O");
+  // A 120° junction at every source vertex (connected_phenyl_ring_has_120_degree_angles_at_every_source_vertex): benzene
+  // connected to a furan carbon turned four ways, with and without a drag; the furan stays as it was.
+  for (const turn of [0, 0.4, 1.9, 3.3]) {
+    const f: Mol = { ...fur, atoms: fur.atoms.map((a) => ({ ...a, location: [a.location[0] * Math.cos(turn) - a.location[1] * Math.sin(turn), a.location[0] * Math.sin(turn) + a.location[1] * Math.cos(turn), 0] })) };
+    // The drag goes out from the ring, off its open side.
+    for (const toward of [undefined, [3 * pos(f, 2)[0] + 0.2, 3 * pos(f, 2)[1]] as [number, number]]) {
+      const m = ok(attachTemplate(f, ben, { atom: 2, anchor: { atom: 0 }, mode: "connect", toward }), "phenyl");
+      assert.ok(same(m, f, 5), "the furan stays");
+      const ph = 5, ring = m.bonds.filter((b) => b.atoms.includes(ph) && b.atoms.every((x) => x >= 5)).map((b) => (b.atoms[0] === ph ? b.atoms[1] : b.atoms[0]));
+      assert.equal(ring.length, 2);
+      for (const r of ring) assert.ok(Math.abs(cos(m, ph, 2, r) + 0.5) < 1e-4, `120° at the phenyl vertex (turn ${turn})`);
+      assert.ok(Math.abs(Math.hypot(pos(m, ph)[0] - pos(m, 2)[0], pos(m, ph)[1] - pos(m, 2)[1]) - 1) < 1e-9, "one bond length");
+    }
+  }
+  // A drag sets the new bond's direction in 15° steps.
+  const dragged = ok(attachTemplate(methylcyclohexane, ben, { atom: 6, anchor: { atom: 0 }, mode: "connect", toward: [2.9, 1.1] }), "drag");
+  const way = Math.atan2(pos(dragged, 7)[1], pos(dragged, 7)[0] - 2) * 180 / Math.PI;
+  assert.ok(Math.abs(way - 45) < 1e-6, `snapped to 45°, not ${way}`);
+  assert.deepEqual(outwardDirections(ben, 0).length, 1, "a ring atom's open side is one direction");
+  assert.deepEqual(outwardDirections({ atoms: [atom("C", 0, 0)], bonds: [] }, 0), [0]);
+
+  // Purine at N-9 (adenine_can_connect_at_n9_without_changing_its_ring_tautomer): Octet's adenine is 9H, so N-9 joins
+  // and N-7 keeps its double bond. Octet's purine is drawn 7H (as PubChem has it): there N-9 has no free valence and
+  // is refused, never swapped for N-7, and N-7 joins.
+  const adeN9 = at("9")(ade), adeN7 = at("7")(ade);
+  const ph9 = ok(attachTemplate(ben, ade, { atom: 0, anchor: { atom: adeN9 }, mode: "connect" }), "adenine N-9");
+  assert.ok(bonded(ph9, 0, 6 + adeN9));
+  assert.ok(ph9.bonds.some((b) => b.type === 2 && b.atoms.includes(6 + adeN7)), "N-7 keeps its double bond");
+  no(attachTemplate(ben, pur, { atom: 0, anchor: { atom: at("9")(pur) }, mode: "connect" }), /chosen template atom: N has no free valence/, "7H-purine N-9");
+  assert.ok(bonded(ok(attachTemplate(ben, pur, { atom: 0, anchor: { atom: at("7")(pur) }, mode: "connect" }), "purine N-7"), 0, 6 + at("7")(pur)));
+  // Glucose at C-1: by a new bond at C-1, and as a glycoside sharing its O-1 with methanol's O.
+  const c1 = at("1", "C")(glc), methanol: Mol = { atoms: [atom("C", 0, 0), atom("O", 1, 0)], bonds: [bond(0, 1)] };
+  assert.ok(bonded(ok(attachTemplate(ben, glc, { atom: 0, anchor: { atom: c1 }, mode: "connect" }), "glucose C-1"), 0, 6 + c1));
+  const glycoside = ok(attachTemplate(methanol, glc, { atom: 1, anchor: { atom: 0 }, mode: "share" }), "methyl glucoside");
+  assert.equal(glycoside.atoms.length, 13, "the O is shared");
+  assert.ok(bonded(glycoside, 1, 2 + c1 - 1), "methanol's O is O-1 on C-1");
+  no(attachTemplate(methanol, glc, { atom: 0, anchor: { atom: 0 }, mode: "share" }), /not the same element/, "O-1 on a carbon");
+  // A sugar drawn in perspective keeps its depth: its atoms' z, grown with it.
+  const chair = lib("α-D-Glucopyranose (chair)"), onChair = ok(attachTemplate(ben, chair, { atom: 0, anchor: { atom: at("1", "C")(chair) }, mode: "connect" }), "chair");
+  assert.ok(chair.atoms.every((a, k) => Math.abs((onChair.atoms[6 + k].location[2] ?? 0) - (a.location[2] ?? 0)) < 1e-9), "the chair keeps its depth");
+
+  // Share an atom: a spiro ring on a CH2, from any compatible atom; a benzene carbon (one H) cannot share two bonds.
+  const spiro = ok(attachTemplate(methylcyclohexane, cp, { atom: 2, mode: "share" }), "spiro");
+  assert.equal(spiro.atoms.length, 11);
+  assert.equal(spiro.bonds.filter((b) => b.atoms.includes(2)).length, 4);
+  no(attachTemplate(ben, cp, { atom: 0, anchor: { atom: 0 }, mode: "share" }), /C has no free valence/, "spiro on benzene");
+  no(attachTemplate(ben, fur, { bond: 0, anchor: { atom: 2 }, mode: "share" }), /Share an atom: point to an atom/, "Share on a bond");
+
+  // Fuse along a bond: the chosen bond is the shared one (source_bond_is_exact…): pyridine's C-5–C-6 on ethene gives
+  // pyridine itself, its N on one of ethene's two atoms, which stay where they were.
+  const ethene: Mol = { atoms: [atom("C", 0, 0), atom("C", 1, 0)], bonds: [bond(0, 1, 2)] };
+  const c56 = pyr.bonds.findIndex((b) => b.atoms.includes(at("5")(pyr)) && b.atoms.includes(at("6")(pyr)));
+  assert.equal(anchorLabel(pyr, { bond: c56 }), "Attach at C-5–C-6");
+  const py = ok(attachTemplate(ethene, pyr, { bond: 0, anchor: { bond: c56 }, mode: "fuse" }), "pyridine");
+  assert.equal(py.atoms.length, 6);
+  assert.equal(py.bonds.length, 6);
+  assert.ok(same(py, ethene, 2));
+  const n = py.atoms.findIndex((a) => a.label === "N");
+  assert.ok(bonded(py, n, 0) || bonded(py, n, 1), "N next to the shared bond");
+  // Furan's C-2–C-3 on a benzene bond is benzofuran's ring fusion; every all-carbon furan bond fuses, O–C does not.
+  for (const e of [1, 2, 3]) assert.equal(ok(attachTemplate(ben, fur, { bond: 1, anchor: { bond: e }, mode: "fuse" }), `furan bond ${e}`).atoms.length, 9);
+  no(attachTemplate(ben, fur, { bond: 1, anchor: { bond: 0 }, mode: "fuse" }), /not the same/, "O–C on C–C");
+  // A drag picks the side (dragging_selects_attachment_side_and_invalid_targets_are_unchanged): cyclopentane on the
+  // bond along the x axis goes up with a drag up and down with a drag down.
+  const ethane: Mol = { atoms: [atom("C", 0, 0), atom("C", 1, 0)], bonds: [bond(0, 1)] };
+  const side = (toward: [number, number]) => { const m = ok(attachTemplate(ethane, cp, { bond: 0, anchor: { bond: 0 }, mode: "fuse", toward }), "side"); return Math.sign(m.atoms.slice(2).reduce((s, a) => s + a.location[1], 0)); };
+  assert.equal(side([0.5, 1]), 1);
+  assert.equal(side([0.5, -1]), -1);
+  no(attachTemplate({ ...ethane, bonds: [bond(0, 1, 3)] }, cp, { bond: 0, mode: "fuse" }), /plain single, double or aromatic/, "a triple bond");
+  no(attachTemplate({ ...ethane, bonds: [bond(0, 1, 1, { stereo: 1 })] }, cp, { bond: 0, mode: "fuse" }), /plain/, "a wedge");
+  no(attachTemplate(ethane, cp, { atom: 0, mode: "fuse" }), /Fuse along a bond: point to a bond/, "Fuse on an atom");
+  // Fusing keeps Octet's re-Kekulé rule: a benzene fused onto a benzene is naphthalene, no atom with two double bonds.
+  const naph = ok(attachTemplate(ben, ben, { bond: 0, anchor: { bond: 0 }, mode: "fuse" }), "naphthalene");
+  assert.ok(naph.atoms.every((_, i) => naph.bonds.filter((b) => b.type === 2 && b.atoms.includes(i)).length <= 1));
+
+  // Error precedence (placement_parity_tests error_precedence): the target's kind first, then the anchor's kind, then
+  // the atoms.
+  no(attachTemplate(ben, fur, { bond: 0, anchor: { atom: 1 }, mode: "connect" }), /Connect with a bond: point to an atom/, "Connect on a bond");
+  no(attachTemplate(ben, fur, { bond: 0, anchor: { atom: 1 } }), /template atom joins an atom/, "atom anchor on a bond");
+  no(attachTemplate(ethane, fur, { atom: 0, anchor: { bond: 1 } }), /template bond joins a bond/, "bond anchor on an atom");
+  no(attachTemplate(ethane, fur, { atom: 0, anchor: { bond: 1 }, mode: "share" }), /Choose a template atom/, "bond anchor, Share");
+  no(attachTemplate({ atoms: [atom("C", 0, 0, { text: "OMe" }), atom("C", 1, 0)], bonds: [bond(0, 1)] }, ben, { atom: 0, mode: "connect" }), /OMe is a label/, "an abbreviation");
+  assert.ok(attachTemplate({ atoms: [atom("O", 0, 0, { text: "OH" }), atom("C", 1, 0)], bonds: [bond(0, 1)] }, ben, { atom: 0, mode: "connect" }).mol, "OH typed is a plain O");
+  // Automatic with an anchor: an atom anchor shares that atom, a bond anchor fuses along that bond.
+  assert.ok(bonded(ok(attachTemplate(ethane, cp, { bond: 0, anchor: { bond: 2 } }), "auto fuse"), 0, 1));
+  assert.equal(ok(attachTemplate(methylcyclohexane, cp, { atom: 6, anchor: { atom: 3 } }), "auto share").atoms.length, 11);
+  // Empty space: the anchor lands on the point.
+  const free = ok(attachTemplate({ atoms: [], bonds: [] }, fur, { point: [4, 2], anchor: { atom: at("3")(fur) } }), "free");
+  assert.deepEqual(pos(free, at("3")(fur)), [4, 2]);
+  const freeBond = ok(attachTemplate({ atoms: [], bonds: [] }, fur, { point: [4, 2], anchor: { bond: 2 } }), "free bond");
+  const [p, q] = fur.bonds[2].atoms.map((k) => pos(freeBond, k));
+  assert.ok(Math.hypot((p[0] + q[0]) / 2 - 4, (p[1] + q[1]) / 2 - 2) < 1e-9);
+  // The drawing itself is never changed (each placement is a new drawing: one Undo step).
+  assert.equal(ben.atoms.length, 6);
+
+  // Anchor and mode kept together (template_library.rs 901-931, 1000-1026).
+  assert.deepEqual(chooseAnchor({ mode: "connect" }, { bond: 1 }), { mode: "fuse", anchor: { bond: 1 } }, "a bond switches to Fuse");
+  assert.deepEqual(chooseAnchor({ mode: "fuse", anchor: { bond: 1 } }, { atom: 2 }), { mode: "connect", anchor: { atom: 2 } }, "an atom after Fuse is Connect");
+  assert.deepEqual(chooseAnchor({}, { bond: 1 }), { anchor: { bond: 1 } }, "Automatic keeps a bond");
+  assert.deepEqual(chooseMode({ anchor: { atom: 2 } }, "fuse"), { mode: "fuse" }, "Fuse clears an atom");
+  assert.deepEqual(chooseMode({ anchor: { bond: 2 } }, "share"), { mode: "share" }, "Share clears a bond");
+  assert.deepEqual(chooseMode({ mode: "share", anchor: { atom: 2 } }, "auto"), { anchor: { atom: 2 } });
+  assert.deepEqual(chooseAnchor({ mode: "share", anchor: { atom: 2 } }, undefined), { mode: "share" });
+  assert.deepEqual(readAttach(fur, { anchor: { atom: 2 }, mode: "connect" }), { anchor: { atom: 2 }, mode: "connect" });
+  assert.deepEqual(readAttach(fur, { anchor: { bond: 2 }, mode: "connect" }), { anchor: { bond: 2 }, mode: "fuse" }, "a bond anchor read back is Fuse");
+  for (const bad of [null, 3, "x", { anchor: { atom: 7 } }, { anchor: { atom: -1 } }, { anchor: { atom: 1.5 } }, { mode: "spin" }, { mode: "auto" }]) assert.equal(readAttach(fur, bad), undefined, JSON.stringify(bad));
+
+  // Custom templates remember it (collections_persist_…anchors_and_favorites…): kept in the settings and read back;
+  // a damaged one is dropped; Edit then Save drops the anchor (its atoms may be numbered another way) but keeps the join.
+  let k: Kept = addTo(empty, newTemplate("Furan copy", fur));
+  const fid = k.templates[0].id;
+  k = setTemplateAttach(k, fid, { anchor: { atom: 2 }, mode: "connect" });
+  assert.deepEqual(back(k)[0].attach, { anchor: { atom: 2 }, mode: "connect" });
+  assert.equal(setTemplateAttach(k, fid, { anchor: { atom: 2 }, mode: "connect" }), k, "no change, the same settings");
+  assert.equal(back({ ...k, templates: [{ ...k.templates[0], attach: { anchor: { atom: 40 } } }] })[0].attach, undefined, "an anchor not in the template is dropped");
+  assert.deepEqual(updateTemplate(k, fid, ben).templates[0].attach, { mode: "connect" }, "Edit drops the anchor");
+  assert.equal(setTemplateAttach(k, fid, {}).templates[0].attach, undefined, "Automatic keeps nothing");
+  // Favourites: starred and unstarred, kept in order, read back with checks; a template removed is no longer one.
+  const favs = toggleFavourite(toggleFavourite([], "lib:Furan"), templateKind(fid));
+  assert.deepEqual(favs, ["lib:Furan", templateKind(fid)]);
+  assert.deepEqual(toggleFavourite(favs, "lib:Furan"), [templateKind(fid)]);
+  assert.deepEqual(readFavourites(JSON.parse(JSON.stringify([...favs, "lib:Furan", 3, "tool:x", "", "lib:"]))), favs, "duplicates and junk dropped");
+  assert.deepEqual(readFavourites("lib:Furan"), []);
+  assert.equal(readFavourites(Array.from({ length: 600 }, (_, n) => `lib:${n}`)).length, 500);
+  assert.deepEqual(dropTemplate({ ...k, favourites: favs }, fid).favourites, ["lib:Furan"], "removed, it is no longer a favourite");
+  console.log("templates: attachment by a chosen atom or bond (Connect, Share, Fuse), refusals, locants, anchors kept, favourites ok");
+}
+
 const dir = new URL("./vendor/opsin/", import.meta.url);
 if (!existsSync(new URL("opsin.js", dir))) { console.log("templates: chemistry skipped (no OPSIN build)"); process.exit(0); }
 // chem.ts reads the drawing tokens and loads Indigo's wasm as a browser does; these stand in for the browser.
@@ -437,6 +611,37 @@ await chem.ready;
   assert.equal(chem.analyse(azide)?.[0].formula, "C2H5N3");
   assert.equal(chem.toInchi(azide), "InChI=1S/C2H5N3/c1-2-4-5-3/h2H2,1H3");
   console.log("templates: functional groups, heterocycles and ligands placed keep their bonds (azide N=N+=N-, no stray H) ok");
+}
+// The chemistry of a chosen attachment, read by Indigo: the chosen furan carbon gives 2- or 3-phenylfuran (two
+// compounds, each C10H8O, the same compound from C-2 and C-5); adenine at N-9 is 9-phenyladenine (9H kept); furan's
+// C-2–C-3 fused on benzene is benzofuran; glucose's O-1 shared with methanol is a methyl glucoside; the products
+// save to Octet's file and read back the same.
+{
+  const { problems } = await import("./check.ts");
+  const { serialize, parse } = await import("./file.ts");
+  const lib = (name: string) => libraryItem(`lib:${name}`)!.mol, fur = lib("Furan"), ben = lib("Benzene");
+  const ofSmiles = (smiles: string) => chem.toInchi(chem.parseStructure(smiles));
+  const put = (m: Mol, t: Mol, target: Parameters<typeof attachTemplate>[2]) => attachTemplate(m, t, target).mol ?? assert.fail(JSON.stringify(target));
+  const furans = [1, 2, 3, 4].map((k) => put(ben, fur, { atom: 0, anchor: { atom: k }, mode: "connect" }));
+  const keys = furans.map((m) => chem.toInchi(m));
+  assert.equal(new Set(keys).size, 2, "two isomers");
+  assert.equal(keys[0], keys[3], "C-2 and C-5 give the same compound");
+  assert.equal(keys[0], ofSmiles("c1ccc(cc1)-c1ccco1"), "2-phenylfuran");
+  assert.equal(keys[1], ofSmiles("c1ccc(cc1)-c1ccoc1"), "3-phenylfuran");
+  for (const m of furans) assert.equal(chem.analyse(m)?.[0].formula, "C10H8O");
+  const ade = lib("Adenine"), n9 = ade.atoms.findIndex((_, i) => templateLocants(ade)[i] === "9");
+  assert.equal(chem.toInchi(put(ben, ade, { atom: 0, anchor: { atom: n9 }, mode: "connect" })), ofSmiles("Nc1ncnc2c1ncn2-c1ccccc1"), "9-phenyladenine");
+  const c23 = fur.bonds.findIndex((b) => b.atoms.includes(1) && b.atoms.includes(2));
+  const benzofuran = put(ben, fur, { bond: 1, anchor: { bond: c23 }, mode: "fuse" });
+  assert.equal(chem.toInchi(benzofuran), ofSmiles("c1ccc2occc2c1"), "benzofuran");
+  const glc = lib("α-D-Glucopyranose"), methanol: Mol = { atoms: [atom("C", 0, 0), atom("O", 1, 0)], bonds: [bond(0, 1)] };
+  const glycoside = put(methanol, glc, { atom: 1, anchor: { atom: 0 }, mode: "share" });
+  assert.equal(chem.analyse(glycoside)?.[0].formula, "C7H14O6", "methyl glucoside");
+  for (const m of [...furans, benzofuran, glycoside]) {
+    assert.deepEqual(problems(m).map((p) => p.message), [], "no warnings");
+    assert.equal(chem.toInchi(parse(serialize(m))), chem.toInchi(m), "saved and read back the same");
+  }
+  console.log("templates: a chosen attachment gives the compound chosen (phenylfurans, 9-phenyladenine, benzofuran, a glucoside) ok");
 }
 const pack = readFileSync(new URL("opsin-data.bin", dir)), files = new Map<string, Int8Array>();
 for (let p = 0; ; ) {

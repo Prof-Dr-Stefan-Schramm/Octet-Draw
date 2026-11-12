@@ -22,7 +22,7 @@ import { hiddenWarnings, hideProblems, MARK, messy, onCaptions, problemAt, probl
 import { parse, serialize } from "./file";
 import {
   EMPTY, extent, stack, addArrow, addCaption, addCycle, addCharge, addRing, lowerBond, updateArrow, deleteGraphics, deleteChosen, inPolygon, updateCaption, atomAt, atomsIn, bondAt, bounds, complete, deleteAtom, deleteAtoms, flipBond,
-  addChair, addGroup, addLane, addTemplate, alignFragments, arrangeShifts, partBox, type Arrange, cutReaction, deleteLane, moveLane, restyleSpot, atomsInPolygon, flipAtoms, fragments, joinOverlaps, joinSelection, setLabel, merge, moveAtoms, neighbours, onSelection, pos, setBondSpec, setElement, setPosition, sprout, subset,
+  addChair, addGroup, addLane, alignFragments, arrangeShifts, partBox, type Arrange, cutReaction, deleteLane, moveLane, restyleSpot, atomsInPolygon, flipAtoms, fragments, joinOverlaps, joinSelection, setLabel, merge, moveAtoms, neighbours, onSelection, pos, setBondSpec, setElement, setPosition, sprout, subset,
   addShape, addSymbol, markNear, moveMark, bondOrders, toggleHydrogens, freePairs, nextDirection, appendCurvePoint, moveCurvePoint, nearestOnCurve, removeCurvePoint, splitCurve, withCurve, setAtomMarks, toggleLonePairs, updateShape, type BondSpec, type Group, type P, type SymbolKind, newTable, resizeTable, setTableCell, expandLabel, contractLabel, spliceTable, sizeTable, fitTable, clearTable, pairMap, clearMap, scaleSettings, scaleSizes, transformParts, medianBond, fitSizes, scaleAt, stereocentres, setEnhanced, markDirections, tiltAtoms, turnAboutBond, flattenAtoms, hingeOf, carryDepth, groupsOf, groupSelection, ungroupSelection, duplicateSelection, extractSelection, insertMol, inRow, wholeIntegral, wholeGroups, groupTargets, selectedGroups, outermost, outerGroups, pivotOf,
   labelHooks, toFront, addChain, chainPoints, chainThrough, snake, clickBond, keyBond, dragBond, etaRing, addGroupAt, farBond, jumpHot, keepHot, walkHot, type Hot, keyElement, placeCentres, pickAtoms, nextGroup,
 } from "./edit";
@@ -109,7 +109,8 @@ import { CanvasAccess, type HotItem } from "./CanvasAccess";
 
 setNamer(iupacName);
 setComplexNamer((m) => complexName(m, { read: nameToSmiles, atoms: nameToAtoms, inchi: toInchi, aux: toInchiAux, cip: cipOf }));
-import { addSet, addSetOf, addTo, closePalette, duplicateTemplate, freeSetName, hasContent, kindName, loadTemplates, moveTemplate, MY_SET, namedKind, newTemplate, openPalette, placeTemplate, removeSet, removeTemplate, renameSet, renameTemplate, setName, templateKind, templateToEnd, templateToStart, updateTemplate } from "./templates";
+import { addSet, addSetOf, addTo, closePalette, duplicateTemplate, freeSetName, hasContent, kindName, loadTemplates, moveTemplate, MY_SET, namedKind, newTemplate, openPalette, ownId, placeTemplate, removeSet, removeTemplate, renameSet, renameTemplate, setName, setTemplateAttach, templateKind, templateToEnd, templateToStart, toggleFavourite, updateTemplate } from "./templates";
+import { attachTemplate, type Attach, type Attached } from "./attach";
 import { formulaCaption, formulaRuns } from "./labels";
 import { expandEscapes, expandRuns, keptText } from "./escapes";
 import { CharMap, inMap } from "./CharMap";
@@ -204,6 +205,9 @@ type Drag =
   // onto: a caption that counts as chemistry the bond ends on; it becomes an atom when the bond is drawn.
   | { kind: "bond"; from: number | P; at: P; start: [number, number]; target: Hover; to?: P; alt?: boolean; onto?: number }
   | { kind: "click"; at: P; start: [number, number]; target: Hover; alt?: boolean }
+  // A template pressed on an atom or bond (the Template tool, or the Ring tool with a library or custom ring): a drag sets
+  // its side or direction (to), shown green before it is let go (attach.ts). meta: Command at the press.
+  | { kind: "template"; at: P; start: [number, number]; target: Hover; to?: P; alt?: boolean; meta?: boolean }
   // A ring tool's press: a drag sets the ring's first bond (to). alt, meta, shift: Option, Command and Shift at the press.
   | { kind: "ring"; from: number | P; at: P; start: [number, number]; target: Hover; to?: P; alt?: boolean; meta?: boolean; shift?: boolean }
   // A chain: side, the side of the drag its first bond goes; path, its points when it snakes (Command held); alt,
@@ -771,6 +775,26 @@ export default function Editor() {
   // The template in hand: a library one or the user's own.
   const templateMol = (kind: string) => templates.find((x) => templateKind(x.id) === kind)?.mol ?? libraryItem(kind)?.mol ?? namedOf(kind);
   const templateVariant = templateMol(settings.variants.template) ? settings.variants.template : "lib:Alanine";
+  // Where each template attaches and how it joins (attach.ts): the user's own templates keep it in the settings, the
+  // built-in ones for the session (out of the box they place as they always have).
+  const [attachSession, setAttachSession] = useState<Record<string, Attach>>({});
+  const attachOf = (kind: string): Attach => templates.find((x) => templateKind(x.id) === kind)?.attach ?? attachSession[kind] ?? {};
+  const setAttach = (kind: string, a: Attach) => { const id = ownId(kind); if (id) setSettings((s) => setTemplateAttach(s, id, a)); else setAttachSession((m) => ({ ...m, [kind]: a })); };
+  // The template the tool in hand puts down: the Template tool's, or the Ring tool's library or custom ring (none for a
+  // plain ring). Where a click or a drag (toward) on t would put it, or why it cannot go there.
+  const placingKind = () => (tool === "template" ? templateVariant : tool === "ring" && !(ringKind in RINGS) ? ringKind : undefined);
+  const placement = (kind: string, t: Hover, at: P, toward?: P): Attached | undefined => {
+    const mol = templateMol(kind);
+    return mol && attachTemplate(doc, mol, { ...attachOf(kind), ...(t.bond !== undefined ? { bond: t.bond } : t.atom !== undefined ? { atom: t.atom } : {}), point: at, ...(toward ? { toward } : {}) });
+  };
+  // A template put down (one Undo step). Stamped beside a catalytic cycle it joins it (⌘ keeps it free). Where it cannot
+  // join, nothing changes and the notice says why (the green preview said so before the click).
+  function putTemplate(kind: string, t: Hover, at: P, meta?: boolean, toward?: P) {
+    const r = placement(kind, t, at, toward);
+    if (!r) return;
+    if (r.refusal !== undefined) return setNotice(r.refusal, "info");
+    return set(r.mol, false, undefined, !meta && "placed");
+  }
   // The Shape and Bracket tools' choices. A line or arc from the Shape tool is drawn like an arrow, with no head.
   const shapeChoice = shapeSpec(settings.variants.shape) ? settings.variants.shape : "box-plain";
   const bracketChoice = bracketSpec(settings.variants.bracket) ? settings.variants.bracket : "brackets";
@@ -4599,6 +4623,7 @@ export default function Editor() {
     if (tool === "bond") return setDrag({ kind: "bond", from: t.atom ?? p, at: p, start: screen, target: t, alt });
     if (tool === "chain") return setDrag({ kind: "chain", from: t.atom ?? p, start: screen, target: t, alt });
     if (tool === "ring" && ringKind in RINGS) return setDrag({ kind: "ring", from: t.atom ?? p, at: p, start: screen, target: t, alt, ...more });
+    if (placingKind() && (t.atom !== undefined || t.bond !== undefined)) return setDrag({ kind: "template", at: p, start: screen, target: t, alt, meta: more.meta });
     setDrag({ kind: "click", at: p, start: screen, target: t, alt });
   }
   // Every drawing tool: hold still for HOLD_MS and Select takes over until release. On the selection it moves it;
@@ -4670,6 +4695,10 @@ export default function Editor() {
       case "click":
         if (Math.hypot(e.clientX - drag.start[0], e.clientY - drag.start[1]) >= 4) stopHold();
         return;
+      case "template":
+        if (!drag.to && Math.hypot(e.clientX - drag.start[0], e.clientY - drag.start[1]) < 4) return;
+        stopHold();
+        return setDrag({ ...drag, to: p });
       case "crosshair": {
         // On the page's grid, a lighter step at a time from its corner (⌘ frees it); Shift keeps it to one axis.
         const step = gridOf(style.grid, mm, corner).minor;
@@ -7117,16 +7146,15 @@ export default function Editor() {
       return setPicked(new Set([id]));
     }
     if (tool === "template") {
-      const mol = templateMol(templateVariant);
       // The point goes too: a template with no bonds or no atoms (a lamp, a flask) goes where the click was.
       // Stamped beside a catalytic cycle, it joins it (⌘ keeps it free).
-      return mol ? set(addTemplate(doc, mol, { ...(t.bond !== undefined ? { bond: t.bond } : t.atom !== undefined ? { atom: t.atom } : {}), point: at }), false, undefined, !more.meta && "placed") : undefined;
+      return putTemplate(templateVariant, t, at, more.meta);
     }
     if (tool === "ring") {
       const custom = templates.find((x) => templateKind(x.id) === ringKind)?.mol ?? libraryItem(ringKind)?.mol ?? namedOf(ringKind);
       // A ring stamped beside a catalytic cycle joins it. ⌘ keeps a chair or a library ring free, as with a template; on
       // a plain ring ⌘ draws it delocalised, so that one joins (only near an arc, never in the middle of the cycle).
-      if (custom) return set(addTemplate(doc, custom, { ...(t.bond !== undefined ? { bond: t.bond } : t.atom !== undefined ? { atom: t.atom } : {}), point: at }), false, undefined, !more.meta && "placed");
+      if (custom) return putTemplate(ringKind, t, at, more.meta);
       const r: { n: number; aromatic: boolean; chair?: 1 | 2 } = RINGS[ringKind as RingKind];
       if (r.chair) return set(addChair(doc, r.chair, t.bond !== undefined ? { bond: t.bond } : { point: at }), false, undefined, !more.meta && "placed");
       // As in ChemDraw: a click on an atom makes a spiro ring, and Option-click sprouts the ring on a new bond (the
@@ -7305,6 +7333,8 @@ export default function Editor() {
         return chainClick(drag.from, !!drag.alt);
       case "click":
         return click(drag.target, drag.at, drag.alt);
+      case "template":
+        return drag.to ? putTemplate(placingKind() ?? templateVariant, drag.target, drag.at, drag.meta, drag.to) : click(drag.target, drag.at, drag.alt, { meta: drag.meta });
       case "ring":
         return drag.to ? set(ringDrop(drag), false, undefined, !chairFree(drag) && "placed") : click(drag.target, drag.at, drag.alt, { meta: drag.meta, shift: drag.shift });
       case "erase": {
@@ -7813,7 +7843,34 @@ export default function Editor() {
       </g>
     );
   };
-  const hovered = (hover: Hover) => { const mark = hoveredMark(hover), shown = settings.interpretation ? interpretationAt(hover) : null; return shown ? <g key="h">{shown}{mark}</g> : mark; };
+  const hovered = (hover: Hover) => {
+    const mark = hoveredMark(hover), shown = settings.interpretation ? interpretationAt(hover) : null, placed = placingGhost(hover);
+    return shown || placed ? <g key="h">{shown}{mark}{placed}</g> : mark;
+  };
+  // The template under the pointer where a click (or the drag under way) would put it, tinted green; or, where it
+  // cannot attach, the reason by the atom or bond (ReShiki's placement preview). Worked out once for each target.
+  const ghostKept = useRef<{ key: string; doc: Mol; at: P; drawn?: ReturnType<typeof render>; refusal?: string }>(undefined);
+  function placingGhost(hover: Hover) {
+    const kind = templatePick ? undefined : placingKind(), t = drag?.kind === "template" ? drag.target : drag ? undefined : hover;
+    if (!kind || !t || (t.atom === undefined && t.bond === undefined)) return null;
+    const toward = drag?.kind === "template" ? drag.to : undefined, key = JSON.stringify([kind, attachOf(kind), t.atom, t.bond, toward]);
+    let g = ghostKept.current;
+    if (!g || g.key !== key || g.doc !== doc) {
+      const ends = t.atom !== undefined ? [t.atom] : doc.bonds[t.bond!]?.atoms ?? [];
+      if (!ends.length || ends.some((i) => !doc.atoms[i])) return null;
+      const at: P = [0, 1].map((k) => ends.reduce((sum, i) => sum + pos(doc, i)[k], 0) / ends.length) as P, r = placement(kind, t, at, toward);
+      // Only what the template adds: its new atoms, and the atoms its new bonds join.
+      const added = r?.mol && new Set([...r.mol.atoms.keys()].filter((i) => i >= doc.atoms.length).concat(r.mol.bonds.slice(doc.bonds.length).flatMap((b) => b.atoms)));
+      g = ghostKept.current = { key, doc, at, drawn: r?.mol && added ? render(subset(r.mol, added), frame, measure, L) : undefined, refusal: r?.refusal };
+    }
+    if (g.refusal) return <text className="attach-refusal" x={g.at[0] * L} y={-g.at[1] * L - 0.7 * L} textAnchor="middle" style={{ fontSize: 12 / views.get().zoom }}>{g.refusal}</text>;
+    return g.drawn ? (
+      <g className="ghost placing" aria-hidden>
+        <path d={toPath(g.drawn.polygons)} />
+        {g.drawn.labels.map((l, i) => <text key={i} x={l.x} y={l.y} transform={labelTurn(l)} style={{ font: labelFont(l) }}>{l.text}</text>)}
+      </g>
+    ) : null;
+  }
   // The mark on what is under the pointer, drawn by Live as the pointer moves.
   const hoveredMark = (hover: Hover, whole = drag ? undefined : integralAt(hover), pick = templatePick && !drag ? pickOf(hover) : undefined) => drag ? null
     : pick ? partMark(...pick)
@@ -8920,6 +8977,10 @@ export default function Editor() {
         librarySize={settings.librarySize}
         onLibrarySize={(librarySize) => setSettings((s) => ({ ...s, librarySize }))}
         onSaveSet={saveTemplateSet}
+        favourites={settings.favourites}
+        onFavourite={(kind) => setSettings((s) => ({ ...s, favourites: toggleFavourite(s.favourites, kind) }))}
+        attachOf={attachOf}
+        onAttach={setAttach}
         popKey={pop?.n ?? 0}
         canUndo={h.at > 0}
         canRedo={h.at < h.stack.length - 1}

@@ -1334,6 +1334,22 @@ button.variant.add {
   fill: var(--ink);
   opacity: 0.35;
 }
+/* A template where a click would put it (attach.ts): green, and the reason in its place where it cannot go there. */
+.ghost.placing {
+  fill: var(--success);
+  opacity: 0.6;
+}
+.attach-refusal {
+  fill: var(--warning);
+  font-family: var(--font-sans);
+  font-weight: 600;
+  paint-order: stroke;
+  stroke: var(--canvas);
+  stroke-width: 3px;
+  stroke-linejoin: round;
+  vector-effect: non-scaling-stroke;
+  pointer-events: none;
+}
 /* On Return the structure stays where its ghost was and settles into full ink. */
 .settle {
   animation: ink-settle var(--motion-fast) var(--ease-out);
@@ -3295,6 +3311,80 @@ button.variant.add {
   margin: var(--space-4) var(--space-2);
   color: var(--ink-muted);
   font-size: 13px;
+}
+/* A starred template (Favourite in its menu). */
+.library-fav {
+  position: absolute;
+  top: var(--space-1);
+  left: var(--space-1);
+  color: var(--ink-faint);
+  pointer-events: none;
+}
+/* The template in hand, drawn large under the grid: its atoms and bonds are the attachment points (AttachPicker). */
+.library-attach {
+  display: grid;
+  flex: none;
+  grid-template-columns: 112px 1fr;
+  gap: var(--space-3);
+  align-items: center;
+  padding: var(--space-2) var(--space-3);
+  border-top: 1px solid var(--hairline);
+}
+.attach-view {
+  width: 112px;
+  height: 112px;
+  color: var(--ink);
+  overflow: visible;
+}
+.attach-hit {
+  fill: transparent;
+  stroke: transparent;
+  cursor: pointer;
+  outline: none;
+  transition: fill var(--motion-fast) var(--ease-out), stroke var(--motion-fast) var(--ease-out);
+}
+@media (hover: hover) and (pointer: fine) {
+  circle.attach-hit:hover {
+    fill: color-mix(in oklab, var(--link) 18%, transparent);
+  }
+  line.attach-hit:hover {
+    stroke: color-mix(in oklab, var(--link) 18%, transparent);
+  }
+}
+circle.attach-hit:focus-visible {
+  fill: color-mix(in oklab, var(--link) 25%, transparent);
+  stroke: var(--link);
+}
+line.attach-hit:focus-visible {
+  stroke: color-mix(in oklab, var(--link) 35%, transparent);
+}
+/* The chosen atom or bond: behind the ink, in the selection's blue. */
+.attach-chosen {
+  fill: var(--brand-mist);
+  stroke: var(--brand-mist);
+  stroke-linecap: round;
+}
+circle.attach-chosen {
+  stroke: var(--link);
+  stroke-width: 1.5px;
+  vector-effect: non-scaling-stroke;
+}
+.attach-side {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-2);
+  min-width: 0;
+}
+.attach-label {
+  margin: 0;
+  color: var(--ink);
+  font: 600 13px var(--font-sans);
+}
+.attach-hint {
+  margin: 0;
+  color: var(--ink-muted);
+  font-size: 11px;
 }
 @media (hover: hover) and (pointer: fine) {
   .library-add:hover {

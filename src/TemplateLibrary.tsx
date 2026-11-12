@@ -10,9 +10,11 @@
 // dragged onto a set's name moves there (a built-in one is copied), dragged within a set of the user's it takes that
 // place, and a selection dragged from the canvas onto the open set or a set's name goes in it. Keep open (the open
 // set's button, or a set's menu) tears a set off into a floating palette (FloatingTemplates, below). The library and
-// each palette have a template size (SizeChoice), and a set's menu saves it as a ChemDraw template file.
+// each palette have a template size (SizeChoice), and a set's menu saves it as a ChemDraw template file. A template's
+// menu stars it as a favourite (the Favourites set at the top), and under the grid the template in hand is drawn large
+// to choose the atom or bond it attaches by and how it joins (AttachPicker, attach.ts).
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { ArrowLineDownRight, ArrowLineUpLeft, ArrowSquareOut, BookmarkSimple, Copy, FileArrowUp, Folders, FolderSimple, FolderSimplePlus, FolderSimpleUser, MagnifyingGlass, NotePencil, PencilSimple, Plus, PushPin, Trash, X } from "@phosphor-icons/react";
+import { ArrowLineDownRight, ArrowLineUpLeft, ArrowSquareOut, BookmarkSimple, Copy, FileArrowUp, Folders, FolderSimple, FolderSimplePlus, FolderSimpleUser, MagnifyingGlass, NotePencil, PencilSimple, Plus, PushPin, Star, Trash, X } from "@phosphor-icons/react";
 import { ContextMenu, menuAt, menuKey, type MenuItem } from "./Menu";
 import { commonKey } from "./common";
 import { measure, STYLE } from "./chem";
@@ -21,7 +23,9 @@ import { LIBRARY, type LibraryItem } from "./library";
 import { arrowShapes, curvePath, isOrbital, labelTurn, render, shapeInk, shapePaths, spotPath, tlcLayout, type Arrow, type Label, type Mol } from "./render";
 import { reduced, timing, useLeaving } from "./motion";
 import { holdCursor } from "./cursor";
-import { MY_SET, ownId, TEMPLATE_SIZES, templateKind, type FloatingPalette, type TemplateSize, type TemplateTool } from "./templates";
+import { FAVOURITES, MY_SET, ownId, TEMPLATE_SIZES, templateKind, type FloatingPalette, type TemplateSize, type TemplateTool } from "./templates";
+import { anchorLabel, atomName, chooseAnchor, chooseMode, MODES, validAnchor, type Attach, type TemplateAnchor, type TemplateMode } from "./attach";
+import { Segmented } from "./Fields";
 
 // The tool a library is beside (the Ring tool's Templates row, or the Template tool): a template chosen or added there
 // is that tool's.
@@ -37,6 +41,7 @@ export type TemplateActions = {
   onKeep?: (kind: string, keep: boolean) => void; onEdit?: (kind: string) => void; onDuplicate?: (id: string) => void;
   onPlace?: (id: string, before?: string) => void; onToStart?: (id: string) => void; onToEnd?: (id: string) => void;
   onKeepOpen?: (set: string) => void; onSaveSet?: (set: string) => void;
+  favourites?: string[]; onFavourite?: (kind: string) => void; // the starred templates' kinds, and a star put on or taken off
 };
 // A set's menu item that saves it as a ChemDraw template file (.ctp), in the library's set menu and a palette's bar.
 const SAVE_SET: MenuItem = { key: "saveset", name: "Save for ChemDraw…", icon: <FileArrowUp size={18} /> };
@@ -128,6 +133,70 @@ export function StructureThumb({ id, mol, px }: { id: string; mol: Mol; px?: num
   );
 }
 
+// The template in hand, drawn large under the library's grid (ReShiki's source preview): a click on an atom or bond
+// makes it the attachment point, ringed and named ("Attach at N-9"); a click on it again takes it off (Automatic). The
+// arrow keys walk the atoms and then the bonds, and Return or Space chooses. Beside it, how it joins (attach.ts):
+// Automatic (ChemDraw's click rule), Connect with a bond, Share an atom, Fuse along a bond.
+const JOIN_NAMES: Record<TemplateMode, string> = { auto: "Auto", connect: "Connect", share: "Share", fuse: "Fuse" };
+export function AttachPicker({ mol, value, onChange }: { mol: Mol; value: Attach; onChange: (a: Attach) => void }) {
+  const drawn = useMemo(() => drawThumb(mol, STYLE), [mol]), L = STYLE.bond;
+  const xy = (i: number): [number, number] => [mol.atoms[i].location[0] * L, -mol.atoms[i].location[1] * L];
+  const anchor = validAnchor(mol, value.anchor), mode = value.mode ?? "auto";
+  const options: TemplateAnchor[] = useMemo(() => [...mol.atoms.flatMap((a, i) => (a.hidden ? [] : [{ atom: i }])), ...mol.bonds.map((_, k) => ({ bond: k }))], [mol]);
+  const same = (a: TemplateAnchor | undefined, b: TemplateAnchor) => !!a && ("atom" in a ? "atom" in b && a.atom === b.atom : "bond" in b && a.bond === b.bond);
+  const chosen = Math.max(0, options.findIndex((o) => same(anchor, o)));
+  const [focus, setFocus] = useState<number>();
+  const marks = useRef<SVGGElement>(null);
+  const pick = (o: TemplateAnchor) => onChange(chooseAnchor(value, same(anchor, o) ? undefined : o));
+  const name = (o: TemplateAnchor) => ("atom" in o ? atomName(mol, o.atom) : anchorLabel(mol, o).replace(/^Attach at /, ""));
+  const key = (e: React.KeyboardEvent, k: number) => {
+    const step = e.key === "ArrowRight" || e.key === "ArrowDown" ? 1 : e.key === "ArrowLeft" || e.key === "ArrowUp" ? -1 : 0;
+    if (step) {
+      e.preventDefault();
+      const next = (k + step + options.length) % options.length;
+      setFocus(next);
+      (marks.current?.children[next] as SVGElement | undefined)?.focus();
+    } else if (e.key === "Enter" || e.key === " ") { e.preventDefault(); pick(options[k]); }
+  };
+  const ring = anchor && "atom" in anchor ? xy(anchor.atom) : undefined, edge = anchor && "bond" in anchor ? mol.bonds[anchor.bond].atoms.map(xy) : undefined;
+  // Drawn as large as fits: the atoms with a label's room round them (a thumbnail keeps five bonds' room).
+  const view = useMemo(() => {
+    const ps = mol.atoms.map((_, i) => xy(i)), xs = ps.map((q) => q[0]), ys = ps.map((q) => q[1]);
+    const [x0, x1, y0, y1] = [Math.min(...xs), Math.max(...xs), Math.min(...ys), Math.max(...ys)], side = Math.max(x1 - x0, y1 - y0) + 1.6 * L;
+    return `${(x0 + x1) / 2 - side / 2} ${(y0 + y1) / 2 - side / 2} ${side} ${side}`;
+  }, [mol]); // eslint-disable-line react-hooks/exhaustive-deps
+  return (
+    <div className="library-attach" role="group" aria-label="Where the template attaches">
+      <svg className="attach-view" viewBox={view}>
+        {edge && <line className="attach-chosen" x1={edge[0][0]} y1={edge[0][1]} x2={edge[1][0]} y2={edge[1][1]} strokeWidth={0.34 * L} />}
+        {ring && <circle className="attach-chosen" cx={ring[0]} cy={ring[1]} r={0.3 * L} />}
+        <g aria-hidden>
+          {drawn.fills.map((f, i) => <path key={i} d={f.d} fill={f.colour ?? "currentColor"} />)}
+          <path d={drawn.d} fill="currentColor" stroke="currentColor" strokeWidth={drawn.line} />
+          {drawn.labels.map((l, i) => <text key={i} x={l.x} y={l.y} transform={labelTurn(l)} fill="currentColor" style={{ font: `${l.size}px ${fontStack("Arial")}` }}>{l.text}</text>)}
+        </g>
+        <g ref={marks} role="radiogroup" aria-label="Attach by">
+          {options.map((o, k) => {
+            const props = { role: "radio", "aria-checked": same(anchor, o), "aria-label": name(o), tabIndex: k === (focus ?? chosen) ? 0 : -1, className: "attach-hit",
+              onClick: () => { setFocus(k); pick(o); }, onKeyDown: (e: React.KeyboardEvent) => key(e, k), onFocus: () => setFocus(k) };
+            if ("atom" in o) { const [x, y] = xy(o.atom); return <circle key={`a${o.atom}`} {...props} cx={x} cy={y} r={0.3 * L}><title>{name(o)}</title></circle>; }
+            const [a, b] = mol.bonds[o.bond].atoms.map(xy);
+            // A bond's target is its middle part, so the atoms' circles stay theirs.
+            const p = (t: number) => [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t];
+            return <line key={`b${o.bond}`} {...props} x1={p(0.3)[0]} y1={p(0.3)[1]} x2={p(0.7)[0]} y2={p(0.7)[1]} strokeWidth={0.36 * L}><title>{name(o)}</title></line>;
+          })}
+        </g>
+      </svg>
+      <div className="attach-side">
+        <p className="attach-label" aria-live="polite">{anchorLabel(mol, anchor)}</p>
+        <Segmented label="How it joins" value={mode} options={MODES.map((m) => [m.mode, JOIN_NAMES[m.mode], m.name] as [TemplateMode, string, string])}
+          onChange={(m) => onChange(chooseMode(value, m))} />
+        <p className="attach-hint">{anchor ? "Click it again for Automatic." : "Click an atom or bond to attach by it."}</p>
+      </div>
+    </div>
+  );
+}
+
 // A template's menu, the same in the library and in a floating palette: Edit, Rename, Duplicate, Move to, Move to
 // start, Move to end and Remove for one of the user's own; Add to templates (a copy), Edit a copy and the Ring menu pin
 // for a built-in one. onRename: Rename was chosen (the library shows the name field).
@@ -135,16 +204,17 @@ export function TemplateMenu({ item, at, keyboard, actions: a, onRename, onClose
   item: LibraryItem; at: { x: number; y: number }; keyboard?: boolean; actions: TemplateActions; onRename?: () => void; onClose: () => void;
 }) {
   const id = ownId(item.kind), kept = !!a.kept?.includes(item.kind);
+  const star: MenuItem[] = a.onFavourite ? [{ key: "favourite", name: "Favourite", icon: <Star size={18} />, checked: !!a.favourites?.includes(item.kind) }] : [];
   const groups: MenuItem[][] = id ? [
     [...(a.onEdit ? [{ key: "edit", name: "Edit", icon: <NotePencil size={18} /> }] : []), ...(onRename ? [{ key: "rename", name: "Rename", icon: <PencilSimple size={18} /> }] : []),
-      ...(a.onDuplicate ? [{ key: "duplicate", name: "Duplicate", icon: <Copy size={18} /> }] : [])],
+      ...(a.onDuplicate ? [{ key: "duplicate", name: "Duplicate", icon: <Copy size={18} /> }] : []), ...star],
     [...(a.onSets ? [{ key: "move", name: "Move to", icon: <Folders size={18} />, more: true }] : []), ...(a.onToStart ? [{ key: "start", name: "Move to start", icon: <ArrowLineUpLeft size={18} /> }] : []),
       ...(a.onToEnd ? [{ key: "end", name: "Move to end", icon: <ArrowLineDownRight size={18} /> }] : [])],
     a.onRemove ? [{ key: "remove", name: "Remove", icon: <Trash size={18} /> }] : [],
   ] : [[
     ...(a.onCopy && a.onSets ? [{ key: "copy", name: "Add to templates", icon: <BookmarkSimple size={18} />, more: true }] : []),
     ...(a.onEdit ? [{ key: "edit", name: "Edit a copy", icon: <NotePencil size={18} /> }] : []),
-    ...(a.onKeep ? [{ key: "keep", name: "Keep in the Ring menu", icon: <PushPin size={18} />, checked: kept }] : []),
+    ...(a.onKeep ? [{ key: "keep", name: "Keep in the Ring menu", icon: <PushPin size={18} />, checked: kept }] : []), ...star,
   ]];
   const sub = (key: string) => (key === "move" ? { label: "Move to", groups: setItems(a.sets ?? [], (s) => `move:${s}`, "move.new", item.category) }
     : key === "copy" ? { label: "Add to templates", groups: setItems(a.sets ?? [], (s) => `copy:${s}`, "copy.new") } : undefined);
@@ -153,6 +223,7 @@ export function TemplateMenu({ item, at, keyboard, actions: a, onRename, onClose
     if (key === "rename") return onRename?.();
     if (key === "remove") return a.onRemove?.(item.kind);
     if (key === "keep") return a.onKeep?.(item.kind, !kept);
+    if (key === "favourite") return a.onFavourite?.(item.kind);
     if (key.startsWith("copy:")) return a.onCopy?.(item.kind, key.slice(5));
     if (key === "copy.new") return a.onNewSet?.((set) => a.onCopy?.(item.kind, set));
     if (!id) return;
@@ -235,17 +306,22 @@ const NAME_CLICK = 250;
 // find: structures for what is searched, by name or abbreviation (TREN), each as a built-in template: Octet's own names
 // that begin as typed and are drawn already (read false, at once), or all of them with the name as typed or its
 // suggestion (read true, once typing pauses). size and onSize: the template size (the settings keep it).
+// favouriteItems: the starred templates, the Favourites set at the top. attach: the template in hand, drawn large under
+// the grid to choose where it attaches and how it joins.
+const FAV = "favourites"; // the Favourites set's key: never a set name the user can type
+const setTitle = (name: string) => (name === FAV ? FAVOURITES : name);
 export function LibraryPanel(p: TemplateActions & {
   current: string; dimmed?: boolean; mine?: LibraryItem[]; size?: TemplateSize; onSize?: (size: TemplateSize) => void;
+  favouriteItems?: LibraryItem[]; attach?: { mol: Mol; value: Attach; onChange: (a: Attach) => void };
   tool?: TemplateTool; reveal?: { set: string; id?: string; n: number }; find?: (query: string, read: boolean) => LibraryItem[];
   onAdd?: (set: string) => void; onRename?: (id: string, name: string) => void;
   onChoose: (kind: string) => void; onPress: (e: React.PointerEvent, kind: string) => void;
 }) {
   const own = useMemo(() => [MY_SET, ...(p.sets ?? [])].map((name) => ({ name, items: (p.mine ?? []).filter((t) => t.category === name), own: true })), [p.mine, p.sets]);
-  const categories = useMemo(() => [...own.filter((c) => c.items.length || p.onSets), ...LIBRARY.map((c) => ({ ...c, own: false }))], [own, p.onSets]);
+  const categories = useMemo(() => [...(p.favouriteItems?.length ? [{ name: FAV, items: p.favouriteItems, own: false }] : []), ...own.filter((c) => c.items.length || p.onSets), ...LIBRARY.map((c) => ({ ...c, own: false }))], [own, p.onSets, p.favouriteItems]);
   const fresh = p.reveal && p.reveal.n !== revealed ? p.reveal : undefined;
   // It opens on the set a template was just added to, or on the category of the template in hand.
-  const [category, setCategory] = useState(() => fresh?.set ?? categories.find((c) => c.items.some((t) => t.kind === p.current))?.name ?? categories[0].name);
+  const [category, setCategory] = useState(() => fresh?.set ?? categories.find((c) => c.name !== FAV && c.items.some((t) => t.kind === p.current))?.name ?? categories[0].name);
   const [query, setQuery] = useState(""), leaving = useLeaving();
   // A set's name being typed: a new set ("" until it has one), or one being renamed.
   const [naming, setNaming] = useState<{ from?: string; value: string }>();
@@ -293,7 +369,7 @@ export function LibraryPanel(p: TemplateActions & {
   const shown = useMemo(() => {
     const q = typed.toLowerCase();
     if (!q) return open.items;
-    const all = categories.flatMap((c) => c.items);
+    const all = categories.filter((c) => c.name !== FAV).flatMap((c) => c.items);
     const found = all.filter((t) => t.name.toLowerCase().includes(q) || t.category.toLowerCase().includes(q) || !!t.also?.toLowerCase().includes(q));
     for (const t of named) {
       const item = all.find((x) => commonKey(x.name) === commonKey(t.name)) ?? t;
@@ -327,7 +403,7 @@ export function LibraryPanel(p: TemplateActions & {
   const size = p.size ?? "medium", px = LIBRARY_THUMB[size];
   // A set's menu: Keep open for every set, and Save for ChemDraw… for one with templates; Rename and Remove for
   // the user's own (not My templates).
-  const setGroups = (s: { set: string; own: boolean }): MenuItem[][] => [
+  const setGroups = (s: { set: string; own: boolean }): MenuItem[][] => s.set === FAV ? [] : [
     [...(p.onKeepOpen ? [{ key: "keepopen", name: "Keep open", icon: <ArrowSquareOut size={18} /> }] : []), ...(p.onSaveSet && categories.find((c) => c.name === s.set)?.items.length ? [SAVE_SET] : [])],
     s.own && s.set !== MY_SET && p.onSets ? [{ key: "rename", name: "Rename", icon: <PencilSimple size={18} /> }, { key: "remove", name: "Remove", icon: <Trash size={18} /> }] : [],
   ].filter((g) => g.length);
@@ -359,7 +435,7 @@ export function LibraryPanel(p: TemplateActions & {
                     if (!kind || !c.own || !p.onSets) return;
                     if (id) p.onSets.move(id, c.name); else p.onCopy?.(kind, c.name);
                   }}>
-                  {c.name}<span>{c.items.length}</span>
+                  {setTitle(c.name)}<span>{c.items.length}</span>
                 </button>
               )}
               {c.own && c.name !== MY_SET && p.onSets && naming?.from !== c.name && (
@@ -376,15 +452,15 @@ export function LibraryPanel(p: TemplateActions & {
       </div>
       <div className="library-main">
         <div className="library-head">
-          <h3 className="library-title">{query ? "Results" : open.name}</h3>
+          <h3 className="library-title">{query ? "Results" : setTitle(open.name)}</h3>
           {p.onSize && <SizeChoice className="library-keep" px={16} size={size} onSize={p.onSize} />}
-          {!query && p.onKeepOpen && (
+          {!query && p.onKeepOpen && open.name !== FAV && (
             <button className="library-keep" aria-label={`Keep ${open.name} open`} data-tip="Keep open" onClick={() => p.onKeepOpen!(open.name)}>
               <ArrowSquareOut size={16} />
             </button>
           )}
         </div>
-        <div ref={grid} className="library-grid" role="menu" aria-label={query ? "Results" : category} {...(!query && open.own ? drop(open.name) : {})}>
+        <div ref={grid} className="library-grid" role="menu" aria-label={query ? "Results" : setTitle(open.name)} {...(!query && open.own ? drop(open.name) : {})}>
           {!query && open.own && p.onAdd && (
             <div className="library-cell">
               <button role="menuitem" className="library-item library-add" aria-label={`Add a structure to ${open.name}`} onClick={() => p.onAdd!(open.name)}>
@@ -427,6 +503,7 @@ export function LibraryPanel(p: TemplateActions & {
                   <Thumb item={t} px={px} />
                   <span className="library-name">{t.name}</span>
                 </button>
+                {p.favourites?.includes(t.kind) && <Star className="library-fav" size={12} aria-hidden />}
                 {mine && p.onRemove ? (
                   <button className="variant-action" aria-label={`Remove ${t.name}`} data-tip="Remove" onClick={() => p.onRemove!(t.kind)}>
                     <X size={12} />
@@ -441,6 +518,7 @@ export function LibraryPanel(p: TemplateActions & {
           })}
           {!shown.length && query && <p className="library-none">No template called “{query.trim()}”. Type its name in the Ring list to add it.</p>}
         </div>
+        {p.attach && p.attach.mol.atoms.length > 0 && <AttachPicker {...p.attach} />}
       </div>
       {menu && item && (
         <TemplateMenu item={item} at={menu.at} keyboard={menu.keyboard} actions={{ ...actions, onPlace: undefined, ...(ordering && ownId(item.kind) ? {} : { onToStart: undefined, onToEnd: undefined }) }}

@@ -2489,14 +2489,22 @@ export function addTemplate(m: Mol, t: Mol, target: { bond?: number; atom?: numb
     const c = middle(at0), to = target.point ?? [0, 0];
     f = (q) => add(to, sub(q, c));
   }
-  const ids: number[] = [];
   // How much f grows the template. One drawn in perspective (a chair, a Newman projection) keeps its depth, grown as
   // much; mirrored, it turns over in 3D, so its depth changes sign and its stereochemistry is kept.
   const kz =(target.bond !== undefined && edge ? len(sub(f([1, 0]), f([0, 0]))) : scale) * (mirrored ? -1 : 1);
-  for (const [k, p] of at0.map(f).entries()) {
+  return stampTemplate(m, t, f, { scale, kz, mirrored }).mol;
+}
+// A template's atoms, bonds and objects put in the drawing where f takes them (addTemplate, and a chosen attachment in
+// attach.ts): scale is the drawing's atom size, kz how much f grows depth (negative: mirrored). shared: template atoms
+// that become these drawing atoms; any other template atom that lands on an atom joins it. ids: the drawing atom of
+// each template atom.
+export function stampTemplate(m: Mol, t: Mol, f: (q: P) => P, o: { scale: number; kz: number; mirrored: boolean; shared?: Map<number, number> }): { mol: Mol; ids: number[] } {
+  const { scale, kz, mirrored } = o, ids: number[] = [];
+  for (const [k, a] of t.atoms.entries()) {
     const before = m.atoms.length;
     let id: number;
-    [m, id] = atomOrNew(m, p, scale);
+    if (o.shared?.has(k)) id = o.shared.get(k)!;
+    else [m, id] = atomOrNew(m, f([a.location[0], a.location[1]]), scale);
     if (id >= before) {
       // A new atom takes the template atom's label, marks and look; its place and size are the drawing's.
       const { location: [, , z = 0], scale: __, order: ___, ...own } = t.atoms[k];
@@ -2517,7 +2525,7 @@ export function addTemplate(m: Mol, t: Mol, target: { bond?: number; atom?: numb
     const k = m.bonds.findIndex((x) => x.atoms.includes(i) && x.atoms.includes(j)), { colour, halo, position } = b;
     if (k >= 0 && (colour || halo || position)) m = { ...m, bonds: m.bonds.map((x, n) => (n === k ? { ...x, ...(colour ? { colour } : {}), ...(halo ? { halo } : {}), ...(position ? { position: mirrored && position !== "centre" ? (position === "left" ? "right" : "left") : position } : {}) } : x)) };
   }
-  return withObjects(m, t, ids, f, Math.abs(kz), mirrored);
+  return { mol: withObjects(m, t, ids, f, Math.abs(kz), mirrored), ids };
 }
 // A template's objects (text, arrows, shapes, cycles, groups) and ring fills added to the drawing with new ids, its
 // atoms as ids gives them, moved by f (k: how much f grows them).
