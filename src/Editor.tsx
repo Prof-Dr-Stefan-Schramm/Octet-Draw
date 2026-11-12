@@ -13,7 +13,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "./listen";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { chemicalText, labelSmiles, GROUPS } from "./labels";
-import { analyse, chiralFlagOnly, structures, expandWithOrigins, stereoFacts, stereoLabels, smilesWeight, toMolfile, toReaction, toSdf, toInchiKey, type RxnStep, type Structure, cipOf, cleanUp, MOST_CLEAN, expandLabels, fragmentMasses, mapReaction, importStructure, toInchi, toInchiAux, measurer, parseStructure, ready, STYLE, textExtent, textWidth, toSmiles } from "./chem";
+import { analyse, chiralFlagOnly, structures, expandWithOrigins, stereoFacts, stereoLabels, smilesWeight, toMolfile, toReaction, toSdf, toInchiKey, type RxnStep, type Structure, cleanUp, MOST_CLEAN, expandLabels, fragmentMasses, mapReaction, importStructure, toInchi, measurer, parseStructure, ready, STYLE, textExtent, textWidth, toSmiles } from "./chem";
 import { MAX_PRINT_PAGES, MAX_PURPOSES, PURPOSES, QUICK, edgeAt, pagesOver, fontStack, pageSize, frameStyle, forPurpose, outlines as pageOutlines, purposeOf, readStyle, roundPt, sameStyle, styleFor, withScale, elementColours, COLOURS, FONTS, HIGHLIGHT_COLOURS, RING_FILLS, sizesAt, darkColour, type DocStyle, type Guides, type OwnPurpose, type PurposeKind } from "./docstyle";
 import { gridLines, gridNudge, gridOf, shownStep, snapToGrid } from "./grid";
 import { RULER, Rulers } from "./Rulers";
@@ -90,7 +90,7 @@ import {
 import { arrowPath, arrowShapes, bendPoint, blockOutline, curved, ellipseArrow, headBarb, headSize, sizeOf, sizedHead, turnPx, scaleOf, fitArrows, HIGHLIGHT, SHADE, inShape, inDrawn, shapeBounds, turns, tlcLayout, spotPath, tableLayout, linesOf, TABLE_LINES, TABLE_PAD, curveBox, headsOf, takesHeads, shapesHeads, headMenu, HEAD_SHAPES, isBracket, isLine, isOrbital, markAt, straightArrow, shapeInk, SWEEPS, sweepBend, sweepOf, isNumber, labelTurn, placeCaptions, render, renderParts, type Arrow, type ArrowKind, type Atom, type Bond, type Box, type Drawing, type PartCache, type Caption, type CurvePoint, type Head, type HeadShape, type CurveFill, type Mol, type Placed, type Shape, type ShapeKind, type Spot, type TableLine, type CellAlign, polymerLabelsAt, type AtomQuery, type BracketUsage, type Polymer, type Grid, ASCENT, DESCENT } from "./render";
 import { cursorColour, dragCursor, drawCursors, type Cursors } from "./cursor";
 import { CURSORS, handlePoint, isCorner, percentOf, resizeBy, sideAt, SIDES, type Box as RBox, type Side } from "./resize";
-import { abbreviationOf, cleanOwnName, loadNames, mergeOwnNames, nameToSmiles, nameToAtoms, namesStarting, ownName, ownNamesFile, readOwnNamesFile, renameOwnName, setOwnNames, suggestName, knownName, looksLikeSmiles, withOwnName, withoutOwnName, type OwnName } from "./names";
+import { abbreviationOf, cleanOwnName, loadNames, mergeOwnNames, nameToSmiles, namesStarting, ownName, ownNamesFile, readOwnNamesFile, renameOwnName, setOwnNames, suggestName, looksLikeSmiles, withOwnName, withoutOwnName, type OwnName } from "./names";
 import { isTemplateFile, readTemplateFile, writeTemplateFile } from "./ctp";
 import { casProblem, nameList } from "./dictionary";
 import { PEPTIDE, peptideProblem } from "./peptide";
@@ -98,17 +98,15 @@ import { relabel, residueName, residuesOf, SEQ_ENDS, sequenceParts, sequenceText
 import { NUCLEIC, nucleicProblem } from "./nucleic";
 import { fullLayout, isSequence, laterSmiles, PREVIEW_PAUSE, quickLayout, warmLayout } from "./namepreview";
 import { commonKey } from "./common";
-import { checkedName, graphOf, setComplexNamer, setNamer, withAbbreviation } from "./naming";
-import { iupacLocants, iupacName } from "./namer";
-import { sandwichIons } from "./metals";
-import { complexName } from "./complexes";
-import { mixtureName, mixturesOf, withSalts, type Mixture } from "./mixtures";
+import { graphOf } from "./naming";
+import { iupacLocants } from "./namer";
+import type { NamedPart } from "./namepart";
+import { askMixtureName, askName, type Outcome } from "./namingworker";
+import { mixturesOf, withSalts, type Mixture } from "./mixtures";
 import { nameRuns } from "./nametype";
 import { atomText, bondText, changeText, describe, groupTitle, ringOn, type Item as AccessItem } from "./access";
 import { CanvasAccess, type HotItem } from "./CanvasAccess";
 
-setNamer(iupacName);
-setComplexNamer((m) => complexName(m, { read: nameToSmiles, atoms: nameToAtoms, inchi: toInchi, aux: toInchiAux, cip: cipOf }));
 import { addSet, addSetOf, addTo, closePalette, duplicateTemplate, freeSetName, hasContent, kindName, loadTemplates, moveTemplate, MY_SET, namedKind, newTemplate, openPalette, placeTemplate, removeSet, removeTemplate, renameSet, renameTemplate, setName, templateKind, templateToEnd, templateToStart, updateTemplate } from "./templates";
 import { formulaCaption, formulaRuns } from "./labels";
 import { expandEscapes, expandRuns, keptText } from "./escapes";
@@ -2430,7 +2428,7 @@ export default function Editor() {
     ...Object.fromEntries(menuSets.map((set, k) => [`ctp_${k}`, () => saveTemplateSet(set)])),
     document: () => setSettingsOpen("document"),
     settings: () => setSettingsOpen(moduleOf(settings.settingsModule)),
-    structure_to_name: () => nameStructures(),
+    structure_to_name: () => void nameStructures(),
     copy_smiles: () => copyAs("smiles"),
     copy_inchi: () => copyAs("inchi"),
     copy_inchikey: () => copyAs("inchikey"),
@@ -5182,25 +5180,34 @@ export default function Editor() {
   }
 
   // Structure to name: a checked name for each structure in the selection (or the drawing), where there is one.
-  // Structure to name runs only when asked, once per structure: names are kept by the structure's own file text.
-  const nameCache = useRef(new Map<string, { name?: string; bare?: string; mol: Mol }>());
-  // A name's structure is drawn as Octet draws SMILES before its InChI is taken, so it counts hydrogens as the
-  // drawing does (the P of PPh3 bonded to Pd has none).
-  const inchiOf = (s: Mol | string) => { try { return toInchi(typeof s === "string" ? parseStructure(s, false) : s); } catch { return undefined; } };
-  // The checked name (bare), the name shown (with its abbreviation) and the structure named.
-  const namedPart = (g: number[], base = doc) => {
-    const part = subset(base, new Set(g)), key = serialize(part);
-    if (!nameCache.current.has(key)) {
-      let bare: string | undefined;
-      // A metallocene drawn with the j key is named as its ions, as OPSIN and the standard InChI have it.
-      const p = sandwichIons(part) ?? part;
-      try { bare = checkedName(p, expandLabels(p), nameToSmiles, inchiOf, cipOf, knownName); } catch { bare = undefined; }
-      // The abbreviation follows the checked name, as in an experimental section: "... (TREN)".
-      nameCache.current.set(key, { bare, name: bare && withAbbreviation(bare, abbreviationOf(inchiOf(p))), mol: p });
+  // Structure to name runs only when asked, once per structure: names are kept by the structure's own file text. The
+  // names are made in a worker (namingworker.ts), so a structure that is slow to name never stops the window. why:
+  // naming it took too long (late), or the worker failed: such a structure is not asked again in the background, so
+  // the screen reader does not start the worker again after each edit. Structure to Name asks again after a failure.
+  const nameCache = useRef(new Map<string, NamedPart & { why?: "late" | "failed" }>());
+  const pendingNames = useRef(new Map<string, Promise<void>>());
+  const partOf = (g: number[], base: Mol) => { const part = subset(base, new Set(g)); return { part, key: serialize(part) }; };
+  // The checked name (bare), the name shown (with its abbreviation) and the structure named, once known.
+  const namedPart = (g: number[], base = doc) => nameCache.current.get(partOf(g, base).key);
+  // Asks the worker for the name of structure g of base, unless it is known; a request that waits or runs is shared.
+  // Each new request goes into asked, so Structure to Name can stop it.
+  const askNamed = (g: number[], base: Mol, background: boolean, asked?: (() => void)[]): Promise<void> => {
+    const { part, key } = partOf(g, base), known = nameCache.current.get(key);
+    if (known && (background || known.why !== "failed")) return Promise.resolve();
+    let wait = pendingNames.current.get(key);
+    if (!wait) {
+      const r = askName(part, settings.dictionary, background);
+      // A stopped request is not shared again, even before its answer comes.
+      asked?.push(() => { if (pendingNames.current.get(key) === wait) pendingNames.current.delete(key); r.cancel(); });
+      wait = r.result.then((o: Outcome<NamedPart>) => {
+        if (pendingNames.current.get(key) === wait) pendingNames.current.delete(key);
+        if (o.done) nameCache.current.set(key, o.answer);
+        else if (o.why !== "stopped") nameCache.current.set(key, { mol: part, why: o.why });
+      });
+      pendingNames.current.set(key, wait);
     }
-    return nameCache.current.get(key)!;
+    return wait;
   };
-  const nameFor = (g: number[], base = doc): string | undefined => namedPart(g, base).name;
 
   // ——— The canvas for screen readers and the keyboard (access.ts, CanvasAccess.tsx) ———
   // Each object's role and name, in reading order, worked out 300 ms after the drawing last changed, so typing and
@@ -5245,7 +5252,12 @@ export default function Editor() {
     if (known.current.size >= 2000) known.current.clear();
     const f = known.current.get(key) ?? {};
     if (loaded && f.formula === undefined) { try { f.formula = analyse(subset(base, new Set(atoms)), 1)?.[0]?.formula ?? ""; } catch { f.formula = ""; } }
-    if (namesLoaded && !f.named) { f.name = atoms.length <= MOST_NAMED ? namedPart(atoms, base).name : undefined; f.named = true; }
+    if (namesLoaded && !f.named) {
+      // The name comes from the naming worker; the canvas is worked out again when it is there.
+      const n = atoms.length <= MOST_NAMED ? namedPart(atoms, base) : undefined;
+      if (n || atoms.length > MOST_NAMED) { f.name = n?.name; f.named = true; }
+      else void askNamed(atoms, base, true).then(() => setFactsAdded((x) => x + 1));
+    }
     known.current.set(key, f);
   }
   useEffect(() => {
@@ -5379,11 +5391,6 @@ export default function Editor() {
     }, 400);
     return () => clearTimeout(t);
   }, [doc]); // eslint-disable-line react-hooks/exhaustive-deps
-  // A grouped mixture's name (mixtures.ts): its components' checked names with their ratio, read back whole.
-  const mixtureNameFor = (mix: Mixture): string | undefined => {
-    const parts = mix.parts.map((p) => { const n = namedPart(p.atoms); return { name: n.bare ?? "", mol: n.mol, count: p.count }; });
-    try { return mixtureName(parts, nameToSmiles, inchiOf); } catch { return undefined; }
-  };
   // The structures to name. The ions of a salt (charged pieces within 3.5 bond lengths of each other whose charges
   // cancel) are named together, as sodium acetate rather than two names. With only captions picked, none.
   const targets = () => {
@@ -5422,34 +5429,67 @@ export default function Editor() {
   }
   // A name's italic and raised characters as IUPAC prints them (nametype.ts), as runs; the text stays the same.
   const typeset = (name: string): { runs?: TextRun[] } => { const runs = nameRuns(name); return styled(runs) ? { runs } : {}; };
-  // Structure to name: each named structure gets its name centred underneath (after its compound number).
-  function nameStructures() {
+  // Structure to name: each named structure gets its name centred underneath (after its compound number). The names
+  // come from the naming worker (namingworker.ts), so the window never waits. When it takes more than half a second,
+  // a notice says so, with Stop. The names land only if the drawing has not changed meanwhile; they are kept either way.
+  const stopNaming = useRef<() => void>(undefined);
+  async function nameStructures() {
     if (!namesLoaded) { void loadNames().then(() => setNamesLoaded(true)).catch(() => {}); return setNotice("Loading names. Try again in a moment.", "info"); }
-    let m = doc, missed = 0;
+    stopNaming.current?.();
+    const base = doc, captions = chem.captions, chemMol = chem.mol;
     // A grouped mixture has one name, with its components' ratio (ChemDraw 26.1).
-    const all = targets(), mixtures = mixturesOf(doc, all), inMixture = new Set(mixtures.flatMap((x) => x.atoms));
-    for (const mix of mixtures) {
-      const name = mixtureNameFor(mix), atoms = mix.atoms;
-      if (!name) { missed++; continue; }
-      if (!m.captions?.some((c) => c.text === name && c.under?.some((i) => atoms.includes(i)))) m = addCaption(m, { text: name, ...typeset(name), x: 0, y: 0, under: atoms })[0];
-    }
-    for (const atoms of all.filter((t) => !t.some((i) => inMixture.has(i)))) {
-      const name = nameFor(atoms);
-      if (!name) { missed++; continue; }
-      if (!m.captions?.some((c) => c.text === name && c.under?.some((i) => atoms.includes(i)))) m = addCaption(m, { text: name, ...typeset(name), x: 0, y: 0, under: atoms })[0];
-    }
+    const all = targets(), mixtures = mixturesOf(base, all), inMixture = new Set(mixtures.flatMap((x) => x.atoms));
+    const single = all.filter((t) => !t.some((i) => inMixture.has(i)));
     // Captions that count as chemistry (Rh as rhodium): the picked ones, or all of them with nothing selected. The
     // name goes under the caption.
     const own = selection.size ? new Set<number>() : pickedChem(picked);
-    chem.captions.forEach((id, k) => {
-      const i = doc.atoms.length + k, c = doc.captions!.find((x) => x.id === id)!;
-      if (own && !own.has(i)) return;
-      const name = nameFor([i], chem.mol), at = belowCaption(c);
-      if (!name) { missed++; return; }
+    const named = captions.map((id, k) => ({ id, i: base.atoms.length + k })).filter(({ i }) => !own || own.has(i));
+    const asked: (() => void)[] = [];
+    let stopped = false;
+    const stop = () => { stopped = true; asked.forEach((cancel) => cancel()); };
+    stopNaming.current = stop;
+    // It stays until the names come (NoticeBar.tsx stay), as the worker may first need some seconds to load.
+    const slow = window.setTimeout(() => showNotice((was) => ({ text: "Naming structures.", kind: "info", action: { label: "Stop", run: stop }, n: (was?.n ?? 0) + 1, stay: true })), 500);
+    const mixtureNames = new Map<Mixture, string | undefined>();
+    try {
+      await Promise.all([...mixtures.flatMap((x) => x.parts.map((p) => p.atoms)), ...single].map((g) => askNamed(g, base, false, asked))
+        .concat(named.map(({ i }) => askNamed([i], chemMol, false, asked))));
+      // A grouped mixture's name: its components' checked names with their ratio, read back whole (mixtures.ts).
+      await Promise.all(mixtures.map(async (mix) => {
+        const parts = mix.parts.map((p) => { const n = namedPart(p.atoms, base); return { name: n?.bare ?? "", mol: n?.mol ?? subset(base, new Set(p.atoms)), count: p.count }; });
+        if (stopped) return;
+        const r = askMixtureName(parts, settings.dictionary);
+        asked.push(r.cancel);
+        const o = await r.result;
+        mixtureNames.set(mix, o.done ? o.answer : undefined);
+      }));
+    } finally {
+      window.clearTimeout(slow);
+      if (stopNaming.current === stop) stopNaming.current = undefined;
+    }
+    if (stopped) return;
+    // The notice, if it showed, goes in each case below.
+    if (now.current !== base) return setNotice("The drawing changed while Octet named it. Choose Structure to Name again.", "info");
+    let m = base, missed = 0, late = 0;
+    const nameOf = (g: number[], b: Mol) => { const n = namedPart(g, b); if (n?.why === "late") late++; return n?.name; };
+    for (const mix of mixtures) {
+      const name = mixtureNames.get(mix), atoms = mix.atoms;
+      if (!name) { missed++; continue; }
+      if (!m.captions?.some((c) => c.text === name && c.under?.some((i) => atoms.includes(i)))) m = addCaption(m, { text: name, ...typeset(name), x: 0, y: 0, under: atoms })[0];
+    }
+    for (const atoms of single) {
+      const name = nameOf(atoms, base);
+      if (!name) { missed++; continue; }
+      if (!m.captions?.some((c) => c.text === name && c.under?.some((i) => atoms.includes(i)))) m = addCaption(m, { text: name, ...typeset(name), x: 0, y: 0, under: atoms })[0];
+    }
+    for (const { id, i } of named) {
+      const c = base.captions!.find((x) => x.id === id)!, name = nameOf([i], chemMol), at = belowCaption(c);
+      if (!name) { missed++; continue; }
       if (!m.captions?.some((x) => x.text === name && Math.hypot(x.x - at.x, x.y - at.y) < 1e-6)) m = addCaption(m, { text: name, ...typeset(name), ...at })[0];
-    });
-    setNotice(missed === 0 ? undefined : missed === 1 ? "Octet cannot name this structure yet." : `Octet cannot name ${missed} of these structures yet.`);
-    if (m !== doc) set(m, true);
+    }
+    const why = late === 0 ? "" : late === 1 && missed === 1 ? " It took more than 15 seconds." : late === 1 ? " One took more than 15 seconds." : ` ${late} took more than 15 seconds.`;
+    setNotice(missed === 0 ? undefined : missed === 1 ? `Octet cannot name this structure yet.${why}` : `Octet cannot name ${missed} of these structures yet.${why}`);
+    if (m !== base) set(m, true);
   }
   const nameable = loaded && chem.mol.atoms.length > 0;
   // Where text for a caption goes (its name, its properties): one line under it, in the same alignment.

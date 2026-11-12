@@ -21,7 +21,7 @@ const { addArrow, addCaption, addShape, deleteAtom, flipAtoms, fragments, groupS
 const { findReaction } = await import("./reaction.ts");
 const { ACTIONS, actionFor, DEFAULT_KEYS, keymap, keyOf } = await import("./keys.ts");
 
-// The names engine (OPSIN), when it is built: Structure to Name as the editor runs it (Editor.tsx namedPart).
+// The names engine (OPSIN), when it is built: Structure to Name as the editor runs it (namepart.ts namePart).
 const dir = new URL("./vendor/opsin/", import.meta.url);
 let nameOf: ((m: Mol) => string | undefined) | undefined;
 if (existsSync(new URL("opsin.js", dir))) {
@@ -229,7 +229,8 @@ assert.match(rule, /box-shadow: var\(--shadow-focus\)/);
 assert.match(rule, /outline: 2px solid transparent/);
 assert.ok(!/canvas-access[^{]*\{[^}]*(transition|animation)/.test(css), "no motion on the canvas's focus");
 // The names given after each edit read a name's structure only for its InChI, so it is Indigo's layout, untidied.
-assert.match(readFileSync(new URL("./Editor.tsx", import.meta.url), "utf8"), /const inchiOf = \(s: Mol \| string\) => \{ try \{ return toInchi\(typeof s === "string" \? parseStructure\(s, false\) : s\)/);
+// They are made in the naming worker by namepart.ts (namingworker.ts).
+assert.match(readFileSync(new URL("./namepart.ts", import.meta.url), "utf8"), /export const inchiOf = \(s: Mol \| string\) => \{ try \{ return toInchi\(typeof s === "string" \? parseStructure\(s, false\) : s\)/);
 
 // ——— Speed: a drawing of about 500 atoms ———
 // n benzene rings in a grid, each with a side group, a caption under every fourth and an arrow between every fifth pair.

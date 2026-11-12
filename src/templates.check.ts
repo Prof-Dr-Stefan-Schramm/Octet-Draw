@@ -460,7 +460,7 @@ const { sandwichIons } = await import("./metals.ts");
 const { messy } = await import("./check.ts");
 setNamer(iupacName);
 setComplexNamer((m) => complexName(m, { read: nameToSmiles, atoms: nameToAtoms, inchi: chem.toInchi, aux: chem.toInchiAux, cip: chem.cipOf }));
-// As the editor takes them (Editor.tsx nameFor): a name's structure drawn as Octet draws SMILES, and a metallocene
+// As the editor takes them (namepart.ts namePart): a name's structure drawn as Octet draws SMILES, and a metallocene
 // drawn with π ligands named as its ions.
 const inchiOf = (s: Mol | string) => { try { return chem.toInchi(typeof s === "string" ? chem.parseStructure(s) : s); } catch { return undefined; } };
 const nameFor = (m: Mol) => { const p = sandwichIons(m) ?? m, name = checkedName(p, chem.expandLabels(p), nameToSmiles, inchiOf, chem.cipOf, knownName); return name && withAbbreviation(name, abbreviationOf(inchiOf(p))); };

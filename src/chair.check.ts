@@ -79,7 +79,7 @@ const { problems } = await import("./check.ts");
 setNamer(iupacName);
 setComplexNamer((m) => complexName(m, { read: nameToSmiles, atoms: nameToAtoms, inchi: chem.toInchi, aux: chem.toInchiAux, cip: chem.cipOf }));
 const inchiOf = (s: Mol | string) => { try { return chem.toInchi(typeof s === "string" ? chem.parseStructure(s) : s); } catch { return undefined; } };
-// As the editor names (Editor.tsx nameFor).
+// As the editor names (namepart.ts namePart).
 const nameFor = (m: Mol) => { const name = checkedName(m, chem.expandLabels(m), nameToSmiles, inchiOf, chem.cipOf, knownName); return name && withAbbreviation(name, abbreviationOf(inchiOf(m))); };
 const warnings = (m: Mol) => problems({ ...m, atoms: m.atoms.map((a) => ({ ...a, cip: true as const })) }, chem.stereoFacts(m)).map((p) => p.type);
 

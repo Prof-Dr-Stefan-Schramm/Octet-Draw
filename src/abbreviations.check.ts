@@ -42,7 +42,7 @@ setComplexNamer((m) => complexName(m, { read: nameToSmiles, atoms: nameToAtoms, 
 const drawn = (name: string): Mol => chem.parseStructure(nameToSmiles(name)!);
 // The Structure panel's line for the first structure: its abbreviation, then its formula (Actions.tsx).
 const header = (m: Mol) => { const a = chem.analyse(m, 3, abbreviationOf)?.[0]; return a && (a.abbreviation ? `${a.abbreviation} · ${a.formula}` : a.formula); };
-// Structure to Name as the editor runs it (Editor.tsx nameFor).
+// Structure to Name as the editor runs it (namepart.ts namePart).
 const inchiOf = (s: Mol | string) => { try { return chem.toInchi(typeof s === "string" ? chem.parseStructure(s, false) : s); } catch { return undefined; } };
 const caption = (m: Mol) => { const name = checkedName(m, chem.expandLabels(m), nameToSmiles, inchiOf, chem.cipOf, knownName); return name && withAbbreviation(name, abbreviationOf(inchiOf(m))); };
 

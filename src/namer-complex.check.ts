@@ -143,7 +143,7 @@ const OTHERS: [string, string, string][] = [
 for (const [label, smiles, want] of [...SAM, ...OTHERS]) assert.equal(nameOf(smiles), want, label);
 console.log(`namer-complex.check: ${SAM.length} of Sam's complexes and ${OTHERS.length} others named as IR-9 names them`);
 
-// Structure to Name as the editor runs it (Editor.tsx nameFor): the namer's name read back by OPSIN first, then
+// Structure to Name as the editor runs it (namepart.ts namePart): the namer's name read back by OPSIN first, then
 // Octet's own names, then a complex's name.
 const { checkedName, setComplexNamer, setNamer } = await import("./naming.ts");
 const { iupacName } = await import("./namer.ts");
