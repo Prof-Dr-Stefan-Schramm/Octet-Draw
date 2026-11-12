@@ -535,6 +535,8 @@ export const setPosition = (m: Mol, i: number, position?: "left" | "centre" | "r
 // Swaps a bond's ends, so a wedge points the other way.
 // The links to kept atoms (a residue label's) go with their ends.
 export const flipBond = (m: Mol, i: number) => setBondAt(m, i, { atoms: [m.bonds[i].atoms[1], m.bonds[i].atoms[0]], ...(m.bonds[i].ports ? { ports: [m.bonds[i].ports![1], m.bonds[i].ports![0]] as [number, number] } : {}) });
+// Swaps the ends of each of bonds ks (Swap the ends of all: every wedge drawn the wrong way round, in one step).
+export const flipBonds = (m: Mol, ks: number[]): Mol => [...new Set(ks)].reduce((x, k) => (x.bonds[k] ? flipBond(x, k) : x), m);
 
 // The bond tools on an existing bond, as ChemDraw 26.1 changes it (its ChangeBondType and bond tracker).
 // A bond style with a narrow and a wide end (a wedge, a hashed or hollow wedge, a dative arrow).

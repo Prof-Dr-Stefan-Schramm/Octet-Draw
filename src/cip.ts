@@ -313,7 +313,9 @@ export function handOf(m: Mol, i: number, ranked: number[]): "R" | "S" | undefin
   } catch { return undefined; }
 }
 
-function stereoUnits(m: Mol, c: Chem): Unit[] {
+// open: where given, gets each double bond that would be a unit but whose drawing does not show E or Z (a substituent
+// in line with the bond, or two on one side), with its first carriers and cis set at random.
+function stereoUnits(m: Mol, c: Chem, open?: Double[]): Unit[] {
   const units: Unit[] = [], n = m.atoms.length;
   const wavy = new Set(m.bonds.flatMap((b) => (b.display === "wavy" ? b.atoms : [])));
   const dirs = dirsOf(m, c);
@@ -363,10 +365,12 @@ function stereoUnits(m: Mol, c: Chem): Unit[] {
     if (dist.has(f2)) return;
     const [c1, c2] = [s1[0].to, s2[0].to];
     const line = (f: number, g: number, s: number) => { const x = unit(sub(m.atoms[f].location, m.atoms[g].location)), y = unit(sub(m.atoms[s].location, m.atoms[f].location)); return !x || !y || dot(cross(x, y), cross(x, y)) < 0.01; };
-    if (s1.length === 2 ? sameSide(m, f1, f2, c1, s1[1].to) !== -1 : line(f1, f2, c1)) return;
-    if (s2.length === 2 ? sameSide(m, f2, f1, c2, s2[1].to) !== -1 : line(f2, f1, c2)) return;
+    const unset = (): void => { open?.push({ kind: "double", foci: [f1, f2], chain, carriers: [c1, c2], cis: true, bond: bonds[(bonds.length - 1) / 2] }); };
+    if (s1.length === 2 ? sameSide(m, f1, f2, c1, s1[1].to) !== -1 : line(f1, f2, c1)) return unset();
+    if (s2.length === 2 ? sameSide(m, f2, f1, c2, s2[1].to) !== -1 : line(f2, f1, c2)) return unset();
     const side = sameSide(m, f1, f2, c1, c2);
     if (side) units.push({ kind: "double", foci: [f1, f2], chain, carriers: [c1, c2], cis: side > 0, bond: bonds[(bonds.length - 1) / 2] });
+    else unset();
   });
   return units;
 }
@@ -816,4 +820,25 @@ export function cipLabels(m: Mol): Cip {
     if (u.kind === "double" && /^[EZct]$/.test(u.label ?? "")) out.bonds[u.bond] = u.label === "c" ? "Z" : u.label === "t" ? "E" : u.label;
   }
   return out;
+}
+
+// The double bonds (by bond number; a cumulene's middle bond) that can be E or Z but whose drawing does not show which:
+// a unit but for its geometry (stereoUnits), whose ends each have two ligands the CIP rules tell apart, so a drawing
+// either way would get a label. A wavy bond at an end or a crossed double bond says E/Z is not known, so neither is
+// one. Adapted from ReShiki (https://github.com/Ameyanagi/ReShiki), crates/model/src/chemistry/stereo_lint.rs
+// (Checked::unspecified), MIT OR Apache-2.0, © 2026 Ameyanagi and ReShiki contributors.
+export function undefinedDoubles(m: Mol): number[] {
+  if (m.atoms.length > MOST_ATOMS || !m.bonds.some((b) => b.type === 2)) return [];
+  const open: Double[] = [];
+  let c: Chem, units: Unit[];
+  try { c = chemOf(m); units = stereoUnits(m, c, open); } catch { return []; }
+  const spent = { nodes: 0, calls: 0 };
+  return open.filter((u) => {
+    try {
+      const g = new Digraph(c, u.foci[0], spent);
+      let label = g.label(u, CONSTITUTIONAL);
+      if (label === "?") { g.auxiliary(u, units); label = g.label(u, ALL); }
+      return /^[EZct]$/.test(label);
+    } catch { return false; }
+  }).map((u) => u.bond);
 }

@@ -251,7 +251,7 @@ for (const { name, smiles, from } of list) {
       row.warnings[p.type + tag] = (row.warnings[p.type + tag] ?? 0) + 1;
     }
   };
-  count(problems(m, stereoFacts(m, true)));
+  count(problems(m, stereoFacts(m, true)).filter((p) => p.type !== "style")); // IUPAC style notes are off by default
   count(problems(shown, stereoFacts(shown, true)).filter((p) => p.type === "unspecified" || p.type === "ambiguous"), "*");
   // A SMILES with no stereo marks leaves its double bonds open, and a drawing sets them: those are left out. So is a
   // double bond any SMILES leaves open that the drawing cannot: in a ring of fewer than 8 atoms (it can only be Z) or

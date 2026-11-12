@@ -131,6 +131,30 @@ const unit = (a: V3): V3 => { const l = Math.hypot(...a) || 1; return [a[0] / l,
 // M or P for an axis with ends `near` and `far` (either way round gives the same answer).
 const helicity = (near: End, far: End) => ({ R: "M", S: "P", undefined: undefined })[String(handedness(near.places[0], near.places[1], far.places[0], far.places[1])) as "R" | "S" | "undefined"];
 
+// Hindered biaryls, as ChemDraw finds them: a single bond out of any ring (or in a ring of 7) between two aromatic
+// ring atoms, each with only its two ring bonds besides, and at least three of the four ortho atoms substituted.
+function hindered(g: Graph, b: Mol["bonds"][number]): boolean {
+  const [a, c] = b.atoms, near = (i: number) => g.near[i].map((e) => e.to);
+  if (b.type !== 1 || !g.arom[a] || !g.arom[c] || near(a).length !== 3 || near(c).length !== 3) return false;
+  const inRings = g.rings.filter((r) => r.includes(a) && r.includes(c) && r.some((x, j) => (x === a && (r[(j + 1) % r.length] === c || r[(j + r.length - 1) % r.length] === c))));
+  if (inRings.length && !inRings.some((r) => r.length === 7)) return false;
+  return [...near(a).filter((x) => x !== c), ...near(c).filter((x) => x !== a)].filter((o) => near(o).length === 3).length >= 3;
+}
+// The atoms whose wedges and hashes draw a hindered biaryl's axis (IUPAC ST-1.7): the axis atoms and every atom of a
+// ring that holds one. A wedge between two of them sets the axis, not a stereocentre (check.ts). After ReShiki's
+// axis_atoms (crates/model/src/chemistry/stereo_lint.rs, MIT OR Apache-2.0, © 2026 Ameyanagi and ReShiki contributors).
+export function axisAtoms(m: Mol): Set<number> {
+  const out = new Set<number>();
+  if (!m.bonds.some((b) => b.stereo === 1 || b.stereo === 6)) return out;
+  const g = graphOf(m);
+  for (const b of m.bonds) {
+    if (!hindered(g, b)) continue;
+    for (const r of g.rings) if (r.includes(b.atoms[0]) || r.includes(b.atoms[1])) for (const i of r) out.add(i);
+    for (const i of b.atoms) out.add(i);
+  }
+  return out;
+}
+
 // The (M) and (P) labels of a structure (labels expanded): on the middle atom of each allene (and of each cumulene
 // with an even number of double bonds), and on the axis bond of each hindered biaryl. In the drawing's atom and bond
 // order; undefined where there is none.
@@ -158,15 +182,9 @@ export function axialLabels(m: Mol): { atoms: (string | undefined)[]; bonds: (st
     const e2 = endOf(m, g, t2, near(t2).filter((x) => x !== chain[chain.length - 2]), chain[chain.length - 2], place);
     if (e1 && e2) atoms[chain[(chain.length - 1) / 2]] = helicity(e1, e2);
   });
-  // Hindered biaryls, as ChemDraw finds them: a single bond out of any ring (or in a ring of 7) between two aromatic
-  // ring atoms, each with only its two ring bonds besides, and at least three of the four ortho atoms substituted.
   m.bonds.forEach((b, k) => {
-    const [a, c] = b.atoms;
-    if (b.type !== 1 || !g.arom[a] || !g.arom[c] || near(a).length !== 3 || near(c).length !== 3) return;
-    const inRings = g.rings.filter((r) => r.includes(a) && r.includes(c) && r.some((x, j) => (x === a && (r[(j + 1) % r.length] === c || r[(j + r.length - 1) % r.length] === c))));
-    if (inRings.length && !inRings.some((r) => r.length === 7)) return;
-    const orthoA = near(a).filter((x) => x !== c), orthoC = near(c).filter((x) => x !== a);
-    if ([...orthoA, ...orthoC].filter((o) => near(o).length === 3).length < 3) return;
+    if (!hindered(g, b)) return;
+    const [a, c] = b.atoms, orthoA = near(a).filter((x) => x !== c), orthoC = near(c).filter((x) => x !== a);
     // Depth: a wedge from an axis atom to an ortho atom, or from an ortho atom to its substituent, puts that ortho
     // atom towards the viewer (a hash, away). The other ortho atom of the same ring turns the other way.
     const zs = depths(m, new Set([a, c])), zo = depths(m, new Set([...orthoA, ...orthoC]));

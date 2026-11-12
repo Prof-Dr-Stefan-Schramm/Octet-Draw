@@ -125,12 +125,15 @@ assert.deepEqual(said(star("C", 5)), ["valence: C1 has 5 bonds. Carbon has a max
   assert.deepEqual(said(cage, facts([0, 1, 2])), []);
   assert.equal(said(m2, facts([0, 1, 2])).length, 1, "C3 has no wedge of its own");
   assert.equal(said(cage, facts([1, 2])).length, 1, "C1 is not a stereocentre, so C2 could be wedged to it");
-  const back = problems(m2, facts([2]));
+  // Backwards only where the wedge turned round would set its wide end: C3 needs a third bond for that.
+  const m3: Mol = { atoms: [...m2.atoms, { label: "C", location: [2, -1, 0] }], bonds: [...m2.bonds, { type: 1, atoms: [2, 4] }] };
+  const back = problems(m3, facts([2]));
   assert.deepEqual(back.map((p) => [p.type, p.bond, p.fix?.command]), [["backwards", 1, "flip_bond:1"]]);
+  assert.deepEqual(problems(m2, facts([2])).map((p) => [p.type, p.bond, p.fix?.command]), [["backwards", 1, "redraw_stereo_at:1"]], "sets nothing either way");
   assert.deepEqual(said(m2, facts([1])), [], "the narrow end is on the stereocentre");
   const shown: Mol = { ...m2, atoms: m2.atoms.map((a) => ({ ...a, cip: true as const })) };
-  assert.deepEqual(said(m2, facts([0], [0])), [], "unset, Show Stereochemistry off");
-  assert.deepEqual(said(shown, facts([0], [0])), ["unspecified: C1 is a stereocentre with no wedge or hash bond. Add one to set its configuration."]);
+  assert.deepEqual(said(m2, facts([0, 1], [0])), [], "unset, Show Stereochemistry off");
+  assert.deepEqual(said(shown, facts([0, 1], [0])), ["unspecified: C1 is a stereocentre with no wedge or hash bond. Add one to set its configuration."]);
   assert.deepEqual(said(shown, facts([2], [2], [])).filter((t) => t.startsWith("ambiguous")), ["ambiguous: The wedge and hash bonds at C3 conflict, or do not set its configuration. Change a wedge or hash."]);
   const flagged: Mol = { ...m2, atoms: m2.atoms.map((a, k) => (k === 1 ? { ...a, enhanced: "&1" } : k === 3 ? { ...a, enhanced: "or2" } : a)) };
   assert.deepEqual(said(flagged, facts([1, 2], [], [], [0, 1, 2, 3])).filter((t) => t.startsWith("enhanced")), [

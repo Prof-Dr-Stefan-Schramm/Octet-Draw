@@ -11,9 +11,9 @@ import { kekulise } from "./rings.ts";
 import { counts } from "./mass.ts";
 import { hasQuery, polymerBrackets, polymerLabel, repeatCount } from "./query.ts";
 import { isQueryMolfile, readV3000, RXCTR, writeV3000 } from "./molv3.ts";
-import { axialLabels } from "./axial.ts";
+import { axialLabels, axisAtoms } from "./axial.ts";
 import { sandwichIons } from "./metals.ts";
-import { cipLabels } from "./cip.ts";
+import { cipLabels, undefinedDoubles } from "./cip.ts";
 import type { StereoFacts } from "./check.ts";
 
 type IndigoModule = Awaited<ReturnType<typeof Indigo>>;
@@ -990,6 +990,81 @@ function placeWedges(m: Mol, hands: Map<number, number>, stereo = stereoFacts(m)
   return { ...m, atoms, bonds };
 }
 
+// Redraw Stereo Bonds (Structure menu): the wedges and hashes of each structure the selection touches (ids; every
+// structure with none) placed again by placeWedges, as import places them, with no atom moved and no configuration
+// changed. Each stereocentre the drawing sets (one Octet's labeller gives R, S, r or s) keeps its hand, read from its
+// stereo bonds as the labeller reads them: wedges and hashes from it; where none starts there, a wedge's wide end and
+// hashed, dashed and bold bonds out of rings. Its stereo bonds are cleared (made plain) and one wedge or hash is put
+// on, from the centre. A wedge or hash that sets nothing is made plain. Left as drawn: a structure drawn in perspective
+// (a chair, a Haworth projection) or in 3D, wavy bonds, a hindered biaryl's axis wedges, an allene's, and the stereo
+// bonds at a centre the drawing does not set. A structure is changed only when Octet's labels (R, S, r, s, E, Z) on
+// every atom and bond stay the same and its standard InChI does too, or InChI now reads more (a wedge drawn the wrong
+// way round, which InChI does not read, now drawn from its centre). count: the stereocentres redrawn;
+// refused: the structures left as drawn because a new drawing would read differently.
+// Adapted from ReShiki (https://github.com/Ameyanagi/ReShiki), crates/model/src/chemistry/stereo_lint.rs (redraw),
+// MIT OR Apache-2.0, © 2026 Ameyanagi and ReShiki contributors.
+export function redrawStereo(drawn: Mol, ids?: Set<number>): { mol: Mol; count: number; refused: number } {
+  const wedge = (b: Mol["bonds"][number]) => b.type === 1 && (b.stereo === 1 || b.stereo === 6 || b.display === "hollow");
+  const marked = (b: Mol["bonds"][number]) => wedge(b) || (b.type === 1 && (b.display === "hashed" || b.display === "dashed" || b.display === "bold"));
+  const groups = fragments(drawn).filter((g) => (!ids?.size || g.some((i) => ids.has(i))) && g.length >= 2);
+  const inGroup = new Set(groups.flat());
+  if (!drawn.bonds.some((b) => marked(b) && inGroup.has(b.atoms[0]))) return { mol: drawn, count: 0, refused: 0 };
+  // Every structure read, Show Stereochemistry or not.
+  const facts = stereoFacts({ ...drawn, atoms: drawn.atoms.map((a) => ({ ...a, cip: true as const })) }), centres = facts.centres;
+  const before = cipOf(drawn), flat = perspectiveBonds(drawn), axis = axisAtoms(drawn), at = bondedTo(drawn);
+  // An allene's end atoms: their wedges set its axis.
+  const allene = new Set<number>();
+  drawn.atoms.forEach((_, c) => {
+    const bs = drawn.bonds.filter((b) => b.atoms.includes(c));
+    if (bs.length === 2 && bs.every((b) => b.type === 2)) for (const b of bs) allene.add(b.atoms[0] === c ? b.atoms[1] : b.atoms[0]);
+  });
+  const t = (inchi?: string) => (/\/t([^/]*)/.exec(inchi ?? "")?.[1].split(",").length ?? 0), plain = (inchi?: string) => inchi?.replace(/\/[tms][^/]*/g, "");
+  let mol = drawn, count = 0, refused = 0;
+  for (const g of groups) {
+    const own = new Set(g);
+    if (g.some((i) => drawn.atoms[i].location[2]) || drawn.bonds.some((b, k) => flat.has(k) && own.has(b.atoms[0]))) continue;
+    // Each set centre's hand, as handed() gives it (1 or -1): its neighbours in atom order, each raised by its bond.
+    const hands = new Map<number, number>();
+    for (const c of g) {
+      if (!centres.has(c) || !/^[RSrs]$/.test(before.atoms[c] ?? "") || at[c].length < 3 || at[c].length > 4) continue;
+      const bonds = drawn.bonds.filter((b) => b.atoms.includes(c) && b.type !== HBOND), ring = (j: number) => inRing(at, c, j);
+      const out = (j: number) => { const b = bonds.find((x) => x.atoms[0] === c && x.atoms[1] === j && wedge(x)); return !b ? 0 : b.stereo === 6 ? -1 : 1; };
+      const other = (j: number) => {
+        const b = bonds.find((x) => x.atoms.includes(j));
+        if (!b || b.type !== 1) return 0;
+        if (wedge(b)) return b.atoms[1] === c ? (b.stereo === 6 ? 1 : -1) : 0;
+        return b.display === "hashed" || b.display === "dashed" ? -1 : b.display === "bold" && !ring(j) ? 1 : 0;
+      };
+      const around = [...at[c]].sort((p, q) => p - q), z = around.some((j) => out(j)) ? out : other;
+      const h = handed(drawn, c, around, z);
+      if (Math.abs(h) > 1e-6) hands.set(c, Math.sign(h));
+    }
+    // The stereo bonds that go: those at a centre with a hand (bold, hashed and dashed ones out of rings only), and
+    // wedges that start at an atom that is no stereocentre. Not wavy bonds, nor an axis's or an allene's wedges.
+    const cleared = mol.bonds.map((b) => {
+      const [p, q] = b.atoms;
+      if (!own.has(p) || !marked(b) || (axis.has(p) && axis.has(q)) || (wedge(b) && allene.has(p))) return b;
+      const set = hands.has(p) || hands.has(q), loose = wedge(b) && !centres.has(p) && !facts.labelled?.has(p);
+      if (!set && !loose) return b;
+      if (!wedge(b) && ((b.display === "bold" && inRing(at, p, q)) || !(hands.has(p) || hands.has(q)))) return b;
+      const out = { ...b };
+      delete out.stereo;
+      delete out.display;
+      return out;
+    });
+    if (!hands.size && cleared.every((b, k) => b === mol.bonds[k])) continue;
+    const atoms = mol.atoms.map((a, i) => (hands.has(i) && a.kept ? { ...a, kept: undefined } : a));
+    const next = placeWedges({ ...mol, atoms, bonds: cleared }, hands, centres);
+    const after = cipOf(next), was = toInchi(mol), now = toInchi(next);
+    const same = g.every((i) => (after.atoms[i] ?? "") === (before.atoms[i] ?? "")) && drawn.bonds.every((b, k) => !own.has(b.atoms[0]) || (after.bonds[k] ?? "") === (before.bonds[k] ?? ""))
+      && (was === now || (!was && !!now) || (plain(was) === plain(now) && t(now) > t(was)));
+    if (!same) { refused++; continue; }
+    mol = next;
+    count += hands.size;
+  }
+  return { mol, count, refused };
+}
+
 // Each label's group as Indigo reads it, kept by the label's text, so each label is read once. Not kept while Indigo
 // is loading. Cleared when it grows large.
 const labelGroups = new Map<string, Mol | undefined>();
@@ -1336,38 +1411,56 @@ const shapeType = (type: number) => (type === HBOND || type === QUADRUPLE ? 1 : 
 // Stereochemistry on, or an enhanced stereo flag are read. With `chiral`, structures with an and or or flag are also
 // tested for chirality: one whose mirror image (each wedge made a hash) has the same InChI is not chiral. Each
 // structure's answer is kept by its atoms and bonds, so an edit reads again only the structures it changed.
-type Facts = { centres: number[]; unset: number[]; conflict: number[]; achiral: boolean };
+// doubles: the double bonds whose E or Z the drawing does not show (cip.ts undefinedDoubles), by the structure's own bond
+// number; unread: Indigo could not read the structure, so its centres are not known.
+type Facts = { centres: number[]; unset: number[]; conflict: number[]; achiral: boolean; doubles: number[]; unread: boolean };
 const factsKept = new Map<string, Facts>();
 export function stereoFacts(drawn: Mol, chiral = false): StereoFacts {
-  const out: StereoFacts = { centres: new Set(), unset: new Set(), conflict: new Set(), achiral: new Set() };
-  const wedge = (b: Mol["bonds"][number]) => b.stereo === 1 || b.stereo === 6, wedged = new Set(drawn.bonds.filter(wedge).flatMap((b) => b.atoms));
-  const groups = fragments(drawn), groupOf = new Int32Array(drawn.atoms.length), bondsOf: Mol["bonds"][] = groups.map(() => []);
+  const out: StereoFacts = { centres: new Set(), unset: new Set(), conflict: new Set(), achiral: new Set(), doubles: new Set(), unread: new Set() };
+  // Read too: a structure with a hollow wedge or a parallel hashed or bold bond, for the IUPAC style notes (check.ts).
+  const wedge = (b: Mol["bonds"][number]) => b.stereo === 1 || b.stereo === 6, marked = (b: Mol["bonds"][number]) => wedge(b) || b.display === "hollow" || b.display === "hashed" || b.display === "bold";
+  const wedged = new Set(drawn.bonds.filter(marked).flatMap((b) => b.atoms));
+  const groups = fragments(drawn), groupOf = new Int32Array(drawn.atoms.length), bondsOf: Mol["bonds"][] = groups.map(() => []), numbersOf: number[][] = groups.map(() => []);
   groups.forEach((g, k) => { for (const i of g) groupOf[i] = k; });
-  for (const b of drawn.bonds) bondsOf[groupOf[b.atoms[0]]].push(b);
+  drawn.bonds.forEach((b, n) => { bondsOf[groupOf[b.atoms[0]]].push(b); numbersOf[groupOf[b.atoms[0]]].push(n); });
   groups.forEach((group, k) => {
     if (!group.some((i) => wedged.has(i) || drawn.atoms[i].cip || drawn.atoms[i].enhanced)) return;
     const flagged = chiral && group.some((i) => /^(&|or)/.test(drawn.atoms[i].enhanced ?? ""));
     // The structure on its own (atoms in drawing order), and its key: what Indigo's answer depends on.
     const ids = [...group].sort((a, b) => a - b), local = new Map(ids.map((d, j) => [d, j]));
     const part: Mol = { atoms: ids.map((i) => renumberCentre(drawn.atoms[i], local)), bonds: bondsOf[k].map((b) => ({ ...b, atoms: [local.get(b.atoms[0])!, local.get(b.atoms[1])!] as [number, number] })) };
-    const key = JSON.stringify([part.atoms.map((a) => [a.label, chemicalText(a.text, a.runs), a.charge, a.isotope, a.radical, a.location[0], a.location[1]]), part.bonds.map((b) => [b.type, b.atoms, b.stereo]), flagged]);
+    const key = JSON.stringify([part.atoms.map((a) => [a.label, chemicalText(a.text, a.runs), a.charge, a.isotope, a.radical, a.location[0], a.location[1]]), part.bonds.map((b) => [b.type, b.atoms, b.stereo, b.display]), flagged]);
     let f = factsKept.get(key);
     if (!f) {
       // Read with labels expanded; kept by the structure's own atoms (an atom inside a label is left out).
       const { mol, from } = expandWithOrigins(part), read = readFacts(mol, flagged);
       const own = (list: number[]) => list.flatMap((j) => (part.atoms[from[j]] && !part.atoms[from[j]].text ? [from[j]] : []));
-      f = { centres: own(read.centres), unset: own(read.unset), conflict: own(read.conflict), achiral: read.achiral };
+      // The double bonds left open, on the structure's own bonds (a double bond inside a label has none).
+      const index = new Map(part.bonds.map((b, j) => [`${Math.min(...b.atoms)} ${Math.max(...b.atoms)}`, j]));
+      const doubles = undefinedDoubles(mol).flatMap((j) => {
+        const [p, q] = mol.bonds[j].atoms.map((i) => from[i]), n = index.get(`${Math.min(p, q)} ${Math.max(p, q)}`);
+        return n !== undefined && !part.atoms[p].text && !part.atoms[q].text ? [n] : [];
+      });
+      f = { centres: own(read.centres), unset: own(read.unset), conflict: own(read.conflict), achiral: read.achiral, doubles, unread: read.unread };
       if (factsKept.size > 500) factsKept.clear();
       factsKept.set(key, f);
     }
     for (const [list, set] of [[f.centres, out.centres], [f.unset, out.unset], [f.conflict, out.conflict]] as const) for (const j of list) set.add(ids[j]);
     if (f.achiral) for (const i of ids) out.achiral.add(i);
+    if (f.unread) for (const i of ids) out.unread!.add(i);
+    for (const j of f.doubles) out.doubles!.add(numbersOf[k][j]);
   });
   // A centre Show Stereochemistry labels is not unset or conflicting, whatever Indigo reads: Octet's labeller also
   // reads ChemDraw's other stereo bonds (a hashed, dashed or bold bond, a wedge's wide end; src/cip.ts).
   if ([...out.unset, ...out.conflict].some((i) => drawn.atoms[i]?.cip)) {
     const shown = stereoLabels(drawn);
     for (const set of [out.unset, out.conflict]) for (const i of set) if (drawn.atoms[i].cip && shown?.atoms[i]) set.delete(i);
+  }
+  // A wedge from an atom Indigo does not list (a tropane's pseudoasymmetric C3) that Octet's labeller gives R, S, r or s
+  // still sets it, so it is not one that sets nothing.
+  if (drawn.bonds.some((b) => wedge(b) && !out.centres.has(b.atoms[0]))) {
+    const shown = stereoLabels(drawn);
+    out.labelled = new Set(shown?.atoms.flatMap((c, i) => (c && /^[RSrs]$/.test(c) ? [i] : [])) ?? []);
   }
   return out;
 }
@@ -1398,8 +1491,8 @@ function readFacts(mol: Mol, chiral: boolean): Facts {
       opts.delete();
     }
   };
-  let centres: number[] = [];
-  try { centres = unsetOf({ ...mol, bonds: mol.bonds.map((b) => ({ ...b, stereo: undefined })) }); } catch { /* no centres read */ }
+  let centres: number[] = [], unread = false;
+  try { centres = unsetOf({ ...mol, bonds: mol.bonds.map((b) => ({ ...b, stereo: undefined })) }); } catch { unread = true; }
   // Indigo also lists a planar N (an amide's, an aniline's, a nucleoside base's: N with a multiple bond, or next to an
   // atom with one), which is no stereocentre, so a wedge from a carbon to it gave a false "between" warning (issue #9).
   const multiple = (i: number) => mol.bonds.some((b) => b.atoms.includes(i) && orderOf(b.type) > 1);
@@ -1528,7 +1621,7 @@ function readFacts(mol: Mol, chiral: boolean): Facts {
   }
   const mirror = (m: Mol): Mol => ({ ...m, bonds: m.bonds.map((b) => (b.stereo === 1 ? { ...b, stereo: 6 } : b.stereo === 6 ? { ...b, stereo: 1 } : b)) });
   const inchi = chiral ? toInchi(kept) : undefined;
-  return { centres, unset, conflict, achiral: !!inchi && inchi === toInchi(mirror(kept)) };
+  return { centres, unset, conflict, achiral: !!inchi && inchi === toInchi(mirror(kept)), doubles: [], unread };
 }
 
 // Clean Up's time. Indigo's clean-up (two passes of up to 1,000 rounds) costs about N^3 a round, from 0.27 s at 120
