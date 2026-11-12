@@ -7,7 +7,7 @@
 // arrow keys that walk the bonds (edit.ts walkHot) can be chosen by ear.
 import { ARROWS, BONDS, SHAPES } from "./kinds.ts";
 import { atomAt, bondAt, fragments, pos, type BondSpec } from "./edit.ts";
-import { HBOND, curved, hydrogens, isBracket, orderOf, straightArrow, type Arrow, type Atom, type Bond, type Box, type Group, type Mol, type Shape } from "./render.ts";
+import { HBOND, curved, hydrogens, isBracket, orderOf, straightArrow, type Arrow, type ArrowLink, type Atom, type Bond, type Box, type Group, type Mol, type Shape } from "./render.ts";
 import { plotName } from "./pageplot.ts";
 import { ELEMENTS } from "./metals.ts";
 import { rings } from "./rings.ts";
@@ -157,6 +157,19 @@ function placeAt(m: Mol, p: P): string | undefined {
   const [x, y] = m.bonds[k].atoms, f = fragmentOf(m, x);
   return `the bond between ${callAtom(m, x, f)} and ${callAtom(m, y, f)}`;
 }
+// What a linked curved arrow end is linked to (arrowlinks.ts): its atom, lone pair, unpaired electron or bond.
+function linkText(m: Mol, l: ArrowLink): string | undefined {
+  const ok = (i: number) => i >= 0 && i < m.atoms.length;
+  if ("bond" in l.on) {
+    const [x, y] = l.on.bond;
+    if (!ok(x) || !ok(y)) return undefined;
+    const f = fragmentOf(m, x);
+    return `the bond between ${callAtom(m, x, f)} and ${callAtom(m, y, f)}`;
+  }
+  if (!ok(l.on.atom)) return undefined;
+  const atom = callAtom(m, l.on.atom, fragmentOf(m, l.on.atom));
+  return l.on.pair === undefined ? atom : l.on.pair.startsWith("radical") ? `the unpaired electron on ${atom}` : `a lone pair on ${atom}`;
+}
 function arrowText(m: Mol, a: Arrow, s: Sources): { role: string; name: string } {
   const kind = ARROWS[a.kind];
   if (a.kind === "line" || a.kind === "arc" || a.kind === "curve" || a.kind === "cut" || a.kind === "orbital") {
@@ -165,7 +178,7 @@ function arrowText(m: Mol, a: Arrow, s: Sources): { role: string; name: string }
     return { role: "shape", name: upper(a.style ? `${a.style} ${noun}` : noun) };
   }
   if (curved(a)) {
-    const from = placeAt(m, a.from), to = placeAt(m, a.to);
+    const from = (a.fromLink && linkText(m, a.fromLink)) || placeAt(m, a.from), to = (a.toLink && linkText(m, a.toLink)) || placeAt(m, a.to);
     return { role: `${lower(kind)} arrow`, name: from || to ? upper([from && `from ${from}`, to && `to ${to}`].filter(Boolean).join(" ")) : kind };
   }
   const r = straightArrow(a) ? s.reaction?.(a.id) : undefined, said = r && reactionText(m, r, a.id, s);

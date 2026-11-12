@@ -200,7 +200,17 @@ export type Arrow = {
   width?: number; // the line width in points; unset uses the document's. The scale multiplies it.
   scale?: number; // the arrow's size against the document style (decision 0007); unset is 1
   role?: PlotPart; // a page spectrum's part: its role and where Octet put it (pageplot.ts)
+  // A curved or fishhook arrow's ends linked to what they were drawn on, so they follow it (arrowlinks.ts).
+  fromLink?: ArrowLink; toLink?: ArrowLink;
 };
+// What a curved arrow's end is linked to (arrowlinks.ts): an atom; a lone pair or radical dot on an atom, by the mark's
+// key (pair0 to pair3, radical0, radical1, as Atom.angles keys marks); or a bond, by its two atoms (a < b, never the
+// bond's index, which a delete changes) and t, how far along it from the first (0 to 1). Atoms by their numbers.
+export type ArrowTarget = { atom: number; pair?: string } | { bond: [number, number]; t: number };
+// on: the target. offset: the end less the target's centre (bond lengths, y up). dir: the way out from the target
+// along which the end is pushed clear of its ink (a unit vector, y up). gap: the clearance beyond the ink in pt; unset
+// is 1.2 pt.
+export type ArrowLink = { on: ArrowTarget; offset: [number, number]; dir: [number, number]; gap?: number };
 // An arrowhead's size in line widths, as CDXML keeps it in hundredths (HeadSize, ArrowheadCenterSize, ArrowheadWidth):
 // how far back from the tip it reaches, how far back its notch is, and how far each barb stands off the shaft.
 export type HeadSize = { length: number; centre: number; width: number };

@@ -7,6 +7,7 @@ import type { DocStyle } from "./docstyle.ts";
 import { aromaticAtoms, rings as ringsOf } from "./rings.ts";
 import { plainOf, styled, whole, without, type TextRun } from "./richtext.ts";
 import { OCENES } from "./metals.ts";
+import { joinLinks, remapLinks, transformLinks } from "./arrowlinks.ts";
 
 export type P = [number, number];
 export const EMPTY: Mol = { atoms: [], bonds: [] };
@@ -920,6 +921,8 @@ function removeAtoms(m: Mol, gone: Set<number>, before = m.bonds): Mol {
   const keptCycles = new Set(cycles?.map((c) => c.id));
   return tidyGroups({ ...m, atoms, bonds: bonds.map((b) => ({ ...b, atoms: [map.get(b.atoms[0])!, map.get(b.atoms[1])!] })), captions: captions?.filter((c) => !c.cycle || keptCycles.has(c.cycle.cycle)), cycles,
     shapes: m.shapes?.map(kept),
+    // Linked curved-arrow ends follow their atoms' new numbers; an end whose atom went lets go where it is.
+    arrows: remapLinks(m.arrows, (i) => map.get(i)),
     groups: m.groups?.map((g) => ({ ...g, atoms: g.atoms.filter((i) => map.has(i)).map((i) => map.get(i)!) })), fills: refill(m.fills, map) });
 }
 // Ring fills follow their atoms' new numbers; a fill goes when one of its atoms goes.
@@ -1297,7 +1300,9 @@ export function contractLabel(m: Mol, keep: number, group: Set<number>, text: st
     return { ...b, atoms: ends, ports };
   });
   // Bonded on more than one side, the label is centred, so it reads as written whichever side its bonds are on.
-  const labelled = { ...m, bonds, atoms: m.atoms.map((a, k) => (k === keep ? { ...a, text, label: many ? a.label : anchorElement(text) ?? a.label, charge: undefined, inner, ...(many ? { align: "centre" as const } : {}) } : a)) };
+  // A curved arrow linked to an atom of the group is linked to the label.
+  const into = new Map([...group].filter((k) => k !== keep).map((k) => [k, keep]));
+  const labelled = { ...m, bonds, arrows: joinLinks(m.arrows, into), atoms: m.atoms.map((a, k) => (k === keep ? { ...a, text, label: many ? a.label : anchorElement(text) ?? a.label, charge: undefined, inner, ...(many ? { align: "centre" as const } : {}) } : a)) };
   return removeAtoms(labelled, new Set([...group].filter((k) => k !== keep)));
 }
 export function moveAtoms(m: Mol, ids: Set<number>, d: P): Mol {
@@ -1418,7 +1423,8 @@ export function joinOverlaps(m: Mol, moved: Set<number>): { mol: Mol; joined: bo
     seen.add(key);
     return true;
   });
-  return { mol: removeAtoms({ ...m, atoms, bonds, ...(m.fills ? { fills } : {}) }, new Set(into.keys())), joined: true };
+  // A curved arrow linked to a joined atom stays linked, to the atom it joined.
+  return { mol: removeAtoms({ ...m, atoms, bonds, ...(m.fills ? { fills } : {}), ...(m.arrows ? { arrows: joinLinks(m.arrows, into) } : {}) }, new Set(into.keys())), joined: true };
 }
 
 // Object > Join (⌘J), as ChemDraw's. One atom in each of two structures:
@@ -2124,7 +2130,9 @@ export function scaleSizes(m: Mol, r: number): Mol {
 // place from the middle, times text (how much its text grows), so text reads the same way after a turn or a flip, and
 // grows about its middle or keeps its size. mirror: f turns the drawing over, so curved arrows bend, half heads point,
 // a single bracket faces and a cycle goes the other way. A flip turns the atoms over first (flipAtoms) and gives none.
-export function transformParts(m: Mol, atoms: Set<number>, items: Set<number>, f: (q: P) => P, size: P = [1, 1], centres?: Map<number, P>, text = 1, mirror?: "across" | "down"): Mol {
+// linked: the atoms that move by f with the objects (the chosen atoms; a flip moves them first, so it names them): a
+// curved arrow moved with the atoms it is linked to keeps those links (transformLinks).
+export function transformParts(m: Mol, atoms: Set<number>, items: Set<number>, f: (q: P) => P, size: P = [1, 1], centres?: Map<number, P>, text = 1, mirror?: "across" | "down", linked = atoms): Mol {
   const mean = (size[0] + size[1]) / 2, both = Math.sqrt(Math.abs(size[0] * size[1]));
   // Free text turns as f turns the page (CD-19, ChemDraw's RotationAngle): its anchor goes round its middle. A flip
   // leaves it reading the same way, its turn the other way, so its anchor goes round its middle by twice its turn,
@@ -2142,7 +2150,7 @@ export function transformParts(m: Mol, atoms: Set<number>, items: Set<number>, f
     ...m,
     atoms: m.atoms.map((a, i) => (atoms.has(i) ? { ...a, location: [...f([a.location[0], a.location[1]]), (a.location[2] ?? 0) * mean] as [number, number, number] } : a)),
     captions: m.captions?.map((c) => (items.has(c.id) && !c.under && !c.on && !c.cycle ? caption(c) : c)),
-    arrows: m.arrows?.map((a) => (items.has(a.id) ? { ...a, from: f(a.from), to: f(a.to), ...(a.curve ? { curve: { ...a.curve, points: a.curve.points.map((q) => ({ at: f(q.at), ...(q.c1 ? { c1: f(q.c1) } : {}), ...(q.c2 ? { c2: f(q.c2) } : {}) })) } } : {}),
+    arrows: m.arrows?.map((a) => (items.has(a.id) ? { ...transformLinks(a, linked, f), from: f(a.from), to: f(a.to), ...(a.curve ? { curve: { ...a.curve, points: a.curve.points.map((q) => ({ at: f(q.at), ...(q.c1 ? { c1: f(q.c1) } : {}), ...(q.c2 ? { c2: f(q.c2) } : {}) })) } } : {}),
       ...(mirror && a.bend ? { bend: -a.bend } : {}), ...(mirror && a.start ? { start: over(a.start) } : {}), ...(mirror && a.end ? { end: over(a.end) } : {}) } : a)),
     shapes: m.shapes?.map((x) => {
       if (!items.has(x.id)) return x;
@@ -2708,7 +2716,8 @@ export function extractSelection(m: Mol, atoms: Set<number>, items: Set<number>,
       const { under: _u, on: _o, cycle: _c, placed: _p, ...free } = c, [x, y] = at?.(c) ?? [c.x, c.y], lined = align?.(c);
       return copied({ ...free, x, y, ...(lined ? { align: lined } : {}) });
     }),
-    arrows, shapes: (m.shapes ?? []).filter((x) => items.has(x.id)).map(copied),
+    // A copied curved arrow keeps the links to atoms copied with it; the others let go.
+    arrows: remapLinks(arrows, (i) => map.get(i)), shapes: (m.shapes ?? []).filter((x) => items.has(x.id)).map(copied),
     // A picked cycle comes as a delete would take it: an intermediate left behind is a break where it was.
     cycles: cycles.map((c) => ({ ...mapBranches(c.nodes.flat().every((i) => map.has(i)) ? c : keepAngles(m, c), (i) => map.get(i)), nodes: c.nodes.map((n) => n.flatMap((i) => (map.has(i) ? [map.get(i)!] : []))) })),
     groups: (m.groups ?? []).filter((g) => g.atoms.every((i) => map.has(i)) && g.items.every((id) => ids.has(id))).map((g) => ({ ...g, atoms: g.atoms.map((i) => map.get(i)!) })),
@@ -2733,7 +2742,7 @@ export function insertMol(m: Mol, add: Mol, offset: P = [0, 0]) {
     ...m,
     atoms: [...m.atoms, ...add.atoms.map((a) => renumberCentre(unlink({ ...a, location: [a.location[0] + offset[0], a.location[1] + offset[1], a.location[2] ?? 0] as [number, number, number] }), at))],
     bonds: [...m.bonds, ...add.bonds.map((b) => unlink({ ...b, atoms: [at(b.atoms[0]), at(b.atoms[1])] as [number, number] }))],
-    arrows: [...(m.arrows ?? []), ...(add.arrows ?? []).map(plain).map((a) => ({ ...a, id: ids.get(a.id)!, from: by(a.from), to: by(a.to),
+    arrows: [...(m.arrows ?? []), ...(remapLinks(add.arrows, at) ?? []).map(plain).map((a) => ({ ...a, id: ids.get(a.id)!, from: by(a.from), to: by(a.to),
       ...(a.curve ? { curve: { ...a.curve, points: a.curve.points.map((q) => ({ at: by(q.at), ...(q.c1 ? { c1: by(q.c1) } : {}), ...(q.c2 ? { c2: by(q.c2) } : {}) })) } } : {}) }))],
     shapes: [...(m.shapes ?? []), ...(add.shapes ?? []).map((x) => remapKept({ ...x, id: ids.get(x.id)!, from: by(x.from), to: by(x.to) }, at))],
     cycles: [...(m.cycles ?? []), ...(add.cycles ?? []).map((c) => ({ ...mapBranches(c, at), id: ids.get(c.id)!, centre: by(c.centre), nodes: c.nodes.map((n) => n.map(at)) }))],
