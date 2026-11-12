@@ -15,7 +15,7 @@ use crate::{recent, Picked, MAX_BYTES};
 
 const MOST: usize = 20; // files kept waiting at one time
 const DRAWINGS: [&str; 4] = ["oct", "cdxml", "cdx", "octet"];
-const PICTURES: [&str; 8] = ["png", "jpg", "jpeg", "gif", "bmp", "tif", "tiff", "webp"];
+pub(crate) const PICTURES: [&str; 8] = ["png", "jpg", "jpeg", "gif", "bmp", "tif", "tiff", "webp"];
 // Vector pictures Octet opens only for the drawing in them (export::cdxml_from_picture).
 const VECTORS: [&str; 2] = ["pdf", "emf"];
 
@@ -166,7 +166,7 @@ fn opened_picture(path: &Path, name: &str, ext: &str, thumb: bool) -> (Option<St
 
 // A picture file's bytes, with Open's limit of 64 MB. The page checks what they are, decodes them and keeps 12 MB of
 // pictures in a drawing at most (src/picture.ts).
-fn picture(path: &Path, name: &str) -> Result<Vec<u8>, String> {
+pub(crate) fn picture(path: &Path, name: &str) -> Result<Vec<u8>, String> {
     match fs::metadata(path) {
         Err(_) => Err("This file is not where it was. It was moved or deleted.".into()),
         Ok(m) if m.len() > MAX_BYTES => Err(format!("Octet cannot insert {name}. It is larger than 64 MB.")),

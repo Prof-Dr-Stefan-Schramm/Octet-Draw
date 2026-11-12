@@ -89,3 +89,14 @@ export function pictureMol(picture: Record<string, string>, w: number, h: number
   const x = w / 2 / bond, y = h / 2 / bond;
   return { ...EMPTY, shapes: [{ id: 1, kind: "picture", from: [-x, -y], to: [x, y], picture }] };
 }
+
+// Adapted from ReShiki (https://github.com/Ameyanagi/ReShiki), src/app/pictures.rs (Ticket, picture_loaded), MIT OR
+// Apache-2.0, © 2026 Ameyanagi and ReShiki contributors.
+// File > Insert Picture…: the picture is for the drawing as it was when the user chose the command. When it is ready
+// (after the file dialog and the decode), it goes in only if that drawing has not changed. If the window shows Home
+// now, it is dropped. If the drawing changed (an edit, or another drawing in its place), it is dropped and the notice
+// says so: a late picture never goes over newer work.
+export const CHANGED = "The drawing changed while Octet read the picture. Choose Insert Picture again.";
+export function pictureFate(asked: Mol, now: Mol, home: boolean): "insert" | "changed" | "away" {
+  return home ? "away" : asked === now ? "insert" : "changed";
+}

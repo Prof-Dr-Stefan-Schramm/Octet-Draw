@@ -1,7 +1,7 @@
 import { Fragment, memo, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState, useSyncExternalStore } from "react";
 import {
   ArrowClockwise, ArrowCounterClockwise, ArrowsOutSimple, Atom as AtomIcon, Dna, Graph as GraphIcon, SelectionInverse, Cube, Flask, Circle, Square, BoundingBox, SelectionSlash, AlignLeft, AlignRight, AlignTop, AlignBottom,
-  AlignCenterHorizontal, AlignCenterVertical, ArrowsOutLineHorizontal, ArrowsOutLineVertical, Eraser, FileArrowDown, FileArrowUp, FilePlus, FlipHorizontal, FlipVertical, FloppyDisk, FolderOpen, FrameCorners,
+  AlignCenterHorizontal, AlignCenterVertical, ArrowsOutLineHorizontal, ArrowsOutLineVertical, Eraser, FileArrowDown, FileArrowUp, FileImage, FilePlus, FlipHorizontal, FlipVertical, FloppyDisk, FolderOpen, FrameCorners,
   GearSix, Keyboard, Lasso, MagicWand, MagnifyingGlassMinus, MagnifyingGlassPlus, Selection, SelectionAll, SlidersHorizontal, TextAlignCenter, TextAlignJustify, TextAlignLeft, TextAlignRight, TextAa,
   TextB, TextItalic, TextT, TextUnderline, Warning, Stack, StackSimple, ArrowsDownUp, FileText, CaretDown, ClockCounterClockwise, X, Info, Printer, Export as ExportIcon, Hash, ArrowsInSimple, Table,
   FileDashed, ArrowsLeftRight, Angle, CornersOut, Faders, FloppyDiskBack, Broom, Files, Unite, MagnetStraight, Paragraph, Resize, Ruler, GridFour, CrosshairSimple, Swatches, DotsNine, CompassTool, ArrowsVertical,
@@ -68,7 +68,7 @@ import { ExportButton, ExportDialog } from "./ExportDialog";
 import { FeedbackLink } from "./FeedbackLink";
 import { createPortal, flushSync } from "react-dom";
 import { CARRY_CDXML, copyToClipboard, exportFile, glyphInk, MDL, pasteRefused, pictureAs, readClipboard, standaloneSvg, inkOfText, UI, type ExportFormat } from "./export";
-import { FULL, kindOf, MAX_PICTURE, pictureBytes, pictureMol, readPicture } from "./picture";
+import { CHANGED, FULL, kindOf, MAX_PICTURE, pictureBytes, pictureFate, pictureMol, readPicture } from "./picture";
 import { conditionItems, formatAmount, formulaWeight, inert, keyColumns, parseAmount, solve, type Field } from "./stoich";
 import { FIELDS as DETAILS, detailsLayout, detailsOf, experimentPage, experimentsCsv, growScheme, inSpan, markupCaption, markupRuns, newExperiment, newGrids, schemeLanding, schemeSpan, templateOf, withDetails, type Details, type ExperimentEntry } from "./experiment";
 import { nextCompound, renumber, romanNumbers, setRoman } from "./numbering";
@@ -1678,6 +1678,41 @@ export default function Editor() {
     setPicked(r.items);
     sayLost(lost);
   }
+  // File > Insert Picture… (issue 72): a picture file the user picks goes in as a pasted picture does: at 1 pt per
+  // pixel, centred in the window, selected, one step to undo, with the same checks (picture.ts). Not a drawing in a
+  // PNG or PDF: the picture itself. A picture ready after the drawing changed does not go in (pictureFate). In a
+  // browser, the browser's file dialog picks the file.
+  async function insertPicture() {
+    const asked = now.current;
+    try {
+      const picked = TAURI ? await invoke<[string, string] | null>("pick_picture").then((p) => p && ([p[0], fromBase64(p[1])] as const)) : await browserPicture();
+      if (!picked) return;
+      const m = await pictureDrawing(picked[1], style.bond, MAX_PICTURE - pictureBytes(asked), `Octet cannot insert ${picked[0]}.`);
+      const fate = m && pictureFate(asked, now.current, homeOpen.current);
+      if (fate === "changed") return setNotice(CHANGED, "info");
+      if (!m || fate !== "insert") return;
+      const r = insertMol(asked, m, toDoc(innerWidth / 2, innerHeight / 2));
+      set(r.mol, true);
+      revealNext.current = true;
+      setSelection(r.atoms);
+      setPicked(r.items);
+    } catch (e) {
+      setNotice(failure("Octet cannot insert this picture.", e));
+    }
+  }
+  // A picture file from the browser's own file dialog, with Open's limit of 64 MB (a cancel gives nothing).
+  const browserPicture = () => new Promise<readonly [string, Uint8Array] | null>((done, failed) => {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = "image/png,image/jpeg,image/gif,image/bmp,image/tiff,image/webp";
+    input.onchange = () => {
+      const f = input.files?.[0];
+      if (!f) return done(null);
+      if (f.size > 64 << 20) return failed(new Error(`Octet cannot insert ${f.name}. It is larger than 64 MB.`));
+      f.arrayBuffer().then((b) => done([f.name, new Uint8Array(b)]), failed);
+    };
+    input.click();
+  });
   // A drawing read from a file, into the editor. With no path and a title, a recovered drawing or a file Octet cannot
   // save over: its changes are not saved yet. With neither (a starter drawing from Home) it is a new drawing. A MOL,
   // SDF or SMILES file opens as a new drawing of its structures, in the middle. A drawing made already (of a picture)
@@ -2079,6 +2114,7 @@ export default function Editor() {
     report_problem: () => void invoke("open_link", { name: "issues" }).catch((e) => setNotice(failure("Octet cannot open the link.", e))),
     check_updates: () => checkUpdates(true),
     import: () => void importFile(),
+    insert_picture: () => void insertPicture(),
     // While a template is open on the canvas, Save keeps it in the template (as ChemDraw saves its template document).
     save: () => (templateEdit ? saveTemplateEdit() : void save(false)),
     save_as: () => void save(true),
@@ -6464,7 +6500,7 @@ export default function Editor() {
   // variant (templates too), and the Settings modules. Each shows its shortcut where it has one. The aromatic display
   // names what it shows next for the structures it acts on, worked out only while the palette is open.
   const MENU_NAMES: Record<string, [string, string | undefined, React.ReactNode]> = {
-    new: ["New drawing", `${MOD}N`, <FilePlus size={18} />], open: ["Open…", `${MOD}O`, <FolderOpen size={18} />], import: ["Import a structure…", "", <FileArrowDown size={18} />],
+    new: ["New drawing", `${MOD}N`, <FilePlus size={18} />], open: ["Open…", `${MOD}O`, <FolderOpen size={18} />], import: ["Import a structure…", "", <FileArrowDown size={18} />], insert_picture: ["Insert picture…", "", <FileImage size={18} />],
     save: ["Save", `${MOD}S`, <FloppyDisk size={18} />], save_as: ["Save as…", `⇧${MOD}S`, <FloppyDiskBack size={18} />],
     copy_smiles: ["Copy as SMILES", `⌥${MOD}C`, <CopySimple size={18} />], copy_inchi: ["Copy as InChI", "", <IdentificationBadge size={18} />], copy_inchikey: ["Copy as InChIKey", "", <Key size={18} />],
     copy_cdxml: ["Copy as CDXML text", `${MOD}D`, <FileCode size={18} />], copy_mol: ["Copy as MOL text", `⌥${MOD}O`, <FileTxt size={18} />], copy_mol_v2000: ["Copy as MOL V2000 text", `⇧⌥${MOD}O`, <Notepad size={18} />],
