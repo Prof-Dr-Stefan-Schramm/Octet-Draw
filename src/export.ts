@@ -193,13 +193,27 @@ export function pictureAs(svg: string, f: { format: ExportFormat; margin: number
   if (raster && f.background === "page" && page) return { svg: withBackground(m, page), transparent: false };
   return { svg: m, transparent: raster && f.format !== "jpg" && f.background === "transparent" };
 }
+// Export… > PDF > Document pages: the pages a drawing covers (pagesOver's [column, row]s, pages w by h px that tile the
+// plane from a page centred on the origin, as File > Print lays them out), as the box round them all (px, for
+// standaloneSvg) and each page as x, y, width, height in pt from the top left of the picture of that box (its frameOf),
+// in the same order, for the app's make_pdf_pages. Each page shows the drawing where it sits on it, at true size.
+// Adapted from ReShiki (https://github.com/Ameyanagi/ReShiki), crates/io/src/export.rs (pages_pdf), MIT OR Apache-2.0, © 2026 Ameyanagi and ReShiki contributors.
+export function sheetsPicture(sheets: [number, number][], w: number, h: number, ptPerPx: number): { box: [number, number, number, number]; pages: [number, number, number, number][] } {
+  const is = sheets.map(([i]) => i), js = sheets.map(([, j]) => j);
+  const box: [number, number, number, number] = [(Math.min(...is) - 0.5) * w, (Math.min(...js) - 0.5) * h, (Math.max(...is) + 0.5) * w, (Math.max(...js) + 0.5) * h];
+  // The picture's frame starts up to 0.01 pt before the first page (frameOf rounds outward), so places keep 4 decimals;
+  // sizes are in hundredths of a point, as the one-page PDF's.
+  const [x0, y0] = frameOf(box, ptPerPx), r = (n: number, d = 100) => Math.round(n * d) / d;
+  return { box, pages: sheets.map(([i, j]) => [r((i - 0.5) * w * ptPerPx - x0, 1e4), r((j - 0.5) * h * ptPerPx - y0, 1e4), r(w * ptPerPx), r(h * ptPerPx)]) };
+}
 // File > Export…: the drawing in every form the page has (svg from standaloneSvg). The app asks where to save,
 // offering those formats (or only `format`), and writes the one the file name's extension asks for. The PDF, PNG
 // and EMF carry the CDXML (CARRY_CDXML), as on the clipboard. PNG at `dpi` of true size (300 if not given), white unless
 // `transparent`; JPEG at `quality` (1 to 100, 95 if not given). mdl: the text of the MDL format asked for; csv: Home's
-// Experiments list. Resolves to the path written, or null if cancelled.
+// Experiments list. pages: a PDF of the document's pages (sheetsPicture), not one page cropped to the drawing.
+// Resolves to the path written, or null if cancelled.
 export type ExportRequest = {
   name: string; format?: ExportFormat | "csv"; csv?: string; oct?: string; svg?: string; cdxml?: string; cdx?: string; mdl?: string; smiles?: string; inchi?: string;
-  dpi?: number; transparent?: boolean; quality?: number;
+  dpi?: number; transparent?: boolean; quality?: number; pages?: [number, number, number, number][];
 };
 export const exportFile = (request: ExportRequest) => invoke<string | null>("export_file", { export: request });

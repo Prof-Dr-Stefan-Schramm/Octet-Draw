@@ -114,7 +114,7 @@ export function loadSettings(): Settings {
       // A saved 350 dpi is the old default, not a choice: it moves to the new default. A dpi or JPEG quality out of
       // range (the quality a whole number, as Rust reads it), or a background Octet does not have, takes the default.
       files: { ...DEFAULT_FILES, ...(typeof saved.files === "object" && saved.files ? saved.files : {}), ...(saved.files?.dpi === 350 || !inRange(saved.files?.dpi, DPI_MIN, DPI_MAX) ? { dpi: DEFAULT_FILES.dpi } : {}),
-        ...(Number.isInteger(saved.files?.quality) && inRange(saved.files.quality, 1, 100) ? {} : { quality: DEFAULT_FILES.quality }), ...(["white", "transparent", "page"].includes(saved.files?.background) ? {} : { background: DEFAULT_FILES.background }), clipboard: { ...DEFAULT_FILES.clipboard, ...(saved.files?.clipboard ?? {}) }, saveAs: saved.files?.saveAs === "cdxml" ? "cdxml" : "oct", quick: PICTURES.includes(saved.files?.quick) ? saved.files.quick : DEFAULT_FILES.quick },
+        ...(Number.isInteger(saved.files?.quality) && inRange(saved.files.quality, 1, 100) ? {} : { quality: DEFAULT_FILES.quality }), ...(["white", "transparent", "page"].includes(saved.files?.background) ? {} : { background: DEFAULT_FILES.background }), clipboard: { ...DEFAULT_FILES.clipboard, ...(saved.files?.clipboard ?? {}) }, saveAs: saved.files?.saveAs === "cdxml" ? "cdxml" : "oct", quick: PICTURES.includes(saved.files?.quick) ? saved.files.quick : DEFAULT_FILES.quick, pdfPages: saved.files?.pdfPages === true },
       paletteWide: saved.paletteWide === true,
       warningTypes: Object.fromEntries(WARNING_TYPES.flatMap((w) => (typeof saved.warningTypes?.[w.id] === "boolean" ? [[w.id, saved.warningTypes[w.id]]] : []))),
       checkCopy: saved.checkCopy === true,

@@ -2,7 +2,8 @@
 // dialog, in the format Settings > Import and export > Quick export picks, PNG at first, with the saved settings) and
 // Export…, which shows the settings first: what to export, the
 // format, a raster picture's resolution (or its size in pixels), background and JPEG quality, the margin, and a preview
-// with the size it will come out at.
+// with the size it will come out at. A PDF is one page cropped to the drawing, or the document's pages the drawing
+// covers, one PDF page each (Pages: Document pages), as File > Print lays them out.
 import { useEffect, useRef, useState } from "react";
 import { CaretUpDown, DownloadSimple, Export as ExportIcon, ImageSquare } from "@phosphor-icons/react";
 import { Dialog } from "./Dialog";
@@ -10,6 +11,7 @@ import { Menu, Pick } from "./Menu";
 import { Exit } from "./motion";
 import { Select } from "./Select";
 import { NumberField, Segmented } from "./Fields";
+import { MAX_PRINT_PAGES } from "./docstyle";
 import { EXPORT_FORMATS as FORMATS, DPI_MAX, DPI_MIN, DPIS, dpiFor, pictureAs, PICTURES, pixelsAt, RASTERS, shortName, tooLarge } from "./export";
 import type { ExportFormat } from "./export";
 import type { FilePrefs } from "./SettingsWindow";
@@ -58,13 +60,15 @@ export function ExportButton({ quick, selected, onQuick, onExport, hint }: { qui
   );
 }
 
-export type ExportSettings = Pick<FilePrefs, "dpi" | "background" | "margin" | "quality"> & { format: ExportFormat };
+export type ExportSettings = Pick<FilePrefs, "dpi" | "background" | "margin" | "quality" | "pdfPages"> & { format: ExportFormat };
 
 // The settings before saving. pictures: the picture of the whole drawing and, when something is selected, of the
-// selection (standaloneSvg, in pt, no margin). page: the drawing's page colour, when it has one. Changes are kept as
-// the next export's defaults.
-export function ExportDialog({ prefs, onPrefs, pictures, page, chemistry, onExport, onClose }: {
+// selection (standaloneSvg, in pt, no margin). page: the drawing's page colour, when it has one. paper: the document's
+// page (its name, width and height in mm); sheets: how many of those pages each part covers. Changes are kept as the
+// next export's defaults.
+export function ExportDialog({ prefs, onPrefs, pictures, page, paper, sheets, chemistry, onExport, onClose }: {
   prefs: ExportSettings; onPrefs: (p: Partial<ExportSettings>) => void; page?: string;
+  paper?: { name: string; w: number; h: number }; sheets?: { all: number; selection: number };
   pictures: { all?: string; selection?: string };
   chemistry: (part: "all" | "selection") => Partial<Record<ExportFormat, boolean>>;
   onExport: (part: "all" | "selection") => void; onClose: () => void;
@@ -82,13 +86,21 @@ export function ExportDialog({ prefs, onPrefs, pictures, page, chemistry, onExpo
   const backdrop = backdrops.some(([b]) => b === prefs.background) ? prefs.background : "white";
   // A saved format this drawing has nothing for stays in the list, so the list shows it and Export… is off.
   const ok = usable.some(([f]) => f === format);
+  // PDF > Document pages: how many pages, and too many (Print's limit).
+  const paged = format === "pdf" && !!prefs.pdfPages && !!paper && !!sheets, count = sheets?.[part] ?? 0, many = paged && count > MAX_PRINT_PAGES;
   // The preview is white paper in both themes, so it and the text on it take the light theme's colours.
   return (
-    <Dialog title="Export" action="Export…" onClose={onClose} onAction={() => onExport(part)} disabled={!ok || big}>
+    <Dialog title="Export" action="Export…" onClose={onClose} onAction={() => onExport(part)} disabled={!ok || big || many}>
       <div className={["export-preview", svg && clear && "transparent"].filter(Boolean).join(" ")} data-theme="light">
         {svg ? <img src={`data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`} alt="Preview" /> : <span className="export-none">{ok ? FORMATS.find(([f]) => f === format)?.[1] : "Nothing to export in this format"}</span>}
       </div>
-      {size.length === 2 && (
+      {paged && size.length === 2 && (
+        <p className="export-size">
+          {count === 1 ? "1 page" : `${count.toLocaleString()} pages`} · {paper.name.includes("mm") ? paper.name : `${paper.name} · ${Math.round(paper.w)} × ${Math.round(paper.h)} mm`}
+        </p>
+      )}
+      {many && <p className="export-size export-big" role="alert">{`Too many pages. Octet exports ${MAX_PRINT_PAGES} pages at most.`}</p>}
+      {!paged && size.length === 2 && (
         <p className="export-size">
           {mm(size[0])} × {mm(size[1])} mm{raster ? ` · ${px[0].toLocaleString()} × ${px[1].toLocaleString()} px` : ""}
         </p>
@@ -122,7 +134,12 @@ export function ExportDialog({ prefs, onPrefs, pictures, page, chemistry, onExpo
           <NumberField label="Quality" unit="%" min={1} max={100} step={5} value={prefs.quality} onChange={(n) => onPrefs({ quality: Math.round(n) })} />
         </label>
       )}
-      {isPicture && (
+      {format === "pdf" && paper && sheets && (
+        <div className="dialog-row"><span>Pages</span>
+          <Segmented label="Pages" value={prefs.pdfPages ? "pages" : "fit"} onChange={(v) => onPrefs({ pdfPages: v === "pages" })} options={[["fit", "Fit to drawing"], ["pages", "Document pages"]]} />
+        </div>
+      )}
+      {isPicture && !paged && (
         <label className="dialog-row"><span>Margin</span>
           <NumberField label="Margin" unit="pt" min={0} max={72} step={1} value={prefs.margin} onChange={(n) => onPrefs({ margin: n })} />
         </label>

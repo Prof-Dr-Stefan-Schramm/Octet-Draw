@@ -67,7 +67,7 @@ import { Feedback } from "./Feedback";
 import { ExportButton, ExportDialog } from "./ExportDialog";
 import { FeedbackLink } from "./FeedbackLink";
 import { createPortal, flushSync } from "react-dom";
-import { CARRY_CDXML, copyToClipboard, exportFile, glyphInk, MDL, pasteRefused, pictureAs, readClipboard, standaloneSvg, inkOfText, UI, type ExportFormat } from "./export";
+import { CARRY_CDXML, copyToClipboard, exportFile, glyphInk, MDL, pasteRefused, pictureAs, readClipboard, sheetsPicture, standaloneSvg, inkOfText, UI, type ExportFormat } from "./export";
 import { FULL, kindOf, MAX_PICTURE, pictureBytes, pictureMol, readPicture } from "./picture";
 import { conditionItems, formatAmount, formulaWeight, inert, keyColumns, parseAmount, solve, type Field } from "./stoich";
 import { FIELDS as DETAILS, detailsLayout, detailsOf, experimentPage, experimentsCsv, growScheme, inSpan, markupCaption, markupRuns, newExperiment, newGrids, schemeLanding, schemeSpan, templateOf, withDetails, type Details, type ExperimentEntry } from "./experiment";
@@ -1170,15 +1170,29 @@ export default function Editor() {
   // A picture of part of the drawing (or all of it) as a standalone SVG at true size: the canvas shows only that part
   // for a moment (nothing is painted in between), and the picture is cut to the ink of what it draws.
   function pictureOf(part: Mol): string | undefined {
+    return drawnAlone(part, (canvas, box) => box && standaloneSvg(canvas, box, 1 / pt));
+  }
+  function drawnAlone<T>(part: Mol, f: (canvas: SVGSVGElement, ink?: [number, number, number, number]) => T): T | undefined {
     const canvas = svg.current;
     if (!canvas) return undefined;
     flushSync(() => setExporting(part));
     try {
-      const box = canvasInk(canvas);
-      return box && standaloneSvg(canvas, box, 1 / pt);
+      return f(canvas, canvasInk(canvas));
     } finally {
       flushSync(() => setExporting(undefined));
     }
+  }
+  // Export… > PDF > Document pages: the pages of the document's paper size that a part covers, as File > Print lays
+  // them out (pagesOver), and how many.
+  const sheetsOf = (ink?: [number, number, number, number]) => pagesOver(ink ?? [0, 0, 0, 0], pages[0][1] * mm * L, pages[0][2] * mm * L);
+  // The picture of those pages and each page's place on it (sheetsPicture), for a PDF with a page for each.
+  function pagesPictureOf(part: Mol): { svg: string; pages: [number, number, number, number][] } | undefined {
+    return drawnAlone(part, (canvas, ink) => {
+      const { pages: sheets } = sheetsOf(ink);
+      if (!sheets.length) return undefined;
+      const p = sheetsPicture(sheets, pages[0][1] * mm * L, pages[0][2] * mm * L, 1 / pt);
+      return { svg: standaloneSvg(canvas, p.box, 1 / pt), pages: p.pages };
+    });
   }
   // What other programs read: CDXML, CDX (ChemDraw's binary form of the same drawing, as base64), a .oct file (the same
   // CDXML with Octet's drawing), and the molecules as a molfile, SMILES and InChI; undefined where Octet or Indigo cannot
@@ -1280,9 +1294,12 @@ export default function Editor() {
   };
   // Export… (⌃⌘E, and the Export button): the settings first, with the whole drawing's picture and, when something is
   // selected, the selection's. The chosen format is made when the dialog shows it. Then the Save dialog for that format.
+  // With each picture, how many document pages the part covers (for PDF > Document pages).
   function openExport() {
     const sel = selectedPart();
-    setExportView({ all: pictureOf(doc), selection: sel && pictureOf(sel), parts: { all: doc, selection: sel } });
+    const shot = (part: Mol) => drawnAlone(part, (canvas, box) => ({ svg: box && standaloneSvg(canvas, box, 1 / pt), sheets: sheetsOf(box).count }));
+    const all = shot(doc), one = sel && shot(sel);
+    setExportView({ all: all?.svg, selection: one?.svg, parts: { all: doc, selection: sel }, sheets: { all: all?.sheets ?? 0, selection: one?.sheets ?? 0 } });
   }
   const filePrefs = settings.files;
   async function exportPart(part: "all" | "selection") {
@@ -1291,8 +1308,11 @@ export default function Editor() {
     // Only what the format needs: a PDF, PNG or EMF carries the CDXML, so it opens and pastes back as the drawing.
     const make = (pf: PartFormat, ...fs: ExportFormat[]) => (fs.includes(f.format) ? formatOf(mol, pf) : undefined);
     try {
-      const pic = svg ? pictureAs(svg, f, pageColour(style)) : undefined;
-      const path = await exportFile({ name, format: f.format, oct: make("oct", "oct"), svg: pic?.svg, cdxml: make("cdxml", "cdxml", ...CARRY_CDXML), cdx: make("cdx", "cdx"), mdl: MDL.includes(f.format) ? formatOf(mol, f.format as PartFormat) : undefined, smiles: make("smiles", "smi"), inchi: make("inchi", "inchi"), dpi: f.dpi, transparent: pic?.transparent, quality: f.quality });
+      // PDF > Document pages: the pages the part covers, at true size, no margin, the CDXML once.
+      const sheets = f.format === "pdf" && f.pdfPages && svg ? pagesPictureOf(mol) : undefined;
+      if (f.format === "pdf" && f.pdfPages && svg && !sheets) return setNotice(`The drawing covers more than ${MAX_PRINT_PAGES} pages. Octet exports ${MAX_PRINT_PAGES} pages at most. Move the drawing nearer to the page, or make it smaller.`);
+      const pic = sheets ? { svg: sheets.svg, transparent: false } : svg ? pictureAs(svg, f, pageColour(style)) : undefined;
+      const path = await exportFile({ name, format: f.format, oct: make("oct", "oct"), svg: pic?.svg, cdxml: make("cdxml", "cdxml", ...CARRY_CDXML), cdx: make("cdx", "cdx"), mdl: MDL.includes(f.format) ? formatOf(mol, f.format as PartFormat) : undefined, smiles: make("smiles", "smi"), inchi: make("inchi", "inchi"), dpi: f.dpi, transparent: pic?.transparent, quality: f.quality, pages: sheets?.pages });
       if (path) { setExportView(undefined); saved(path); }
     } catch (e) {
       setNotice(failure("Octet cannot export this drawing.", e));
@@ -2875,7 +2895,7 @@ export default function Editor() {
   // Option held at the last press, with any tool (Option-click opens or repeats a label).
   const pressAlt = useRef(false);
   const pressCtrlCopy = useRef(false); // Ctrl at the press made this a copy-drag (Windows and Linux): see skipsCycle
-  const [exportView, setExportView] = useState<{ all?: string; selection?: string; parts: { all: Mol; selection?: Mol } }>();
+  const [exportView, setExportView] = useState<{ all?: string; selection?: string; parts: { all: Mol; selection?: Mol }; sheets?: { all: number; selection: number } }>();
   const [dialog, setDialog] = useState<{ kind: "rotate"; angle: string; clockwise: boolean } | { kind: "scale"; how: "document" | "length" | "percent"; value: string }
     | { kind: "atom"; atom: number; element: string; charge: string; isotope: string; radical: string; stereo: string; group: string; targets: number[]; q: AtomQuery; q0: AtomQuery; reset?: true }
     | { kind: "contract"; text: string; keep: number; group: number[]; want?: string; warn?: string }
@@ -9226,6 +9246,7 @@ export default function Editor() {
       <ExportButton quick={filePrefs.quick} selected={!!(selection.size || picked.size)} hint={platformLabel(EXPORT_KEYS)} onQuick={() => checkFirst(() => void quickExport())} onExport={() => checkFirst(openExport)} />
       <Exit>{exportView && (
         <ExportDialog prefs={settings.files} onPrefs={(p) => setSettings((s) => ({ ...s, files: { ...s.files, ...p } }))} pictures={exportView} page={pageColour(style)}
+          paper={{ name: pages[0][0], w: pages[0][1], h: pages[0][2] }} sheets={exportView.sheets}
           chemistry={(part) => {
             // The chosen format is made now, so the dialog says at once when it cannot be. The others are offered
             // when the part can have them, and made when they are chosen.

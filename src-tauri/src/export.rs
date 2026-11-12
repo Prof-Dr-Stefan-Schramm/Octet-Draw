@@ -114,6 +114,59 @@ pub fn make_pdf(svg: &str, cdxml: Option<&str>) -> Result<Vec<u8>, String> {
     Ok(pdf.finish())
 }
 
+// Export… > PDF > Document pages: one PDF page for each rectangle (x, y, width, height in pt, from the SVG's top left,
+// y down), in the order given. The SVG is converted once, as one form XObject (fonts embedded once), and every page
+// draws it moved so its rectangle's top left is the page's top left, clipped to the page: a mark past a page's edge
+// is cut there. Pages the drawing does not reach come out empty. Nothing paints the background, as in make_pdf. The
+// CDXML goes once in the catalog's /Metadata stream, as in make_pdf. At most MAX_PAGES pages (Print's limit), each at
+// most 14,400 pt (200 in, PDF's largest page) across.
+// Adapted from ReShiki (https://github.com/Ameyanagi/ReShiki), crates/io/src/export.rs (pages_pdf), MIT OR Apache-2.0, © 2026 Ameyanagi and ReShiki contributors.
+pub const MAX_PAGES: usize = 64;
+pub fn make_pdf_pages(svg: &str, pages: &[[f32; 4]], cdxml: Option<&str>) -> Result<Vec<u8>, String> {
+    if pages.is_empty() || pages.len() > MAX_PAGES {
+        return Err(format!("Octet exports 1 to {MAX_PAGES} pages in a PDF."));
+    }
+    if pages.iter().any(|r| r.iter().any(|v| !v.is_finite()) || !(r[2] > 0.0 && r[2] <= 14_400.0 && r[3] > 0.0 && r[3] <= 14_400.0)) {
+        return Err("Octet cannot export a page of this size.".into());
+    }
+    let tree = tree(svg)?;
+    let (chunk, picture) = svg2pdf::to_chunk(&tree, svg2pdf::ConversionOptions::default()).map_err(|e| e.to_string())?;
+    let mut alloc = Ref::new(1);
+    let [catalog, tree_ref, meta] = [(); 3].map(|_| alloc.bump());
+    let ids: Vec<(Ref, Ref)> = pages.iter().map(|_| (alloc.bump(), alloc.bump())).collect();
+    let mut map = HashMap::new();
+    let chunk = chunk.renumber(|old| *map.entry(old).or_insert_with(|| alloc.bump()));
+    let picture = *map.get(&picture).ok_or("Octet cannot draw this picture.")?;
+    let pt = |px: f32| (px * 750.0).round() / 1000.0;
+    let (w, h) = (pt(tree.size().width()), pt(tree.size().height()));
+
+    let mut pdf = Pdf::new();
+    let mut cat = pdf.catalog(catalog);
+    cat.pages(tree_ref);
+    if cdxml.is_some() {
+        cat.metadata(meta);
+    }
+    cat.finish();
+    pdf.pages(tree_ref).kids(ids.iter().map(|(page, _)| *page)).count(ids.len() as i32);
+    for (&[x, y, pw, ph], &(page, content)) in pages.iter().zip(&ids) {
+        let mut p = pdf.page(page);
+        p.media_box(Rect::new(0.0, 0.0, pw, ph)).parent(tree_ref).contents(content);
+        p.resources().x_objects().pair(Name(b"S"), picture);
+        p.finish();
+        let mut c = Content::new();
+        c.save_state().rect(0.0, 0.0, pw, ph).clip_nonzero().end_path();
+        // The picture's top left (0, 0) lands at (-x, ph + y) on the page, PDF's y up.
+        c.transform([w, 0.0, 0.0, h, -x, ph + y - h]).x_object(Name(b"S")).restore_state();
+        pdf.stream(content, &c.finish());
+    }
+    pdf.extend(&chunk);
+    if let Some(x) = cdxml {
+        let data = miniz_oxide::deflate::compress_to_vec_zlib(cdxml_document(x).as_bytes(), 6);
+        pdf.metadata(meta, &data).filter(Filter::FlateDecode).pair(Name(b"Vendor"), Name(b"org.octet"));
+    }
+    Ok(pdf.finish())
+}
+
 // The clipboard's SVG on Linux: the same width and height in pt, with 1 user unit = 1 px (96 to the inch), the unit
 // Inkscape gives pasted content. Inkscape pastes an SVG's content in its own user units and drops the root's width,
 // height and viewBox, so the picture as export writes it (1 user unit = 1 pt) pasted at 72/96, 75% of true size
@@ -409,6 +462,7 @@ pub struct Export {
     dpi: Option<f32>,
     transparent: Option<bool>,
     quality: Option<u8>, // JPEG
+    pages: Option<Vec<[f32; 4]>>, // PDF > Document pages: one page per rectangle of the SVG (make_pdf_pages)
 }
 
 // Files exported this session. The page can ask to show one of them in the file manager (reveal_file), never
@@ -457,7 +511,10 @@ pub async fn export_file(app: AppHandle, exported: State<'_, Exported>, export: 
     };
     let text = |s: &Option<String>| s.clone().unwrap_or_default().into_bytes();
     let bytes = match format {
-        "pdf" => make_pdf(e.svg.as_deref().unwrap_or_default(), e.cdxml.as_deref())?,
+        "pdf" => match &e.pages {
+            Some(pages) => make_pdf_pages(e.svg.as_deref().unwrap_or_default(), pages, e.cdxml.as_deref())?,
+            None => make_pdf(e.svg.as_deref().unwrap_or_default(), e.cdxml.as_deref())?,
+        },
         "svg" => format!("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n{}\n", e.svg.as_deref().unwrap_or_default()).into_bytes(),
         "png" => make_png(e.svg.as_deref().unwrap_or_default(), e.dpi.unwrap_or(300.0), e.transparent.unwrap_or(false), e.cdxml.as_deref())?,
         "tif" => make_tiff(e.svg.as_deref().unwrap_or_default(), e.dpi.unwrap_or(300.0), e.transparent.unwrap_or(false))?,
@@ -960,6 +1017,55 @@ mod tests {
         let pdf = make_pdf(SVG, None).unwrap();
         assert!(find(&pdf, b"/Metadata").is_none());
         assert_eq!(cdxml_from_pdf(&pdf), None);
+    }
+
+    // Document pages (ReShiki tests/pages.rs, page_pdf_uses_all_sheets_while_drawing_exports_stay_cropped): one page
+    // per rectangle at its size, in order, the same picture on each, moved and clipped; the CDXML once; the
+    // one-page PDF stays cropped.
+    #[test]
+    fn pdf_pages_one_per_rectangle() {
+        // Two A4 pages side by side, then one below the first, over a picture 3 pages' worth wide.
+        let (a4w, a4h) = (595.28, 841.89);
+        let svg = format!(r##"<svg xmlns="http://www.w3.org/2000/svg" width="{w}pt" height="{h}pt" viewBox="0 0 {w} {h}"><path d="M10 10L1000 1500" stroke="black"/></svg>"##, w = 2.0 * a4w, h = 2.0 * a4h);
+        let rects = [[0.0, 0.0, a4w, a4h], [a4w, 0.0, a4w, a4h], [0.0, a4h, a4w, a4h]];
+        let pdf = make_pdf_pages(&svg, &rects, Some(CDXML)).unwrap();
+        let text = String::from_utf8_lossy(&pdf);
+        assert!(text.starts_with("%PDF-"));
+        assert!(text.contains("/Count 3"));
+        assert_eq!(text.matches("/MediaBox [0 0 595.28 841.89]").count(), 3);
+        assert_eq!(text.matches("/Type /Page\n").count(), 3);
+        // One picture, drawn on every page: one form XObject, three "Do"s.
+        assert_eq!(text.matches("/Subtype /Form").count(), 1, "the picture once");
+        assert_eq!(text.matches("/S Do").count(), 3);
+        // Each page clips to itself and moves the picture so its rectangle is the page.
+        assert!(text.contains("0 0 595.28 841.89 re\nW\nn"));
+        // The picture's bottom left goes to (-x, page height + y - picture height).
+        assert!(text.contains("1190.56 0 0 1683.78 0 -841.89 cm"), "first page: the picture's top left at the page's");
+        assert!(text.contains("1190.56 0 0 1683.78 -595.28 -841.89 cm"), "second page: the picture one page to the left");
+        assert!(text.contains("1190.56 0 0 1683.78 0 0 cm"), "third page: the picture one page up");
+        // The CDXML once, in the catalog, and it reads back.
+        assert_eq!(text.matches("/Vendor /org.octet").count(), 1);
+        assert_eq!(cdxml_from_pdf(&pdf).as_deref(), Some(CDXML));
+        assert!(find(&make_pdf_pages(&svg, &rects, None).unwrap(), b"/Metadata").is_none());
+        // One page of another size, and the ordinary PDF still one page cropped to the picture.
+        let one = String::from_utf8_lossy(&make_pdf_pages(SVG, &[[-10.0, -20.0, 612.0, 792.0]], None).unwrap()).into_owned();
+        assert!(one.contains("/Count 1") && one.contains("/MediaBox [0 0 612 792]") && one.contains("86 0 0 65 10 707 cm"), "{one}");
+        let cropped = String::from_utf8_lossy(&make_pdf(SVG, None).unwrap()).into_owned();
+        assert!(cropped.contains("/Count 1") && cropped.contains("/MediaBox [0 0 86 65]"));
+    }
+
+    // ReShiki's malformed_page_layouts_fail: no pages, too many, a value that is not a number, a page of no size or
+    // past PDF's 200 in: an error, no PDF.
+    #[test]
+    fn pdf_pages_refuse_bad_rectangles() {
+        let ok = [0.0, 0.0, 100.0, 100.0];
+        assert!(make_pdf_pages(SVG, &[], None).is_err());
+        assert!(make_pdf_pages(SVG, &[ok; MAX_PAGES], None).is_ok());
+        assert!(make_pdf_pages(SVG, &[ok; MAX_PAGES + 1], None).is_err());
+        for bad in [[f32::NAN, 0.0, 100.0, 100.0], [0.0, f32::INFINITY, 100.0, 100.0], [0.0, 0.0, 0.0, 100.0], [0.0, 0.0, 100.0, -1.0], [0.0, 0.0, 14_401.0, 100.0], [0.0, 0.0, 100.0, f32::NAN]] {
+            assert!(make_pdf_pages(SVG, &[ok, bad], None).is_err(), "{bad:?}");
+        }
+        assert!(make_pdf_pages("<svg", &[ok], None).is_err());
     }
 
     #[test]

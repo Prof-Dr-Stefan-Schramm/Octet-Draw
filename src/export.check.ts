@@ -2,7 +2,8 @@
 // picture.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { CARRY_CDXML, dpiFor, frameOf, glyphInk, inkOfText, pasteRefused, pictureAs, pixelsAt, tooLarge, UI, withBackground, withMargin } from "./export.ts";
+import { CARRY_CDXML, dpiFor, frameOf, glyphInk, inkOfText, pasteRefused, pictureAs, pixelsAt, sheetsPicture, tooLarge, UI, withBackground, withMargin } from "./export.ts";
+import { MAX_PRINT_PAGES, pagesOver } from "./docstyle.ts";
 import { EMPTY, extractSelection, sprout } from "./edit.ts";
 
 // Export, Copy and Print take the canvas, less the layers UI names. An aria-hidden element on the canvas is one of
@@ -38,7 +39,7 @@ assert.doesNotMatch(grids, /exporting === doc|\bdoc\.(grids|captions|arrows)|\((
 // The export paths keep to the selection, and the Export button says Quick export saves it.
 const body = (name: string) => editor.slice(editor.indexOf(`function ${name}(`), editor.indexOf("\n  }\n", editor.indexOf(`function ${name}(`)));
 assert.match(body("quickExport"), /selectedPart\(\) \?\? doc/, "Quick export takes the selection when there is one");
-assert.match(body("openExport"), /selection: sel && pictureOf\(sel\)/, "Export… offers the selection's picture");
+assert.match(body("openExport"), /one = sel && shot\(sel\)[\s\S]*selection: one\?\.svg/, "Export… offers the selection's picture");
 const dialog = readFileSync(new URL("ExportDialog.tsx", import.meta.url), "utf8");
 assert.match(dialog, /useState<"all" \| "selection">\(pictures\.selection \? "selection" : "all"\)/, "Export… starts on the selection");
 assert.match(dialog, /Quick export \$\{selected \? "selection " : ""\}as/, "Quick export's item names the selection");
@@ -81,7 +82,7 @@ for (const [name, src] of [["Export…", dialog], ["Settings", settingsWindow]])
 assert.match(settingsWindow, /<Select label="Background" value=\{files\.background\} options=\{BACKDROPS\}/);
 assert.match(settingsWindow, /label="JPEG quality"/);
 assert.match(dialog, /label="Width" unit="px"/);
-assert.match(dialog, /disabled=\{!ok \|\| big\}/, "Export… is off for a picture too large");
+assert.match(dialog, /disabled=\{!ok \|\| big \|\| many\}/, "Export… is off for a picture too large, or too many pages");
 assert.match(editor, /copyToClipboard\(\{ dpi: settings\.files\.dpi,/, "Copy's picture takes the export dpi");
 assert.match(editor, /page=\{pageColour\(style\)\}/);
 assert.equal((editor.match(/quality: f\.quality/g) ?? []).length, 2, "Export… and Quick export pass the JPEG quality");
@@ -150,5 +151,50 @@ assert.match(editor, /if \(picture\) return pastePicture\(picture\);\s+const say
   const editor = readFileSync(new URL("Editor.tsx", import.meta.url), "utf8");
   const ink = /function canvasInk\([\s\S]*?\n  \}\n/.exec(editor)?.[0] ?? "";
   assert.match(ink, /el\.closest\("defs, mask, clipPath, pattern, marker, symbol, filter"\)\) continue;/, "canvasInk leaves out defs and masks");
+}
+// Export… > PDF > Document pages (ReShiki tests/pages.rs: physical points, reading order, every sheet): the pages a
+// drawing covers, as Print lays them out, each as x, y, width, height in pt from the top left of one picture of
+// them all. 1 pt = 4/3 px here (ptPerPx 0.75), the page A4.
+{
+  const [w, h] = [((210 * 72) / 25.4) * (4 / 3), ((297 * 72) / 25.4) * (4 / 3)], k = 0.75;
+  // A drawing on the document page alone: one page, the page itself.
+  const one = pagesOver([-100, -50, 200, 80], w, h);
+  assert.deepEqual(one, { count: 1, pages: [[0, 0]] });
+  // Places within 0.01 pt (the picture's frame is rounded outward to hundredths), sizes exact to the hundredth.
+  const near = (got: number[][], want: number[][], why: string) => {
+    assert.equal(got.length, want.length, why);
+    got.forEach((g, n) => g.forEach((v, m) => assert.ok(Math.abs(v - want[n][m]) < 0.01 && (m < 2 || v === want[n][m]), `${why}: page ${n + 1}: ${g} for ${want[n]}`)));
+  };
+  const a = sheetsPicture(one.pages, w, h, k);
+  near(a.pages, [[0, 0, 595.28, 841.89]], "A4 in pt");
+  const within = (got: number[], want: number[], why: string) => assert.ok(got.every((v, m) => Math.abs(v - want[m]) <= 0.015), `${why}: ${got}`);
+  within(frameOf(a.box, k).slice(2), [595.28, 841.89], "the picture is the page, to its rounding outward");
+  // A drawing that runs past the right edge and the bottom: four pages, left to right, then down; the empty one too.
+  const four = pagesOver([-100, -50, w, h], w, h);
+  assert.deepEqual(four.pages, [[0, 0], [1, 0], [0, 1], [1, 1]]);
+  const b = sheetsPicture(four.pages, w, h, k);
+  near(b.pages, [[0, 0, 595.28, 841.89], [595.28, 0, 595.28, 841.89], [0, 841.89, 595.28, 841.89], [595.28, 841.89, 595.28, 841.89]], "four pages");
+  within(frameOf(b.box, k).slice(2), [1190.56, 1683.78], "one picture over all four");
+  // The drawing where it sits on each page: a point 10 px right of the second page's left edge is 7.5 pt in.
+  const [x0] = frameOf(b.box, k), x = (0.5 * w + 10) * k - x0;
+  assert.ok(Math.abs(x - b.pages[1][0] - 7.5) < 0.01);
+  // Pages to the left of and above the document page (negative columns and rows) work the same.
+  const c = sheetsPicture(pagesOver([-w, -h, 0, 0], w, h).pages, w, h, k);
+  near(c.pages, [[0, 0, 595.28, 841.89], [595.28, 0, 595.28, 841.89], [0, 841.89, 595.28, 841.89], [595.28, 841.89, 595.28, 841.89]], "pages up and to the left");
+  // Past Print's limit there are no pages, so the dialog and the export refuse.
+  const many = pagesOver([0, 0, 20 * w, 20 * h], w, h);
+  assert.ok(many.count > MAX_PRINT_PAGES && !many.pages.length);
+  // The wiring: Export… sends the pages only for PDF > Document pages; Quick export and Copy stay one cropped page.
+  assert.ok(editor.includes(`const sheets = f.format === "pdf" && f.pdfPages && svg ? pagesPictureOf(mol) : undefined;`));
+  assert.ok(editor.includes("quality: f.quality, pages: sheets?.pages });"));
+  assert.ok(body("quickExport") && !body("quickExport").includes("pages"), "Quick export stays cropped");
+  assert.ok(!/copyToClipboard\([^\n]*pages/.test(editor), "the clipboard PDF stays one page");
+  assert.ok(dialog.includes(`options={[["fit", "Fit to drawing"], ["pages", "Document pages"]]}`));
+  const settings = readFileSync(new URL("settings.ts", import.meta.url), "utf8");
+  assert.ok(settings.includes("pdfPages: saved.files?.pdfPages === true"), "only true turns it on");
+  const rust = readFileSync(new URL("../src-tauri/src/export.rs", import.meta.url), "utf8");
+  assert.ok(rust.includes("Some(pages) => make_pdf_pages("));
+  assert.ok(rust.includes("pub const MAX_PAGES: usize = 64;"));
+  assert.equal(MAX_PRINT_PAGES, 64, "the app's limit is Print's");
 }
 console.log("export.check: ok");
