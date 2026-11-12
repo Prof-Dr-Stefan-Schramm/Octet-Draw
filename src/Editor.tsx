@@ -29,7 +29,7 @@ import {
 import { snapBoxes, snapMove, type Guide } from "./snap";
 import { clean3d, MOST_3D } from "./clean3d";
 import { applyConformer, geometryOf, geometryRequest, plainError, SEED, type GeometryResponse } from "./geometry";
-import { describeModel, drawnGeometry, frameOf, isStale, liveAtoms, modelAt, modelOf, modelPrimitives, newModel, openingRotation, pointsOf, primitiveNodes, scaleModels, setDisplay, shownAs3d, turn as turnModel, type Geometry, type Model3d, type SvgNode, type V3 } from "./model3d";
+import { describeModel, drawnGeometry, frameOf, isStale, liveAtoms, modelAt, modelOf, modelPrimitives, newModel, openingRotation, pointsOf, primitiveNodes, scaleModels, setDisplay, shownAs3d, turn as turnModel, type Crystal, type Geometry, type Model3d, type SvgNode, type V3 } from "./model3d";
 import { arrowTrace, kept, lobesOf, nearTrace, shapeTrace } from "./hit";
 import { store, type Store } from "./store";
 import { loadSettings, RULER_UNITS, saveSettings, SETTINGS_KEY } from "./settings";
@@ -53,7 +53,7 @@ import type { Show } from "./Spectrum";
 import { analyse as analyseSpectrum, defineGroup, fromJcamp, groupText, keepIds, keyOf as spectrumKeyOf, measuredHead, msPeaks, nextGroupId, regroup, type Measured } from "./measured";
 import { BRUKER, SPC, isJcamp, isSpectrum, readBrukerText as brukerOf, readJcamp, readSpcText, type JcampSpectrum } from "./jcamp";
 import { crystalFormat, readCrystal } from "./crystal";
-import { openingView as crystalOpening } from "./crystalcell";
+import { COPY_OPACITY, fittingRepeat, openingView as crystalOpening, repeatOf, setCrystal } from "./crystalcell";
 import { rings } from "./rings";
 import { NumberField, Segmented, Switch } from "./Fields";
 import { fromCdxml, parseXml, toCdxml, type CdxmlOptions } from "./cdxml";
@@ -5860,7 +5860,8 @@ export default function Editor() {
     // A 3D structure (Structure Perspective): depth shading on or off.
     const solid = ids.some((i) => Math.abs(doc.atoms[i].location[2] ?? 0) > 1e-3);
     const k3 = modelOf(doc, fragments(doc).filter((g) => g.some((i) => selection.has(i))).flat()), x3 = k3 === undefined ? undefined : doc.models![k3];
-    const model = x3 && { display: x3.display, style: x3.style ?? "ballStick", hydrogens: x3.hydrogensShown ?? "all", labels: x3.labels ?? "none", look: x3.look ?? "flat", scheme: x3.scheme ?? "octet", stale: isStale(doc, x3), optimise: TAURI };
+    const model = x3 && { display: x3.display, style: x3.style ?? "ballStick", hydrogens: x3.hydrogensShown ?? "all", labels: x3.labels ?? "none", look: x3.look ?? "flat", scheme: x3.scheme ?? "octet", stale: isStale(doc, x3), optimise: TAURI,
+      ...(x3.crystal ? { crystal: { adps: !!x3.crystal.sites?.some((q) => q.adp), repeat: Math.max(...repeatOf(x3.crystal)), opacity: Math.round((x3.crystal.copyOpacity ?? COPY_OPACITY) * 100), along: x3.crystal.along, moleculeOnly: !!x3.crystal.moleculeOnly, solvent: x3.crystal.includeSolvent !== false, probability: x3.crystal.probability ?? 50 } } : {}) };
     return { kind: "structure", model, optimise: TAURI, text: labelText(ids), atoms: ids.length, generic: genericSites(doc, fragments(doc).filter((g) => g.some((i) => selection.has(i))).flat()), hydrogens: ids.some((i) => doc.atoms[i].label === "H" && !doc.atoms[i].text), structures: fragments(doc).filter((g) => g.some((i) => selection.has(i))).length, next: nextCompound(doc), roman: romanOrNone(), nameable, pairs, stereo, joinable: !!joinSelection(doc, selection),
       ...(solid ? { depth: fragments(doc).filter((g) => g.some((i) => selection.has(i))).flat().some((i) => doc.atoms[i].shade) } : {}), cip: fragments(doc).filter((g) => g.some((i) => selection.has(i))).flat().every((i) => doc.atoms[i].cip), numbers: ids.every((i) => doc.atoms[i].number),
       // Aromatic rings drawn with circles, so the aromatic display action can name what it shows next.
@@ -6760,6 +6761,14 @@ export default function Editor() {
       else if (verb === "update" || verb === "regenerate") {
         const y = make(g, x.display, { style: x.style === "ellipsoids" ? undefined : x.style, look: x.look, hydrogensShown: x.hydrogensShown, labels: x.labels, scheme: x.scheme, size: x.size, offset: x.offset });
         if (y) m = { ...m, models: m.models!.map((z, j) => (j === k ? y : z)) };
+      } else if (x.crystal && ["probability", "molecule", "solvent", "repeat", "opacity", "along"].includes(verb)) {
+        // A crystal's cell settings (crystalcell.ts): each press steps on to the next; unset is the default.
+        const c = x.crystal, r = Math.max(...repeatOf(c)) % 4 + 1, along = ({ none: "a", a: "b", b: "c", c: "111" } as Record<string, Crystal["along"]>)[c.along ?? "none"];
+        const step: Partial<Crystal> = verb === "probability" ? { probability: ({ 30: undefined, 50: 70, 70: 90, 90: 30 } as const)[c.probability ?? 50] }
+          : verb === "molecule" ? { moleculeOnly: c.moleculeOnly ? undefined : true } : verb === "solvent" ? { includeSolvent: c.includeSolvent === false ? undefined : false }
+          : verb === "repeat" ? { repeat: r === 1 ? undefined : fittingRepeat(x, [r, r, r]) } : verb === "opacity" ? { copyOpacity: ({ 55: 0.3, 30: 0.8, 80: undefined } as Record<number, number | undefined>)[Math.round((c.copyOpacity ?? COPY_OPACITY) * 100)] }
+          : { along };
+        m = setCrystal(m, k!, step);
       } else if (verb === "style") change({ style: arg === "ballStick" ? undefined : (arg as Model3d["style"]) });
       // Hydrogens, labels, look and colours: each press steps on to the next.
       else if (verb === "hydrogens") change({ hydrogensShown: x.hydrogensShown === undefined ? "polar" : x.hydrogensShown === "polar" ? "none" : undefined });

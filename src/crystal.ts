@@ -15,7 +15,8 @@ import { crystalSize, layOutCrystal, openingView } from "./crystalcell.ts";
 // The most atoms a structure may have in its cell.
 export const MAX_CRYSTAL_ATOMS = 2_000;
 export class CrystalError extends Error {}
-const fail = (message: string): never => { throw new CrystalError(message); };
+// Each reason is a sentence, so the notice can show it after "Octet cannot open …".
+const fail = (message: string): never => { throw new CrystalError(/[.!?]$/.test(message) ? message : `${message}.`); };
 const failAt = (line: number, message: string): never => fail(`Line ${line}: ${message}`);
 
 type M3 = [V3, V3, V3];

@@ -18,7 +18,7 @@ const fractional = (x: Model3d, i: number) => fractionalOf(x.crystal!.vectors)(x
 // Bonds of an atom (by model index, which is the drawing's index on opening): inside the drawing and leaving the cell.
 const bondsOf = (m: Mol, i: number) => m.bonds.filter((b) => b.atoms.includes(i)).length + (model(m).crystal?.crossing ?? []).reduce((n, c) => n + (c.a === i ? 1 : 0) + (c.b === i ? 1 : 0), 0);
 const refused = (format: CrystalFormat, text: string, message: string) => {
-  assert.throws(() => open(format, text), (e: unknown) => e instanceof CrystalError && e.message.includes(message), `${format} ${JSON.stringify(text.slice(0, 80))}: expected "${message}"`);
+  assert.throws(() => open(format, text), (e: unknown) => e instanceof CrystalError && e.message.includes(message) && /^[A-Z].*\.$/.test(e.message), `${format} ${JSON.stringify(text.slice(0, 80))}: expected "${message}"`);
 };
 
 // ---- Our test structures ----

@@ -12,7 +12,7 @@ import {
   TextAlignJustify, TextAlignRight, Tag, TextB, TextItalic, TextUnderline, Trash, Warning, X, Plus as PlusIcon, Rows, RowsPlusBottom, RowsPlusTop, Columns, ColumnsPlusRight, ColumnsPlusLeft, ArrowsInLineHorizontal, Backspace, Broom, CirclesThree, FlowArrow, Subtitles, Textbox, WarningCircle, WaveSine, Circle, TextSubscript, TextSuperscript, Cube, Square, BoundingBox, SelectionSlash, AlignLeft, AlignRight, AlignTop, AlignBottom, ArrowsOutLineHorizontal, ArrowsOutLineVertical, BezierCurve, LineSegment, ArrowsMerge, ArrowsInCardinal, Crosshair, FadersHorizontal, Copy, ListDashes, Percent,
   EyeSlash, Angle, Resize, Unite, SelectionPlus, Paragraph, Checkerboard, CubeTransparent, CircleHalf, ClockCounterClockwise, Shuffle, ArrowBendDownRight, Path, Scissors, CircleNotch,
   Question, EyeClosed, BellSlash, ArrowsInLineVertical, BracketsRound, TreeStructure, Asterisk, AsteriskSimple, BracketsSquare, SquaresFour, StarFour, TextTSlash,
-  Gauge, CubeFocus, Sphere, SquareSplitVertical, SquareHalf, ShareNetwork, Cylinder, Hexagon, TagChevron, SunDim, DropHalf, ArrowUUpRight, Recycle, DiceFive,
+  Gauge, CubeFocus, Sphere, SquareSplitVertical, SquareHalf, ShareNetwork, Cylinder, Hexagon, TagChevron, SunDim, DropHalf, ArrowUUpRight, Recycle, DiceFive, Egg, ChartPieSlice, Package, DropSlash, GridNine, CircleHalfTilt, Binoculars,
 } from "@phosphor-icons/react";
 import type { Analysis } from "./chem";
 import type { Problem } from "./check";
@@ -296,7 +296,10 @@ export function SearchGlyph({ letter }: { letter: string }) {
 }
 
 // A selected structure's 3D model (model3d.ts), for its actions: how it shows, and whether its structure changed.
-export type ModelContext = { display: "3d" | "both" | "2d"; style: string; hydrogens: string; labels: string; look: string; scheme: string; stale: boolean; optimise: boolean };
+// crystal: a crystal's model (crystalcell.ts): whether its file gave displacement parameters (for ellipsoids), and its
+// cell's settings.
+export type ModelContext = { display: "3d" | "both" | "2d"; style: string; hydrogens: string; labels: string; look: string; scheme: string; stale: boolean; optimise: boolean;
+  crystal?: { adps: boolean; repeat: number; opacity: number; along?: string; moleculeOnly: boolean; solvent: boolean; probability: number } };
 // Each command its own icon (look.check): the styles, and one button each that steps hydrogens, labels and colours on.
 const STYLE_ITEMS: [string, string, React.ReactNode][] = [["ballStick", "Ball and stick", <ShareNetwork size={18} />], ["stick", "Stick", <Cylinder size={18} />], ["wireframe", "Wireframe", <Hexagon size={18} />], ["spaceFilling", "Space-filling", <Sphere size={18} />]];
 // Show as 3D model, Show 2D and 3D and Show as 2D (ReShiki's), and with a model shown, its style, hydrogens, labels,
@@ -310,7 +313,20 @@ function modelItems(model?: ModelContext): Item[] {
   if (model.display !== "both") items.push(it(<SquareSplitVertical size={18} />, "Show 2D and 3D", "model.show.both"));
   if (model.display !== "2d") items.push(it(<SquareHalf size={18} />, "Show as 2D", "model.show.2d"));
   if (model.display === "2d") return items;
-  for (const [k, name, icon] of STYLE_ITEMS) if (k !== model.style) items.push(it(icon, name, `model.style.${k}`));
+  const styles = model.crystal?.adps ? [...STYLE_ITEMS, ["ellipsoids", "Ellipsoids (ORTEP)", <Egg size={18} />] as [string, string, React.ReactNode]] : STYLE_ITEMS;
+  for (const [k, name, icon] of styles) if (k !== model.style) items.push(it(icon, name, `model.style.${k}`));
+  // A crystal (ReShiki's cell settings): each press steps on to the next, as hydrogens and labels do.
+  const c = model.crystal;
+  if (c) {
+    if (model.style === "ellipsoids") items.push(it(<ChartPieSlice size={18} />, `Ellipsoids at ${{ 30: 50, 50: 70, 70: 90, 90: 30 }[c.probability] ?? 50}% probability`, "model.probability"));
+    items.push(it(<Package size={18} />, c.moleculeOnly ? "Show the packing" : "Molecule only", "model.molecule"));
+    if (c.moleculeOnly) items.push(it(<DropSlash size={18} />, c.solvent ? "Hide solvent" : "Include solvent", "model.solvent"));
+    else {
+      items.push(it(<GridNine size={18} />, c.repeat >= 4 ? "Show one cell" : `Repeat ${c.repeat + 1} × ${c.repeat + 1} × ${c.repeat + 1} cells`, "model.repeat"));
+      items.push(it(<CircleHalfTilt size={18} />, `Copies at ${{ 55: 30, 30: 80, 80: 55 }[c.opacity] ?? 55}% opacity`, "model.opacity"));
+    }
+    items.push(it(<Binoculars size={18} />, ({ none: "Look along a", a: "Look along b", b: "Look along c", c: "Look along [111]" } as Record<string, string>)[c.along ?? "none"] ?? "Crystallographer's view", "model.along"));
+  }
   items.push(it(<span className="glyph-text">Hₓ</span>, { all: "Show polar hydrogens only", polar: "Hide hydrogens", none: "Show all hydrogens" }[model.hydrogens] ?? "Show all hydrogens", "model.hydrogens"));
   items.push(it(<TagChevron size={18} />, { none: "Label heteroatoms", heteroatoms: "Label all atoms", all: "Hide atom labels" }[model.labels] ?? "Label heteroatoms", "model.labels"));
   items.push(it(<SunDim size={18} />, model.look === "glossy" ? "Flat look" : "Glossy look", "model.look"));
