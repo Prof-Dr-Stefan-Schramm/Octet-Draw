@@ -1,0 +1,2 @@
+# RDKit's parameter tables, kept exactly as RDKit ships them (trailing spaces included).
+*.txt -whitespace

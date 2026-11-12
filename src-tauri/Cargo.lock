@@ -2644,6 +2644,7 @@ dependencies = [
  "objc2-app-kit",
  "objc2-foundation",
  "objc2-web-kit",
+ "octet-geometry",
  "open",
  "pdf-writer",
  "png 0.17.16",
@@ -2660,6 +2661,14 @@ dependencies = [
  "tauri-plugin-updater",
  "webview2-com",
  "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "octet-geometry"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

@@ -3,6 +3,7 @@
 
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
+use std::ffi::OsStr;
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -18,6 +19,7 @@ mod access_keys;
 mod clipboard;
 mod crashlog;
 mod export;
+mod geometry;
 // Feedback, for testers: not in the public release (build.rs, REL-8).
 #[cfg(feedback)]
 mod feedback;
@@ -682,6 +684,8 @@ fn menu(app: &AppHandle, palette: &[String], text: &(Vec<String>, Vec<f64>), ove
         &item("clean_reaction_augmented", "Augmented Clean Up Reaction", "")?,
         // ChemDraw's 3D Clean Up (⇧⌘D): a 3D shape for the selected structures.
         &item("clean_3d", "3D Clean Up", "CmdOrCtrl+Shift+D")?,
+        // A force-field 3D shape (MMFF94s, UFF where MMFF has no parameters), worked out in a separate process.
+        &item("optimize_3d", "3D Optimise", "")?,
         &item("atom_properties", "Atom Properties…", "")?,
         &item("bond_properties", "Bond Properties…", "")?,
         &item("bracket_properties", "Bracket Properties…", "")?,
@@ -960,6 +964,11 @@ fn menu(app: &AppHandle, palette: &[String], text: &(Vec<String>, Vec<f64>), ove
 }
 
 fn main() {
+    // 3D Optimise runs in a second Octet process (src/geometry). It starts here, before the single-instance plugin,
+    // which would otherwise give its arguments to the Octet that runs.
+    if std::env::args_os().nth(1).as_deref() == Some(OsStr::new("--geometry-worker")) {
+        std::process::exit(geometry::worker_main());
+    }
     let builder = tauri::Builder::default();
     // Windows and Linux start a second Octet for each file opened from Explorer or a file manager. It gives its files
     // to the Octet that runs, and ends. (On the Mac the system sends them to the running Octet itself.)
@@ -986,7 +995,7 @@ fn main() {
         .manage(TextLists::default())
         .manage(Purposes::default())
         .manage(TemplateSets::default())
-        .invoke_handler(tauri::generate_handler![recent::recent_list, recent::recent_thumb, recent::recent_remove, recent::open_recent, file_changed, recent::experiment_note, recent::experiment_list, recent::experiment_remove, home::home_read, home::home_write, home::home_pick_drawings, home::home_pick_picture, home::thumb_save, home::thumb_load, home::thumb_drop, revert_drawing, menu_items, set_menu_keys, set_online_search, search::search_online, pubchem::pubchem_structure, open_link, open_licences, reveal_file, open_drawing, pick_style_file, save_drawing, set_check, set_palette, set_text_lists, set_purposes, set_template_sets, import_structure, print_page, clipboard::copy_to_clipboard, clipboard::read_clipboard, export::export_file, export::system_fonts, #[cfg(feedback)] feedback::snapshot, #[cfg(feedback)] feedback::send_feedback, update::update_check, update::update_install, recovery::recovery_write, recovery::recovery_clear, recovery::recovery_list, recovery::recovery_open, recovery::recovery_discard, crashlog::log_error, crashlog::crash_report, crashlog::show_log, quit::set_edited, quit::quit_answer, open::take_opened, windows::open_window, windows::close_window, windows::window_start, windows::window_info, windows::window_empty, windows::window_list, windows::window_show, windows::show_home])
+        .invoke_handler(tauri::generate_handler![recent::recent_list, recent::recent_thumb, recent::recent_remove, recent::open_recent, file_changed, recent::experiment_note, recent::experiment_list, recent::experiment_remove, home::home_read, home::home_write, home::home_pick_drawings, home::home_pick_picture, home::thumb_save, home::thumb_load, home::thumb_drop, revert_drawing, menu_items, set_menu_keys, set_online_search, search::search_online, pubchem::pubchem_structure, open_link, open_licences, reveal_file, open_drawing, pick_style_file, save_drawing, set_check, set_palette, set_text_lists, set_purposes, set_template_sets, import_structure, print_page, clipboard::copy_to_clipboard, clipboard::read_clipboard, export::export_file, export::system_fonts, geometry::geometry_generate, #[cfg(feedback)] feedback::snapshot, #[cfg(feedback)] feedback::send_feedback, update::update_check, update::update_install, recovery::recovery_write, recovery::recovery_clear, recovery::recovery_list, recovery::recovery_open, recovery::recovery_discard, crashlog::log_error, crashlog::crash_report, crashlog::show_log, quit::set_edited, quit::quit_answer, open::take_opened, windows::open_window, windows::close_window, windows::window_start, windows::window_info, windows::window_empty, windows::window_list, windows::window_show, windows::show_home])
         .setup(|app| {
             let handle = app.handle();
             // Files named when Octet starts (Explorer and file managers pass them as arguments).

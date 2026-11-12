@@ -5,7 +5,7 @@ import {
   GearSix, Keyboard, Lasso, MagicWand, MagnifyingGlassMinus, MagnifyingGlassPlus, Selection, SelectionAll, SlidersHorizontal, TextAlignCenter, TextAlignJustify, TextAlignLeft, TextAlignRight, TextAa,
   TextB, TextItalic, TextT, TextUnderline, Warning, Stack, StackSimple, ArrowsDownUp, FileText, CaretDown, ClockCounterClockwise, X, Info, Printer, Export as ExportIcon, Hash, ArrowsInSimple, Table,
   FileDashed, ArrowsLeftRight, Angle, CornersOut, Faders, FloppyDiskBack, Broom, Files, Unite, MagnetStraight, Paragraph, Resize, Ruler, GridFour, CrosshairSimple, Swatches, DotsNine, CompassTool, ArrowsVertical,
-  EyeSlash, Crosshair, Repeat, CubeTransparent, ArrowsMerge, ArrowsInCardinal, FadersHorizontal, CaretLineUp, Sparkle, PencilRuler, CloudArrowDown, Bug, GraduationCap, CopySimple, IdentificationBadge, Key, FileCode, FileTxt, Notepad,
+  EyeSlash, Crosshair, Repeat, CubeTransparent, Gauge, ArrowsMerge, ArrowsInCardinal, FadersHorizontal, CaretLineUp, Sparkle, PencilRuler, CloudArrowDown, Bug, GraduationCap, CopySimple, IdentificationBadge, Key, FileCode, FileTxt, Notepad,
   File as PageIcon, CheckCircle, Asterisk, AsteriskSimple, BracketsSquare, SquaresFour, FlowArrow, BracketsRound,
   TreeStructure, StarFour, Lightbulb, Prohibit, SelectionForeground, PaintRoller, WarningDiamond, TextTSlash, NotePencil, ArrowSquareOut, ImageSquare, MarkdownLogo, Notebook,
 } from "@phosphor-icons/react";
@@ -28,7 +28,8 @@ import {
 } from "./edit";
 import { snapBoxes, snapMove, type Guide } from "./snap";
 import { clean3d, MOST_3D } from "./clean3d";
-import { describeModel, drawnGeometry, frameOf, isStale, liveAtoms, modelAt, modelOf, modelPrimitives, newModel, openingRotation, pointsOf, primitiveNodes, scaleModels, setDisplay, shownAs3d, turn as turnModel, type Model3d, type SvgNode, type V3 } from "./model3d";
+import { applyConformer, geometryOf, geometryRequest, plainError, SEED, type GeometryResponse } from "./geometry";
+import { describeModel, drawnGeometry, frameOf, isStale, liveAtoms, modelAt, modelOf, modelPrimitives, newModel, openingRotation, pointsOf, primitiveNodes, scaleModels, setDisplay, shownAs3d, turn as turnModel, type Geometry, type Model3d, type SvgNode, type V3 } from "./model3d";
 import { arrowTrace, kept, lobesOf, nearTrace, shapeTrace } from "./hit";
 import { store, type Store } from "./store";
 import { loadSettings, RULER_UNITS, saveSettings, SETTINGS_KEY } from "./settings";
@@ -2213,6 +2214,10 @@ export default function Editor() {
       setSettings((s) => ({ ...s, variants: { ...s.variants, select: "perspective" } }));
       setTool("select");
     },
+    // 3D Optimise (Structure menu, beside 3D Clean Up, which stays): a force-field shape (MMFF94s, or UFF where MMFF
+    // has no parameters) for the selected structures (or every one), worked out in a separate process by the app.
+    // Each keeps its place and faces as drawn; depth shading goes on and Select becomes Structure Perspective.
+    optimize_3d: () => void optimise3d(),
     // Align (⇧⌥⌘ L, C, R, T, M, B) and Distribute (⇧⌥⌘ H, V), as ChemDraw's Object menu: every selected structure,
     // group and object is one thing; they line up on the one highest on the page, or space out evenly between the
     // two at the ends.
@@ -5830,8 +5835,8 @@ export default function Editor() {
     // A 3D structure (Structure Perspective): depth shading on or off.
     const solid = ids.some((i) => Math.abs(doc.atoms[i].location[2] ?? 0) > 1e-3);
     const k3 = modelOf(doc, fragments(doc).filter((g) => g.some((i) => selection.has(i))).flat()), x3 = k3 === undefined ? undefined : doc.models![k3];
-    const model = x3 && { display: x3.display, style: x3.style ?? "ballStick", hydrogens: x3.hydrogensShown ?? "all", labels: x3.labels ?? "none", look: x3.look ?? "flat", scheme: x3.scheme ?? "octet", stale: isStale(doc, x3), optimise: false };
-    return { kind: "structure", model, text: labelText(ids), atoms: ids.length, generic: genericSites(doc, fragments(doc).filter((g) => g.some((i) => selection.has(i))).flat()), hydrogens: ids.some((i) => doc.atoms[i].label === "H" && !doc.atoms[i].text), structures: fragments(doc).filter((g) => g.some((i) => selection.has(i))).length, next: nextCompound(doc), roman: romanOrNone(), nameable, pairs, stereo, joinable: !!joinSelection(doc, selection),
+    const model = x3 && { display: x3.display, style: x3.style ?? "ballStick", hydrogens: x3.hydrogensShown ?? "all", labels: x3.labels ?? "none", look: x3.look ?? "flat", scheme: x3.scheme ?? "octet", stale: isStale(doc, x3), optimise: TAURI };
+    return { kind: "structure", model, optimise: TAURI, text: labelText(ids), atoms: ids.length, generic: genericSites(doc, fragments(doc).filter((g) => g.some((i) => selection.has(i))).flat()), hydrogens: ids.some((i) => doc.atoms[i].label === "H" && !doc.atoms[i].text), structures: fragments(doc).filter((g) => g.some((i) => selection.has(i))).length, next: nextCompound(doc), roman: romanOrNone(), nameable, pairs, stereo, joinable: !!joinSelection(doc, selection),
       ...(solid ? { depth: fragments(doc).filter((g) => g.some((i) => selection.has(i))).flat().some((i) => doc.atoms[i].shade) } : {}), cip: fragments(doc).filter((g) => g.some((i) => selection.has(i))).flat().every((i) => doc.atoms[i].cip), numbers: ids.every((i) => doc.atoms[i].number),
       // Aromatic rings drawn with circles, so the aromatic display action can name what it shows next.
       circles: fragments(doc).filter((g) => g.some((i) => selection.has(i))).flat().some((i) => doc.atoms[i].circle),
@@ -6542,7 +6547,7 @@ export default function Editor() {
     map_reaction: ["Map atoms", "", <FlowArrow size={18} />], clear_reaction_map: ["Clear atom map", "", <X size={18} />],
     interpretation: [settings.interpretation ? "Hide reaction interpretation" : "Show reaction interpretation", "", <Lightbulb size={18} />],
     mirror_h: ["Flip horizontal", "", <FlipHorizontal size={18} />], mirror_v: ["Flip vertical", "", <FlipVertical size={18} />],
-    properties: [settings.properties ? "Hide the Properties panel" : "Show the Properties panel", "", <Flask size={18} />], aromatic_display: [commandsOpen && (selection.size ? fragments(doc).filter((g) => g.some((i) => selection.has(i))).flat() : doc.atoms.map((_, i) => i)).some((i) => doc.atoms[i].circle) ? "Show Kekulé bonds" : "Show aromatic circles", `⌥${MOD}K`, <Circle size={18} />], hydrogen_display: ["Toggle hydrogen display", "", <EyeSlash size={18} />], show_stereo: ["Show stereochemistry", "", <span className="glyph-text">R/S</span>], predict_1h: ["Predict ¹H-NMR shifts", "", <span className="glyph-text">¹H</span>], predict_13c: ["Predict ¹³C-NMR shifts", "", <span className="glyph-text">¹³C</span>], structure_perspective: ["Structure perspective", `⌥${MOD}S`, <Cube size={18} />], flatten: ["Flatten", "", <Square size={18} />], clean_3d: ["3D clean up", `⇧${MOD}D`, <CubeTransparent size={18} />],
+    properties: [settings.properties ? "Hide the Properties panel" : "Show the Properties panel", "", <Flask size={18} />], aromatic_display: [commandsOpen && (selection.size ? fragments(doc).filter((g) => g.some((i) => selection.has(i))).flat() : doc.atoms.map((_, i) => i)).some((i) => doc.atoms[i].circle) ? "Show Kekulé bonds" : "Show aromatic circles", `⌥${MOD}K`, <Circle size={18} />], hydrogen_display: ["Toggle hydrogen display", "", <EyeSlash size={18} />], show_stereo: ["Show stereochemistry", "", <span className="glyph-text">R/S</span>], predict_1h: ["Predict ¹H-NMR shifts", "", <span className="glyph-text">¹H</span>], predict_13c: ["Predict ¹³C-NMR shifts", "", <span className="glyph-text">¹³C</span>], structure_perspective: ["Structure perspective", `⌥${MOD}S`, <Cube size={18} />], flatten: ["Flatten", "", <Square size={18} />], clean_3d: ["3D clean up", `⇧${MOD}D`, <CubeTransparent size={18} />], optimize_3d: ["3D optimise", "", <Gauge size={18} />],
     rotate_dialog: ["Rotate…", `${MOD}R`, <Angle size={18} />], scale_dialog: ["Scale…", `${MOD}K`, <Resize size={18} />],
     group: ["Group", `${MOD}G`, <BoundingBox size={18} />], ungroup: ["Ungroup", `⇧${MOD}G`, <SelectionSlash size={18} />], group_integral: ["Pick as one", "", <Unite size={18} />],
     join: ["Join", `${MOD}J`, <ArrowsMerge size={18} />], centre_page: ["Centre on page", "", <ArrowsInCardinal size={18} />], repeat: ["Repeat", "", <Repeat size={18} />],
@@ -6648,17 +6653,74 @@ export default function Editor() {
     const own = [...settings.palette, ...(style.palette ?? []).filter((c) => !settings.palette.some((u) => u.hex.toLowerCase() === c.hex.toLowerCase()))].slice(0, 24);
     return own.length ? { ...style, palette: own } : style;
   };
+  // The force-field solver (src-tauri/geometry, run by the app in a worker process): MMFF94s, then UFF when MMFF has
+  // no parameters for the structure (it says so).
+  const solveShape = async (m: Mol, g: number[], seed = SEED): Promise<{ res: GeometryResponse; note?: string }> => {
+    const request = geometryRequest(m, g, "MMFF94s", seed);
+    if (typeof request === "string") throw new Error(request);
+    try {
+      return { res: await invoke<GeometryResponse>("geometry_generate", { request }) };
+    } catch (e) {
+      if (!/MMFF parameters are unavailable/.test(String(e))) throw e;
+      return { res: await invoke<GeometryResponse>("geometry_generate", { request: { ...request, field: "UFF" } }), note: "MMFF94s has no parameters for this structure, so Octet used UFF." };
+    }
+  };
+  async function optimise3d() {
+    if (!TAURI) return setNotice("3D Optimise needs the Octet app.", "info");
+    const before = doc, all = fragments(doc).filter((g) => !selection.size || g.some((i) => selection.has(i))).filter((g) => g.length > 1);
+    if (!all.length) return;
+    setNotice("Octet is calculating the 3D shape.", "info");
+    let m = before;
+    const notes = new Set<string>();
+    for (const g of all) {
+      try {
+        const { res, note } = await solveShape(before, g);
+        if (note) notes.add(note);
+        m = applyConformer(m, g, res);
+      } catch (e) {
+        return setNotice(plainError(e));
+      }
+    }
+    if (now.current !== before) return setNotice("The drawing changed during the calculation. Do 3D Optimise again.", "info");
+    setNotice(notes.size ? [...notes][0] : undefined, "info");
+    sayAfter("Optimised in 3D.");
+    set(m, true);
+    setSettings((s) => ({ ...s, variants: { ...s.variants, select: "perspective" } }));
+    setTool("select");
+  }
+  // A model's 3D shape: the force field's in the app (with its hydrogens), else (the browser, or a structure the
+  // force fields cannot take) Octet's 3D Clean Up.
+  const modelShape = async (m: Mol, g: number[], seed = SEED): Promise<Geometry> => {
+    if (!TAURI) return drawnGeometry(m, g);
+    try {
+      const { res, note } = await solveShape(m, g, seed);
+      if (note) setNotice(note, "info");
+      return geometryOf(res, seed);
+    } catch (e) {
+      setNotice(`${plainError(e)} Octet made the model with 3D Clean Up.`, "info");
+      return drawnGeometry(m, g);
+    }
+  };
   // 3D models (model3d.ts) of the selected structures: Show as 3D model, Show 2D and 3D and Show as 2D (a model is
   // made the first time, and grows from the drawing into 3D), Update 3D model, and how a model looks.
-  function modelAction(what: string) {
+  async function modelAction(what: string) {
     const parts = fragments(doc).filter((g) => g.some((i) => selection.has(i)));
     if (!parts.length) return setNotice("Select a structure first.", "info");
     const [verb, arg] = what.split(".");
-    let m = doc;
+    // The shapes to make first (in the app, the force field's, in its own process), then the change all at once.
+    const before = doc, shapes = new Map<number[], Geometry>();
+    const needs = parts.filter((g) => g.length <= MOST_3D && (verb === "show" ? arg !== "2d" && modelOf(before, g) === undefined : (verb === "update" || verb === "regenerate") && modelOf(before, g) !== undefined));
+    if (needs.length && TAURI) setNotice("Octet is calculating the 3D shape.", "info");
+    for (const g of needs) {
+      const old = modelOf(before, g), seed = verb === "regenerate" ? ((before.models![old!].seed ?? SEED) + 8) % 2_000_000_000 : SEED;
+      shapes.set(g, await modelShape(before, g, seed));
+    }
+    if (needs.length && now.current !== before) return setNotice("The drawing changed during the calculation. Try again.", "info");
+    let m = before;
     const fresh = new Set<Model3d>();
     const make = (g: number[], display: Model3d["display"], keep?: Partial<Model3d>) => {
       if (g.length > MOST_3D) { setNotice(`Octet cannot make a 3D model of a structure of more than ${MOST_3D} atoms.`); return; }
-      const x = newModel(m, g, drawnGeometry(m, g), display, keep);
+      const x = newModel(m, g, shapes.get(g) ?? drawnGeometry(m, g), display, keep);
       fresh.add(x);
       return x;
     };
@@ -6798,7 +6860,7 @@ export default function Editor() {
       return mapped ? set(mapped, true) : setNotice("Octet cannot map these atoms.");
     }
     if (command.startsWith("cycle.")) return cycleAction(command.slice(6));
-    if (command.startsWith("model.")) return modelAction(command.slice(6));
+    if (command.startsWith("model.")) return void modelAction(command.slice(6));
 
     // Enhanced stereo: one stereocentre's flag (again to take it off), or every stereocentre in the selection at once.
     if (command.startsWith("stereo.")) {

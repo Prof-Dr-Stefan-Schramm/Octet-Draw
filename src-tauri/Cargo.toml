@@ -25,6 +25,8 @@ png = "0.17"
 # JPEG and GIF export (its encoders; svg2pdf already builds it with these features).
 image = { version = "0.25", default-features = false, features = ["jpeg", "gif"] }
 base64 = "0.22"
+# 3D Optimise: Octet's own force-field geometry crate (geometry/, plain Rust: distance geometry, UFF, MMFF94, MMFF94s).
+octet-geometry = { path = "geometry" }
 # Opens web addresses and files in the user's own programs. On Windows it calls ShellExecuteExW, not cmd.exe.
 open = { version = "5.4", features = ["shellexecute-on-windows"] }
 
@@ -64,6 +66,13 @@ block2 = "0.6"
 [features]
 # The smoke test of the real app (src/smoke.rs, check.yml). Never in an installer.
 smoke = []
+
+# The force fields are slow without optimisation: optimise the geometry crate in tauri dev and in cargo test too.
+[profile.dev.package.octet-geometry]
+opt-level = 3
+
+[profile.test.package.octet-geometry]
+opt-level = 3
 
 [profile.release]
 codegen-units = 1

@@ -13408,3 +13408,78 @@ Octet's own model colours and radii, and the model and painter design, are adapt
 (https://github.com/Ameyanagi/ReShiki), MIT OR Apache-2.0, (c) 2026 Ameyanagi and ReShiki contributors, used under
 
 Apache-2.0.
+
+================================================================================
+3D Optimise: octet-geometry, RDKit's UFF and MMFF parameters (Merck)
+================================================================================
+
+Rust geometry backend and parameter data
+=======================================
+
+Octet's 3D Optimise command uses its own Rust crate, octet-geometry
+(src-tauri/geometry). It implements distance-geometry embedding, MMFF94,
+MMFF94s, UFF, atom typing, energy/gradient evaluation and optimization in
+plain Rust. Its public interface, worker protocol and worker-process design are
+adapted from ReShiki (https://github.com/Ameyanagi/ReShiki), MIT OR Apache-2.0,
+Copyright (c) 2026 Ameyanagi and ReShiki contributors. ReShiki's own geometry
+backend, COSMolKit, is not used.
+
+The crate follows the behaviour of RDKit (https://github.com/rdkit/rdkit), the
+independent reference its tests compare with: atom typing, MMFF aromaticity
+and charges, force-field terms and their empirical rules, and distance
+geometry. It embeds RDKit's UFF and MMFF parameter tables as text files
+(src-tauri/geometry/src/data), taken unchanged from the parameter strings of
+RDKit 2026.09.2 (Code/ForceField/UFF/Params.cpp and
+Code/ForceField/MMFF/Params.cpp). No C++ code, Python or RDKit runtime is
+compiled, linked or needed: the application runs from its own executable.
+Python with RDKit is used only by separate developer reference scripts.
+
+Original RDKit source/data notices remain applicable under BSD-3-Clause; see
+the RDKit licence below. The embedded sources preserve:
+Copyright (C) 2013 Paolo Tosco
+Copyright (C) 2004-2006 Rational Discovery LLC
+Copyright (C) 2004-2021 Greg Landrum and other RDKit contributors
+Copyright (C) 2001-2024 Greg Landrum and other RDKit contributors
+All Rights Reserved
+
+The MMFF parameter data additionally preserve:
+Copyright (c) Merck and Co., Inc., 1994, 1995, 1996
+All Rights Reserved
+and, for MMFF94s-specific tables:
+Copyright (c) Merck and Co., Inc., 1994,1995,1996,1997,1998,1999
+All Rights Reserved
+This notice does not replace, modify, or relicense those original notices.
+
+
+RDKit licence
+=============
+
+BSD 3-Clause License
+
+Copyright (c) 2006-2015, Rational Discovery LLC, Greg Landrum, and Julie Penzotti and others
+All rights reserved.
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are met:
+
+1. Redistributions of source code must retain the above copyright notice, this
+   list of conditions and the following disclaimer.
+
+2. Redistributions in binary form must reproduce the above copyright notice,
+   this list of conditions and the following disclaimer in the documentation
+   and/or other materials provided with the distribution.
+
+3. Neither the name of the copyright holder nor the names of its
+   contributors may be used to endorse or promote products derived from
+   this software without specific prior written permission.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
