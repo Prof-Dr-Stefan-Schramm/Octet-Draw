@@ -1831,9 +1831,9 @@ export function fromCdxml(input: string | Xml): CdxmlRead {
       } else if (isotope) lose("isotope");
       if (lined.includes("\n")) text = lined;
       if (text.length > MAX_LABEL || /[<>]/.test(text)) { lose("label text"); text = text.replace(/[<>]/g, "").slice(0, MAX_LABEL).trim(); }
-      // A fragment's label is an abbreviation even when it spells an element: Ac (acetyl) and Pr (propyl), never actinium
-      // or praseodymium.
-      if (isElement(text) && !plain && type !== "Fragment") a.label = text;
+      // A fragment's or ChemDraw nickname's label is an abbreviation even when it spells an element: Ac (acetyl) and Pr
+      // (propyl), never actinium or praseodymium.
+      if (isElement(text) && !plain && type !== "Fragment" && type !== "Nickname") a.label = text;
       else {
         a.text = text;
         a.label = anchorElement(text) ?? "C";

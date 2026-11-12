@@ -990,13 +990,22 @@ function placeWedges(m: Mol, hands: Map<number, number>, stereo = stereoFacts(m)
   return { ...m, atoms, bonds };
 }
 
+// A label's group from its SMILES (labelSmiles), its first atom the one bonded to the drawing. Indigo marks a first
+// atom in brackets with a bond to spare a radical ([Si] of TMS, [Se] of SePh): that bond is the one to the drawing,
+// so the mark goes.
+export function labelFragment(smiles: string): Mol {
+  const m = parseStructure(smiles);
+  if (!m.atoms[0]?.radical) return m;
+  const { radical: _, ...first } = m.atoms[0];
+  return { ...m, atoms: [first, ...m.atoms.slice(1)] };
+}
 // Each label's group as Indigo reads it, kept by the label's text, so each label is read once. Not kept while Indigo
 // is loading. Cleared when it grows large.
 const labelGroups = new Map<string, Mol | undefined>();
 function labelGroup(text: string): Mol | undefined {
   if (labelGroups.has(text)) return labelGroups.get(text);
   let frag: Mol | undefined;
-  try { const smiles = labelSmiles(text); frag = smiles ? parseStructure(smiles) : undefined; } catch { frag = undefined; }
+  try { const smiles = labelSmiles(text); frag = smiles ? labelFragment(smiles) : undefined; } catch { frag = undefined; }
   if (!indigo) return frag;
   if (labelGroups.size >= 1000) labelGroups.clear();
   labelGroups.set(text, frag);

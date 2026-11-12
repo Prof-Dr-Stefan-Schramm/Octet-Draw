@@ -2,7 +2,7 @@
 // Coordinates are in bond lengths with y up, the same as KET.
 import { AROMATIC, HBOND, H_FIRST, hydrogens, lonePairs, orderOf, placedAt, QUADRUPLE, settleShape, tableLayout, tableRow, type Arrow, type Head, type Atom, type Bond, type Box, type Caption, type Curve, type Kept, type CurvePoint, type Mol, type Shape, type Spot, type Table } from "./render.ts";
 import { keepAngles, mapBranches, type Cycle } from "./cycle.ts";
-import { anchorElement, chemicalText, isElement, labelSmiles } from "./labels.ts";
+import { anchorElement, chemicalText, isElement, labelSmiles, typedElement } from "./labels.ts";
 import type { DocStyle } from "./docstyle.ts";
 import { aromaticAtoms, rings as ringsOf } from "./rings.ts";
 import { plainOf, styled, whole, without, type TextRun } from "./richtext.ts";
@@ -310,11 +310,12 @@ export function setLabel(m: Mol, i: number, text: string): Mol {
       return ports.some((p) => p >= 0) ? { ...plain, ports } : plain;
     }) };
   }
-  // A label that becomes an element leaves its contracted group behind.
-  if (m.atoms[i].inner && (!t || t === "C" || isElement(t))) m = setAtom(m, i, { inner: undefined });
+  // A label that becomes an element leaves its contracted group behind. Ac, Np, Pr and Ts typed are nicknames, as in
+  // ChemDraw (labels.ts NICKNAME_SYMBOLS).
+  if (m.atoms[i].inner && (!t || t === "C" || typedElement(t))) m = setAtom(m, i, { inner: undefined });
   if (!t) return setElement(m, i, "C");
   if (t === "C") return showCarbon(m, i);
-  if (isElement(t)) return setElement(m, i, t);
+  if (typedElement(t)) return setElement(m, i, t);
   return setAtom(m, i, { label: anchorElement(t) ?? "C", text: t, runs: undefined });
 }
 // A written label's runs (issue 44): set on the label, and the label attaches through the part chemistry reads

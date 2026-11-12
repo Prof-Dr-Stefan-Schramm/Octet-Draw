@@ -13,7 +13,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "./listen";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { chemicalText, labelSmiles, GROUPS } from "./labels";
-import { analyse, chiralFlagOnly, structures, expandWithOrigins, stereoFacts, stereoLabels, smilesWeight, toMolfile, toReaction, toSdf, toInchiKey, type RxnStep, type Structure, cipOf, cleanUp, MOST_CLEAN, expandLabels, fragmentMasses, mapReaction, importStructure, toInchi, toInchiAux, measurer, parseStructure, ready, STYLE, textExtent, textWidth, toSmiles } from "./chem";
+import { analyse, chiralFlagOnly, labelFragment, structures, expandWithOrigins, stereoFacts, stereoLabels, smilesWeight, toMolfile, toReaction, toSdf, toInchiKey, type RxnStep, type Structure, cipOf, cleanUp, MOST_CLEAN, expandLabels, fragmentMasses, mapReaction, importStructure, toInchi, toInchiAux, measurer, parseStructure, ready, STYLE, textExtent, textWidth, toSmiles } from "./chem";
 import { MAX_PRINT_PAGES, MAX_PURPOSES, PURPOSES, QUICK, edgeAt, pagesOver, fontStack, pageSize, frameStyle, forPurpose, outlines as pageOutlines, purposeOf, readStyle, roundPt, sameStyle, styleFor, withScale, elementColours, COLOURS, FONTS, HIGHLIGHT_COLOURS, RING_FILLS, sizesAt, darkColour, type DocStyle, type Guides, type OwnPurpose, type PurposeKind } from "./docstyle";
 import { gridLines, gridNudge, gridOf, shownStep, snapToGrid } from "./grid";
 import { RULER, Rulers } from "./Rulers";
@@ -91,6 +91,7 @@ import { arrowPath, arrowShapes, bendPoint, blockOutline, curved, ellipseArrow, 
 import { cursorColour, dragCursor, drawCursors, type Cursors } from "./cursor";
 import { CURSORS, handlePoint, isCorner, percentOf, resizeBy, sideAt, SIDES, type Box as RBox, type Side } from "./resize";
 import { abbreviationOf, cleanOwnName, loadNames, mergeOwnNames, nameToSmiles, nameToAtoms, namesStarting, ownName, ownNamesFile, readOwnNamesFile, renameOwnName, setOwnNames, suggestName, knownName, looksLikeSmiles, withOwnName, withoutOwnName, type OwnName } from "./names";
+import { allNicknames, type Nickname } from "./nicknames";
 import { isTemplateFile, readTemplateFile, writeTemplateFile } from "./ctp";
 import { casProblem, nameList } from "./dictionary";
 import { PEPTIDE, peptideProblem } from "./peptide";
@@ -403,7 +404,7 @@ const CONTRACTED = ["OMe", "OEt", "OiPr", "OtBu", "OAc", "OBz", "OBn", "OPh", "O
 const NICKNAMES = [Object.keys(GROUPS), CONTRACTED];
 const nicknameMols = new Map<string, Mol | undefined>();
 const nicknameMol = (name: string) => {
-  if (!nicknameMols.has(name)) { const smiles = labelSmiles(name); try { nicknameMols.set(name, smiles ? parseStructure(smiles) : undefined); } catch { nicknameMols.set(name, undefined); } }
+  if (!nicknameMols.has(name)) { const smiles = labelSmiles(name); try { nicknameMols.set(name, smiles ? labelFragment(smiles) : undefined); } catch { nicknameMols.set(name, undefined); } }
   return nicknameMols.get(name);
 };
 // Structures for names and abbreviations (TREN, dppf, a name OPSIN reads), laid out once each: the template library's
@@ -433,10 +434,33 @@ const bondKindOf = (b: Bond) => (Object.keys(BONDS) as BondKind[]).find((k) => {
 // The Bond Properties list, in the order of ChemDraw's Bond Type list. A hydrogen bond is in it only on a hydrogen
 // bond: no bond becomes one, as in ChemDraw.
 const BOND_TYPES: BondKind[] = ["single", "dashed", "hashed", "hashwedge", "bold", "wedge", "wavy", "hollow", "dative", "double", "eitherdouble", "bolddouble", "aromaticdouble", "dasheddouble", "triple", "quadruple", "hydrogen"];
-let contracted: [string, string][] | undefined;
+let contracted: [string, string][] | undefined, nicknamed: [string, string][] | undefined, nicknamedFor: Nickname[] | undefined;
+const inchiPairs = (names: string[]) => names.flatMap((name) => { const smiles = labelSmiles(name), inchi = smiles ? toInchi(`[Xe]${smiles}`) : undefined; return inchi ? [[name, inchi] as [string, string]] : []; });
 function contractLabelText(want: string): string | undefined {
-  contracted ??= [...CONTRACTED, ...Object.keys(GROUPS)].flatMap((name) => { const smiles = labelSmiles(name), inchi = smiles ? toInchi(`[Xe]${smiles}`) : undefined; return inchi ? [[name, inchi] as [string, string]] : []; });
-  return contracted.find(([, inchi]) => inchi === want)?.[0];
+  contracted ??= inchiPairs([...CONTRACTED, ...Object.keys(GROUPS)]);
+  const found = contracted.find(([, inchi]) => inchi === want)?.[0];
+  if (found) return found;
+  // Then every nickname (the user's and Octet's), those that ReShiki contracts first (contract not false), worked out
+  // again when the user's nicknames change.
+  if (nicknamedFor !== allNicknames()) {
+    nicknamedFor = allNicknames();
+    nicknamed = inchiPairs([...nicknamedFor.filter((e) => e.user), ...nicknamedFor.filter((e) => !e.user && e.contract !== false), ...nicknamedFor.filter((e) => !e.user && e.contract === false)].map((e) => e.label));
+  }
+  return nicknamed!.find(([, inchi]) => inchi === want)?.[0];
+}
+// Choose Nickname's find field: the nicknames whose label, other spellings or names have the text in them, ignoring
+// case. Labels that start with it come first. At most 60.
+function findNicknames(text: string): string[] {
+  const q = text.trim().toLowerCase();
+  if (!q) return [];
+  const hits: [string, number][] = [];
+  for (const e of allNicknames()) {
+    const spellings = [e.label, ...(e.aliases ?? []), ...(e.reverse ? [e.reverse] : [])].map((s) => s.toLowerCase());
+    const rank = spellings[0] === q ? 0 : spellings.includes(q) ? 1 : spellings.some((s) => s.startsWith(q)) ? 2 : spellings.some((s) => s.includes(q)) || e.names.some((n) => n.toLowerCase().includes(q)) ? 3 : -1;
+    if (rank >= 0) hits.push([e.label, rank]);
+  }
+  for (const name of [...Object.keys(GROUPS), ...CONTRACTED]) if (!hits.some(([l]) => l === name) && name.toLowerCase().includes(q)) hits.push([name, name.toLowerCase().startsWith(q) ? 2 : 3]);
+  return hits.sort((a, b) => a[1] - b[1] || a[0].length - b[0].length).slice(0, 60).map(([l]) => l);
 }
 // The stoichiometry grid's rows, as ChemDraw's: what each component is, then amounts. shown: rows that appear only
 // once one of these was typed somewhere; product: rows for products (true) or reactants (false) only. Equivalents are
@@ -1322,7 +1346,7 @@ export default function Editor() {
   // drawing), each written label's atoms for ChemDraw's abbreviations, and the document's name.
   const cdxmlOptions = (): CdxmlOptions => ({
     derived: cycleArrows, name,
-    expand: (text) => { const smiles = loaded ? labelSmiles(text) : undefined; try { return smiles ? parseStructure(smiles) : undefined; } catch { return undefined; } },
+    expand: (text) => { const smiles = loaded ? labelSmiles(text) : undefined; try { return smiles ? labelFragment(smiles) : undefined; } catch { return undefined; } },
   });
   // What Octet could not hold from a ChemDraw file, said once: "Octet left out 6 annotations and 1 rotated shape."
   const sayLost = (lost: Record<string, number>) => { if (Object.keys(lost).length) setNotice(`Octet left out ${lostText(lost)}.`); };
@@ -2331,7 +2355,7 @@ export default function Editor() {
         const inner = m.atoms[i].inner, ported = !!inner?.atoms.length && m.bonds.some((b) => b.ports && b.atoms.some((k, e) => k === i && b.ports![e] >= 0));
         const smiles = ported ? undefined : labelSmiles(chemicalText(doc.atoms[i].text, doc.atoms[i].runs)!);
         if (!smiles && !inner?.atoms.length) { setNotice(`Octet cannot draw out ${doc.atoms[i].text}.`); continue; }
-        try { m = expandLabel(m, i, smiles ? parseStructure(smiles) : inner!); } catch { setNotice(`Octet cannot draw out ${doc.atoms[i].text}.`); }
+        try { m = expandLabel(m, i, smiles ? labelFragment(smiles) : inner!); } catch { setNotice(`Octet cannot draw out ${doc.atoms[i].text}.`); }
       }
       set(m);
     },
@@ -2905,7 +2929,7 @@ export default function Editor() {
     return () => removeEventListener("keydown", down, true);
   }, []);
   // Choose Nickname: the list open by an atom (its place on screen). A click outside it or Escape closes it.
-  const [nicknames, setNicknames] = useState<{ atom: number; x: number; y: number }>();
+  const [nicknames, setNicknames] = useState<{ atom: number; x: number; y: number; find?: string }>();
   const nicknameBox = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (!nicknames) return;
@@ -9477,14 +9501,29 @@ export default function Editor() {
           </label>
         </Dialog>
       )}</Exit>
-      <Exit>{nicknames && (
-        <div ref={nicknameBox}>
-          <Menu label="Choose a nickname" className="nickname-menu" columns={3}
-            style={{ position: "fixed", left: Math.max(8, Math.min(nicknames.x + 16, innerWidth - 8 - menuWidth(3))), top: Math.max(8, nicknames.y - 20) }}
-            groups={NICKNAMES.map((g) => g.map((name) => { const m = nicknameMol(name); return { key: name, name, icon: m?.bonds.length ? <TemplateGlyph mol={m} /> : <TextAa size={20} />, checked: doc.atoms[nicknames.atom]?.text === name }; }))}
-            onChoose={(name) => { const i = nicknames.atom; setNicknames(undefined); if (doc.atoms[i]) set(setLabel(doc, i, name), true); }} />
-        </div>
-      )}</Exit>
+      <Exit>{nicknames && (() => {
+        // Octet's groups and condensed labels, or with text in the find field the nicknames that match it (all of
+        // Octet's, nicknamedata.ts, and the user's).
+        const found = nicknames.find?.trim() ? findNicknames(nicknames.find) : undefined;
+        const choose = (name: string) => { const i = nicknames.atom; setNicknames(undefined); if (doc.atoms[i]) set(setLabel(doc, i, name), true); };
+        return (
+          <div ref={nicknameBox}>
+            <Menu label="Choose a nickname" className="nickname-menu" columns={3}
+              style={{ position: "fixed", left: Math.max(8, Math.min(nicknames.x + 16, innerWidth - 8 - menuWidth(3))), top: Math.max(8, nicknames.y - 20) }}
+              groups={(found ? [found] : NICKNAMES).map((g) => g.map((name) => { const m = nicknameMol(name); return { key: name, name, icon: m?.bonds.length ? <TemplateGlyph mol={m} /> : <TextAa size={20} />, checked: doc.atoms[nicknames.atom]?.text === name }; }))}
+              head={<input className="list-find" autoFocus placeholder="Find a nickname" aria-label="Find a nickname" value={nicknames.find ?? ""} spellCheck={false}
+                onChange={(e) => setNicknames({ ...nicknames, find: e.target.value })}
+                onKeyDown={(e) => {
+                  if (e.key === "Escape") return;
+                  e.stopPropagation();
+                  if (e.key === "Enter" && found?.[0]) { e.preventDefault(); choose(found[0]); }
+                  if (e.key === "ArrowDown") { e.preventDefault(); nicknameBox.current?.querySelector<HTMLElement>(".variant")?.focus(); }
+                }} />}
+              extra={found && !found.length ? <p className="list-none">Nothing matches</p> : undefined}
+              onChoose={choose} />
+          </div>
+        );
+      })()}</Exit>
       <Exit>{checking && (
         <Dialog title="Possible Error in Drawing" action="Ignore" cancel="Stop" onClose={() => setChecking(undefined)}
           alt={{ label: "Ignore All", onClick: () => { const c = checking; setChecking(undefined); c.then(); } }}

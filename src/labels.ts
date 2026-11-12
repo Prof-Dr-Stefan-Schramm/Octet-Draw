@@ -4,6 +4,8 @@
 // (OMe becomes MeO, CO2Et becomes EtO2C), as ChemDraw does in its ACS 1996 output.
 
 import { condensedLabel } from "./condensed.ts";
+import { BUNDLED, lookupNickname, onNicknamesChange, type Nickname } from "./nicknames.ts";
+import { READ_AS_BEFORE } from "./nicknamedata.ts";
 
 const SYMBOLS = (
   "H He Li Be B C N O F Ne Na Mg Al Si P S Cl Ar K Ca Sc Ti V Cr Mn Fe Co Ni Cu Zn Ga Ge As Se Br Kr Rb Sr Y Zr " +
@@ -17,13 +19,27 @@ export const GROUPS: Record<string, string> = {
   Me: "C", Et: "CC", Pr: "CCC", iPr: "C(C)C", nPr: "CCC", Bu: "CCCC", nBu: "CCCC", iBu: "CC(C)C", sBu: "C(C)CC", tBu: "C(C)(C)C",
   Ph: "c1ccccc1", Bn: "Cc1ccccc1", Ar: "c1ccccc1", Ac: "C(C)=O", Bz: "C(=O)c1ccccc1", Piv: "C(=O)C(C)(C)C",
   Boc: "C(=O)OC(C)(C)C", Cbz: "C(=O)OCc1ccccc1", Fmoc: "C(=O)OCC1c2ccccc2-c2ccccc21", Alloc: "C(=O)OCC=C", Troc: "C(=O)OCC(Cl)(Cl)Cl",
-  Ts: "S(=O)(=O)c1ccc(C)cc1", Ms: "S(C)(=O)=O", Tf: "S(=O)(=O)C(F)(F)F", Ns: "S(=O)(=O)c1ccc([N+](=O)[O-])cc1",
+  // Ns is 2-nitrobenzenesulfonyl (Fukuyama's nosyl), as ChemDraw and ReShiki read it; 4-nitro is pNs.
+  Ts: "S(=O)(=O)c1ccc(C)cc1", Ms: "S(C)(=O)=O", Tf: "S(=O)(=O)C(F)(F)F", Ns: "S(=O)(=O)c1ccccc1[N+](=O)[O-]",
   TMS: "[Si](C)(C)C", TES: "[Si](CC)(CC)CC", TBS: "[Si](C)(C)C(C)(C)C", TBDMS: "[Si](C)(C)C(C)(C)C",
   TIPS: "[Si](C(C)C)(C(C)C)C(C)C", TBDPS: "[Si](c1ccccc1)(c1ccccc1)C(C)(C)C",
   PMB: "Cc1ccc(OC)cc1", PMP: "c1ccc(OC)cc1", MOM: "COC", THP: "C1CCCCO1", Tr: "C(c1ccccc1)(c1ccccc1)c1ccccc1",
   Cp: "C1C=CC=C1", Cy: "C1CCCCC1", Mes: "c1c(C)cc(C)cc1C", Tol: "c1ccc(C)cc1",
 };
+// Names read as a group inside a longer label (CH2Bpin, NHPbf): Octet's groups, and Octet's nicknames that are one
+// word of letters with a small letter in them and are not read as elements and groups already (Bpin, Pbf, Dipp, Morph;
+// not TDS or BT, which would change how P, T and other letters read in formulas, and not ODMTr, which is O and DMTr).
+// Every nickname is read whole too (labelSmiles).
+const tokenNicknames = (list: Nickname[]) => list.flatMap((e) => [e.label, ...(e.aliases ?? [])])
+  .filter((n) => {
+    const us = readUnits(n), rest = n.slice(us[0].text.length);
+    // Not an atom and a word (ODMTr is O and DMTr, NPhth N and Phth): the word is read on its own.
+    return /^[A-Z][A-Za-z]{2,}$/.test(n) && /[a-z]/.test(n) && !GROUPS[n] && us.some((u) => u.kind === "other") && !(us[0].kind === "element" && /^[A-Z]/.test(rest));
+  });
+const NICKNAME_TOKENS = new Set<string>();
 const GROUP_NAMES = Object.keys(GROUPS).sort((a, b) => b.length - a.length);
+// A group's SMILES by its name: Octet's groups, then nicknames (for a name read inside a longer label).
+export const groupSmiles = (name: string): string | undefined => GROUPS[name] ?? (NICKNAME_TOKENS.has(name) ? lookupNickname(name)?.entry.smiles : undefined);
 
 // ChemDraw's generic labels (Insert Generic Label): A, M, Q, X and R, then the 38 Reaxys classes, each with what it
 // stands for. Y, and R with a number (R1 to R99) and primes (R', R''), are generic too. A generic label is a query
@@ -56,7 +72,7 @@ export function units(label: string): Unit[] {
 }
 // The next element or group at the start of rest: a group, a two-letter element, or one character.
 function token(rest: string): Unit {
-  const group = GROUP_NAMES.find((g) => rest.startsWith(g) && !/[a-z]/.test(rest[g.length] ?? ""));
+  const group = GROUP_NAMES.find((g) => rest.startsWith(g) && !/[a-z]/.test(rest[g.length] ?? "")) ?? [...NICKNAME_TOKENS].find((g) => rest.startsWith(g) && !/[a-z]/.test(rest[g.length] ?? ""));
   const two = rest.slice(0, 2), text = group ?? (ELEMENTS.has(two) && /^[A-Z][a-z]$/.test(two) ? two : rest[0]);
   return { text, kind: group ? "group" : ELEMENTS.has(text) ? "element" : "other" };
 }
@@ -78,6 +94,44 @@ function word(w: string): Unit[] | undefined {
 function unitsOf(label: string): Unit[] {
   // A generic label (ALK, CYC, Q) is one unit: it is never read as atoms.
   if (isGeneric(label) && !/\d/.test(label)) return [{ text: label, kind: "other" }];
+  const read = readUnits(label);
+  return (!GROUPS[label] && nicknameUnits(label, read)) || read;
+}
+// A nickname is drawn as its units when they spell its atoms (SF5, CH2CF3, OTBS), give its reverse spelling (NPhth
+// reads PhthN with the bond to its right), or keep each word whole (ODMT reads DMTO). Else as its label and reverse
+// spelling: the two parts that swap (NiPr2 and iPr2N, Bpin and pinB), or one unit, never reversed (TDS, Morph, 2-Py).
+// Undefined to draw it as read.
+function nicknameUnits(label: string, read: Unit[]): Unit[] | undefined {
+  const hit = lookupNickname(label);
+  if (!hit) return undefined;
+  const { entry, spelling } = hit, other = spelling === "label" ? entry.reverse : spelling === "reverse" ? entry.label : undefined;
+  const words = read.some((u) => u.kind === "other") && read.every((u) => u.kind !== "other" || /^[A-Z][A-Za-z]+$/.test(u.text));
+  // A nickname read as one group of its own (Bpin, a group name inside longer labels) still shows its reverse spelling.
+  const itself = read.length === 1 && read[0].text === label;
+  if (!itself && (spells(read, entry.formula) || (other ? [...read].reverse().map((u) => u.text + (u.count ?? "")).join("") === other : words))) return undefined;
+  const part = (t: string): Unit => { const [, text, count] = /^(.*?)(\d*)$/.exec(t)!; return { text: text || t, ...(text && count ? { count } : {}), kind: ELEMENTS.has(text) ? "element" : "group" }; };
+  for (let k = 1; other && k < label.length; k++) if (label.slice(k) + label.slice(0, k) === other) return [part(label.slice(0, k)), part(label.slice(k))];
+  return [{ text: label, kind: "group" }];
+}
+// Whether units name a formula's atoms other than hydrogen (H, D and T left out): its elements, groups and brackets.
+function spells(us: Unit[], formula: string): boolean {
+  const add = (to: Record<string, number>, from: Record<string, number>, n: number) => { for (const [el, k] of Object.entries(from)) to[el] = (to[el] ?? 0) + k * n; };
+  const heavy = (f: string) => { const out: Record<string, number> = {}; for (const [, el, n] of f.replace(/[+-]$/, "").matchAll(/([A-Z][a-z]?)(\d*)/g)) if (!/^[HDT]$/.test(el)) out[el] = (out[el] ?? 0) + Number(n || 1); return out; };
+  const of = (list: Unit[]): Record<string, number> | undefined => {
+    const out: Record<string, number> = {};
+    for (const u of list) {
+      const n = Number(u.count ?? 1);
+      if (u.kind === "element") { if (!/^[HDT]$/.test(u.text)) add(out, { [u.text]: 1 }, n); }
+      else if (u.kind === "bracket") { const inner = of(readUnits(u.text.slice(1, -1))); if (!inner) return undefined; add(out, inner, n); }
+      else if (u.kind === "group") { const f = lookupNickname(u.text)?.entry.formula; if (!f) return undefined; add(out, heavy(f), n); }
+      else return undefined;
+    }
+    return out;
+  };
+  const got = of(us), want = heavy(formula), keys = new Set([...Object.keys(got ?? {}), ...Object.keys(want)]);
+  return !!got && [...keys].every((k) => (got[k] ?? 0) === (want[k] ?? 0));
+}
+function readUnits(label: string): Unit[] {
   const out: Unit[] = [];
   let i = 0;
   const digits = () => { const m = /^\d+/.exec(label.slice(i)); if (m) i += m[0].length; return m?.[0]; };
@@ -129,6 +183,11 @@ export function anchorElement(label: string): string | undefined {
 
 // A label is a plain element when it is one element symbol and nothing else.
 export const isElement = (label: string) => ELEMENTS.has(label);
+// Element symbols that ChemDraw 25.5 reads as nicknames when they are typed or read as a label: Ac acetyl, Np
+// 4-nitrophenyl, Pr propyl, Ts tosyl. Octet does the same. The element itself comes from an element key or the
+// periodic table. Ar, Nb, Cm and the others stay elements, as in ChemDraw.
+export const NICKNAME_SYMBOLS = new Set(["Ac", "Np", "Pr", "Ts"]);
+export const typedElement = (label: string) => ELEMENTS.has(label) && !NICKNAME_SYMBOLS.has(label);
 // An element with its oxidation state written after it, Os(II), Fe(0): the element and the state.
 const ROMAN = ["0", "I", "II", "III", "IV", "V", "VI", "VII", "VIII", "IX", "X"];
 export function writtenOxidation(label: string): { el: string; ox: number } | undefined {
@@ -165,13 +224,22 @@ const FORMULAS: Record<string, string> = {
 // hang off the atom before them, and CO2R or COOR becomes an ester. Undefined if Octet cannot read it.
 // A label written right to left (HO2C, OHC, MeO, Et3N) is read from its end, as ChemDraw reads a label it shows
 // reversed: when its reverse is a formula above, or when it starts with a group and ends with one heavy atom.
+// Nicknames (nicknames.ts) are read whole: the user's own first; Octet's after its groups and the formulas above, but
+// read as before where that reading gave the same structure (READ_AS_BEFORE: OMe is still OC). The reading below got
+// the others wrong (F3C, ClAc, NiPr2, TDS) or read nothing.
 export function labelSmiles(label: string): string | undefined {
+  const nickname = lookupNickname(label);
+  if (nickname?.entry.user) return nickname.entry.smiles;
   if (GROUPS[label]) return GROUPS[label];
   if (isGeneric(label)) return undefined;
   // An element with its oxidation state, Os(II): the element alone ((II) is not two iodine atoms, and no charge).
   const ox = writtenOxidation(label);
   if (ox) return `[${ox.el}]`;
   if (FORMULAS[label]) return FORMULAS[label];
+  if (nickname && !READ_AS_BEFORE.has(label)) return nickname.entry.smiles;
+  return readLabel(label) ?? nickname?.entry.smiles;
+}
+function readLabel(label: string): string | undefined {
   let us = units(label);
   if (!us.length) return undefined;
   const back = [...us].reverse(), last = back[0];
@@ -192,7 +260,9 @@ export function labelSmiles(label: string): string | undefined {
       if (u.text === "H") continue;
       smiles += smiles && n > 1 ? `(${atom(u.text)})`.repeat(n) : atom(u.text).repeat(n);
     } else if (u.kind === "group") {
-      smiles += smiles ? `(${GROUPS[u.text]})`.repeat(n) : GROUPS[u.text] + `(${GROUPS[u.text]})`.repeat(n - 1);
+      const g = groupSmiles(u.text);
+      if (!g) return undefined;
+      smiles += smiles ? `(${g})`.repeat(n) : g + `(${g})`.repeat(n - 1);
     } else if (u.kind === "bracket") {
       const inner = labelSmiles(u.text.slice(1, -1));
       if (!inner) return undefined;
@@ -271,3 +341,7 @@ export function formulaRuns(text: string): Run[] {
 // writer writes it, with formulaTextRuns, so the file shows what the page shows.
 export const formulaCaption = (c: { on?: unknown; cycle?: { side: string } }) => !!c.on || (!!c.cycle && c.cycle.side !== "name");
 export const formulaTextRuns = (text: string): { text: string; script?: "sub" }[] => formulaRuns(text).map((r) => (r.sub ? { text: r.text, script: "sub" } : { text: r.text }));
+
+// Nicknames read inside longer labels, longest first; and labels split again when the user's nicknames change.
+for (const n of tokenNicknames(BUNDLED).sort((a, b) => b.length - a.length)) NICKNAME_TOKENS.add(n);
+onNicknamesChange(() => split.clear());
