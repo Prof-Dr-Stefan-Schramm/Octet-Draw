@@ -6,7 +6,7 @@
 // The links are only a drawing aid: they carry no chemistry, and the arrow's from and to always hold the resolved ends,
 // which every file and export writes.
 import type { Arrow, ArrowLink, ArrowTarget, Drawing, Mol, Style } from "./render.ts";
-import { scaleOf } from "./render.ts";
+import { arrowPath, headSize, headsOf, scaleOf } from "./render.ts";
 
 type P = [number, number];
 const sub = (a: P, b: P): P => [a[0] - b[0], a[1] - b[1]];
@@ -123,7 +123,7 @@ export function resolveEnd(m: Mol, ink: LinkInk, s: LinkStyle, link: ArrowLink, 
   return along < need ? add(p, mul(d, need - along + 1e-7)) : p;
 }
 // Half an arrow's line width, in bond lengths.
-const penOf = (a: Arrow, s: LinkStyle) => ((a.width !== undefined ? a.width * s.pt : s.line) * scaleOf(a)) / 2 / s.bond;
+const penOf = (a: Omit<Arrow, "id">, s: LinkStyle) => ((a.width !== undefined ? a.width * s.pt : s.line) * scaleOf(a)) / 2 / s.bond;
 
 // The similarity (a turn and scale, or with mirror a flip) that takes an arrow's old ends to its new ones: what the
 // edit did to the arrow. A short arrow only moves.
@@ -258,6 +258,116 @@ export function linkEnds<T extends Omit<Arrow, "id">>(m: Mol, a: T, from?: { on:
   const f = from && linkFor(m, from.on, from.at, a, "from"), t = to && linkFor(m, to.on, to.at, a, "to");
   return { ...a, ...(f ? { fromLink: f } : {}), ...(t ? { toLink: t } : {}) };
 }
+
+// ——— Arrowheads clear of bonds (part B) ———
+// Ports open_approach and HeadInk (arrow_anchors.rs 642-826) for Octet's arcs. ReShiki turns a cubic's end tangent.
+// An arc has one bend for both ends, so here the head end goes round its atom to the arrival direction, and the arc
+// takes the bend whose tangent there is that direction (the start stays; its departure turns with the bend). Only a head that touches a bond (or whose shaft does) is moved, so an arrow drawn
+// clear keeps its place and aiming again changes nothing. Candidates face the source (within OPEN_APPROACH of the way
+// back to it). A clear head and clear shaft win over a clear head alone; then the smallest extra gap (up to one more
+// gap, in eighths); then the widest angle from the bonds (up to OPEN_APPROACH); then the nearest to the preferred way.
+const OPEN_APPROACH = Math.PI / 3;
+type Seg = { a: P; b: P; w: number }; // a bond's ink near the atom: its axis and how far its lines reach either side (px)
+// The bonds at an atom as bands round their axes (px, y down): half the stroke, plus the spacing of a double, triple or
+// aromatic bond's second line on either side (which side Octet draws it on is not known here, so both).
+export function bondInk(m: Mol, atom: number, s: LinkStyle): { segs: Seg[]; ways: P[] } {
+  const L = s.bond, px = (q: P): P => [q[0] * L, -q[1] * L], segs: Seg[] = [], ways: P[] = [];
+  for (const b of m.bonds) {
+    if (b.atoms[0] !== atom && b.atoms[1] !== atom) continue;
+    const o = at(m, atom), q = at(m, b.atoms[b.atoms[0] === atom ? 1 : 0]), sc = (scaleOf(m.atoms[b.atoms[0]]) + scaleOf(m.atoms[b.atoms[1]])) / 2;
+    const stroke = (b.display === "hashed" || b.display === "hollow" || b.stereo === 6 ? s.bold / 2 + s.line / 2 : b.display === "bold" || b.stereo === 1 ? s.bold / 2 : s.line / 2) * sc;
+    const rails = b.type === 2 || b.type === 3 || b.type === 4 ? 1 : b.type === 14 ? 1.5 : 0, spacing = (b.spacing !== undefined ? (b.spacing / 100) * L : s.spacing) * sc;
+    segs.push({ a: px(o), b: px(q), w: stroke + spacing * rails + (b.display === "wavy" ? 1.25 * s.line : 0) });
+    ways.push(unit(sub(q, o)));
+  }
+  return { segs, ways };
+}
+const segPoint = (p: P, a: P, b: P) => { const ab = sub(b, a), t = Math.max(0, Math.min(1, dot(sub(p, a), ab) / (dot(ab, ab) || 1))); return len(sub(p, add(a, mul(ab, t)))); };
+const crossZ = (a: P, b: P) => a[0] * b[1] - a[1] * b[0];
+const segSeg = (p: P, q: P, a: P, b: P) => {
+  const d1 = crossZ(sub(q, p), sub(a, p)), d2 = crossZ(sub(q, p), sub(b, p)), d3 = crossZ(sub(b, a), sub(p, a)), d4 = crossZ(sub(b, a), sub(q, a));
+  if (d1 * d2 < 0 && d3 * d4 < 0) return 0;
+  return Math.min(segPoint(p, a, b), segPoint(q, a, b), segPoint(a, p, q), segPoint(b, p, q));
+};
+const inTri = (p: P, t: P[]) => { const s = [0, 1, 2].map((i) => crossZ(sub(t[(i + 1) % 3], t[i]), sub(p, t[i]))); return s.every((v) => v >= 0) || s.every((v) => v <= 0); };
+// Whether an arrow's head at its end, and its shaft, touch the bond ink (px). The head as its full triangle (a half
+// head's too: either side may meet a bond), its length back along the arc and its width either side. The bonds all
+// start at the atom the head points at, where they meet: the ink there, as near the atom as the tip and a line width
+// more, is where the head points, and does not count.
+export function touches(a: Omit<Arrow, "id">, bonds: Seg[], s: LinkStyle): { head: boolean; shaft: boolean } {
+  const L = s.bond, path = arrowPath({ ...a, id: 0 }, L), size = headSize(a), line = (a.width !== undefined ? a.width * s.pt : s.line) * scaleOf(a);
+  const H = size.length * line, W = size.width * line, T = path[path.length - 1];
+  const ink = bonds.flatMap((g) => { const r = len(sub(T, g.a)) + line, l = len(sub(g.b, g.a)); return l > r ? [{ ...g, a: add(g.a, mul(sub(g.b, g.a), r / l)) }] : []; });
+  // The point on the path H back from the tip.
+  let back = T, left = H;
+  for (let i = path.length - 1; i > 0 && left > 0; i--) { const d = len(sub(path[i], path[i - 1])); if (d >= left) { back = add(path[i], mul(sub(path[i - 1], path[i]), left / d)); left = 0; } else { left -= d; back = path[i - 1]; } }
+  const u = unit(sub(T, back)), n: P = [-u[1], u[0]], base = sub(T, mul(u, H)), tri: P[] = [T, add(base, mul(n, W)), sub(base, mul(n, W))];
+  const head = ink.some((g) => [0, 1, 2].some((i) => segSeg(tri[i], tri[(i + 1) % 3], g.a, g.b) < g.w + line / 2) || inTri(g.a, tri));
+  // The shaft, up to the head's base, in steps of no more than a line width or so.
+  const pts: P[] = [];
+  for (let i = 0; i + 1 < path.length; i++) { const k = Math.max(1, Math.ceil(len(sub(path[i + 1], path[i])) / Math.max(1, line * 2))); for (let j = 0; j < k; j++) pts.push(add(path[i], mul(sub(path[i + 1], path[i]), j / k))); }
+  const shaft = pts.filter((q) => len(sub(q, T)) > H).some((q) => ink.some((g) => segPoint(q, g.a, g.b) < g.w + line / 2));
+  return { head, shaft };
+}
+// Ports open_approach and aim_end for a new curved arrow: when its head end is linked to an atom (not a lone pair or a
+// bond) and its head or shaft touches the atom's bonds, that end goes round the atom (and the arc takes the bend for
+// it) to where they clear, with the least extra gap. The other end and the side the arc bulges to stay. ink: the drawing
+// as it is (its label boxes). Run once, on release.
+export function aimHead<T extends Omit<Arrow, "id">>(m: Mol, a: T, ink: LinkInk, s: LinkStyle): T {
+  const { start, end } = headsOf(a), which = end !== "none" ? "to" : start !== "none" ? "from" : undefined;
+  const key = which === "to" ? "toLink" : "fromLink", link = which && a[key];
+  if (!which || !link || "bond" in link.on || link.on.pair !== undefined || link.on.atom >= m.atoms.length) return a;
+  const atom = link.on.atom, centre = at(m, atom), other = which === "to" ? a.from : a.to, bonds = bondsOf(m);
+  const { segs, ways } = bondInk(m, atom, s);
+  if (!segs.length) return a;
+  const back = unit(sub(other, centre)), preferred = unit(link.dir), pen = penOf(a, s), gap = link.gap ?? LINK_GAP_PT;
+  // The head lies along the arc's tangent at its end, so to come in along d the arc takes the bend that gives that
+  // tangent from the other end (tangentOut the other way round). It keeps the side it bulges to, and at most a half
+  // circle (sweep 180°). own: the arrow's own bend, for the way it was drawn.
+  const most = 0.5, side = Math.sign(a.bend ?? 0);
+  const bendFor = (p: P, d: P) => {
+    const v = unit(sub(other, p)), phi = Math.atan2(crossZ(v, d), dot(v, d)), b = Math.tan((which === "to" ? -phi : phi) / 2) / 2;
+    return Math.abs(b) > most || (side && b * side < 0) ? undefined : b;
+  };
+  const trial = (d: P, extra: number, own: boolean) => {
+    const l: ArrowLink = { ...link, offset: [0, 0], dir: d, ...(extra ? { gap: gap + extra } : {}) };
+    const p = resolveEnd(m, ink, s, l, pen, bonds)!, bend = own ? a.bend : bendFor(p, d);
+    if (bend === undefined && !own) return undefined;
+    const t = which === "to" ? { ...a, to: p, bend } : reverseOf({ ...a, from: p, bend });
+    return { l, p, bend, hit: touches(t, segs, s) };
+  };
+  // The least extra gap (in eighths of one more gap) at which the head and shaft clear, or the head alone.
+  const score = (d: P, own = false) => {
+    let headOnly: { extra: number; l: ArrowLink; p: P; bend?: number } | undefined;
+    const angle = Math.min(OPEN_APPROACH, ...ways.map((w) => Math.acos(Math.max(-1, Math.min(1, dot(w, d))))));
+    for (let i = 0; i <= 8; i++) {
+      const r = trial(d, (gap * i) / 8, own);
+      if (!r) return undefined;
+      if (!r.hit.head && !r.hit.shaft) return { clear: true, extra: (gap * i) / 8, l: r.l, p: r.p, bend: r.bend, angle };
+      if (!r.hit.head && !headOnly) headOnly = { extra: (gap * i) / 8, l: r.l, p: r.p, bend: r.bend };
+    }
+    return headOnly ? { clear: false, ...headOnly, angle } : undefined;
+  };
+  const first = score(preferred, true);
+  if (first?.clear && first.extra === 0) return a; // already clear
+  type Best = NonNullable<ReturnType<typeof score>> & { turn: number };
+  const better = (x: Best, y?: Best) => !y || (x.clear !== y.clear ? x.clear : Math.abs(x.extra - y.extra) > 1e-9 ? x.extra < y.extra : Math.abs(x.angle - y.angle) > 1e-4 ? x.angle > y.angle : x.turn < y.turn);
+  let best: Best | undefined = first && { ...first, turn: 0 };
+  const facing = Math.cos(OPEN_APPROACH) - 1e-4, step = Math.PI / 180;
+  for (const sign of [1, -1]) {
+    for (let k = 1; k <= 180; k++) {
+      const d = turn(preferred, sign * k * step);
+      // A side stops where it no longer faces the source.
+      if (dot(d, back) < facing) break;
+      const r = score(d);
+      if (r && better({ ...r, turn: k }, best)) best = { ...r, turn: k };
+    }
+  }
+  if (!best || best.turn === 0 && best.extra === 0) return a;
+  return { ...a, [which]: best.p, [key]: best.l, ...(best.bend !== undefined ? { bend: best.bend } : {}) };
+}
+// An arrow the other way round, so its start's head is tested as an end's.
+const reverseOf = <T extends Omit<Arrow, "id">>(a: T): T => ({ ...a, from: a.to, to: a.from, bend: -(a.bend ?? 0) });
 
 // Ports validate (for a file's links): finite numbers, a direction that is not zero, a gap of 0 to 1000 pt, atom
 // numbers in range, a bond's atoms in order with t in 0 to 1, and a mark key Octet knows.

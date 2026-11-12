@@ -127,7 +127,7 @@ import { between, MOST_GLIDE, moving } from "./glide";
 import { Tooltips } from "./Tooltip";
 import { failure, fileName, type NoticeKind } from "./notice";
 import { history, type History } from "./history";
-import { PAIR_KEY, hasLinks, linkEnds, linkFor, linkable, reconcileLinks, reverseLinks, type LinkStyle } from "./arrowlinks";
+import { PAIR_KEY, aimHead, hasLinks, linkEnds, linkFor, linkable, reconcileLinks, reverseLinks, type LinkStyle } from "./arrowlinks";
 import { logError } from "./crashlog";
 import "./editor.css";
 
@@ -7236,7 +7236,8 @@ export default function Editor() {
         const to: P = drag.to ?? (drag.make?.kind === "orbital" ? orbitalTip(drag.make, drag.from, drag.target) : !drag.make && arrowPick.ellipse ? [drag.from[0] + (arrowPick.ellipse === "cw" ? 0.6 : -0.6), drag.from[1] + 1.2]
           : curved({ kind: drag.make?.kind ?? arrowKind }) ? [drag.from[0] + 1.5, drag.from[1]] : [drag.from[0] + 3, drag.from[1]]);
         if (Math.hypot(to[0] - drag.from[0], to[1] - drag.from[1]) < 0.2) return;
-        const [mol, id] = addArrow(doc, dragArrow(drag, to));
+        // A linked head that would sit on a bond goes round its atom to where it is clear (aimHead).
+        const [mol, id] = addArrow(doc, aimHead(doc, dragArrow(drag, to), drawing, linkStyle));
         set(mol);
         return setPicked(new Set([id]));
       }
