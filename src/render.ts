@@ -129,11 +129,12 @@ export const orderOf = (type: number) => (type === AROMATIC ? 1.5 : type === HBO
 // A caption: free text at x, y (bond lengths, y up; the text's anchor point by its alignment), or, with under
 // set, kept centred under those atoms by the ACS rule (baseline 15 pt below the structure's ink box).
 // Captions under the same structure stack one line apart, in id order.
-// on: conditions text, kept centred above or below an arrow (by the arrow's id).
+// on: conditions text, kept centred above or below an arrow (by the arrow's id). gap: from the arrow's line to the near
+// edge of the text (pt, at the arrow's scale); unset is GAP_ARROW_PT (arrowlabels.ts).
 export type Caption = {
   id: number; text: string; x: number; y: number;
   bold?: boolean; italic?: boolean; underline?: boolean; size?: number; align?: "left" | "centre" | "right" | "justify"; under?: number[];
-  on?: { arrow: number; side: "above" | "below" };
+  on?: { arrow: number; side: "above" | "below"; gap?: number };
   colour?: string; // #rrggbb; unset uses the document's text colour
   cycle?: CycleText; // a catalytic cycle's centre label, or a reagent or product on one of its steps
   angle?: number; // turned anticlockwise about its anchor (the start, middle or end of its first baseline), in degrees (ChemDraw's RotationAngle)
@@ -1855,7 +1856,7 @@ export function placeCaptions(mol: Mol, d: Pick<Drawing, "ink" | "scale">, width
   fixed: Map<number, { x: number; y: number; anchor: Placed["anchor"]; wrap?: number }> = new Map(), measure?: (text: string, c: Caption, style: RunStyle) => number,
   extent?: (text: string, c: Caption, style: RunStyle) => [number, number]): Placed[] {
   const k = d.scale, below = new Map<string, number>(); // the next free baseline under each structure
-  const beside = new Map<string, number>(); // how far the conditions on each side of each arrow already reach
+  const beside = new Map<string, number>(); // how far (px) from its line the conditions on each side of each arrow already reach
   const order = (c: Caption) => (isNumber(c) ? 0 : 1);
   // Conditions placed by hand go first: the others on their side of the arrow stack out past them.
   const sorted = [...(mol.captions ?? [])].sort((a, b) => order(a) - order(b) || a.id - b.id), done = new Map<number, Placed[]>();
@@ -1891,12 +1892,13 @@ export function placeCaptions(mol: Mol, d: Pick<Drawing, "ink" | "scale">, width
     } else if (arrow && hand) {
       [x, y] = [hand[0] * k, -hand[1] * k];
     } else if (arrow) {
-      // Conditions: centred on the arrow's middle, GAP_ARROW_PT (times the arrow's scale) clear of it, stacking away from it.
+      // Conditions: centred on the arrow's middle, their gap (GAP_ARROW_PT unless set, times the arrow's scale) clear of
+      // it, stacking away from it: each starts at its own gap or past the text before it on its side, whichever is further.
       const [s, t] = [[arrow.from[0] * k, -arrow.from[1] * k], [arrow.to[0] * k, -arrow.to[1] * k]];
       const mid = [(s[0] + t[0]) / 2, (s[1] + t[1]) / 2], len = Math.hypot(t[0] - s[0], t[1] - s[1]) || 1, u = [(t[0] - s[0]) / len, (t[1] - s[1]) / len];
-      const key = `${arrow.id} ${c.on!.side}`, used = beside.get(key) ?? 0, gap = GAP_ARROW_PT * scaleOf(arrow) * pt + used;
+      const key = `${arrow.id} ${c.on!.side}`, gap = Math.max((c.on!.gap ?? GAP_ARROW_PT) * scaleOf(arrow) * pt, beside.get(key) ?? 0);
       const block = offs[offs.length - 1];
-      beside.set(key, used + block + (LINE + 0.2) * size);
+      beside.set(key, gap + block + (LINE + 0.2) * size);
       if (Math.abs(u[0]) >= 0.5) {
         // A mostly horizontal arrow: text above or below its middle.
         x = mid[0];
@@ -1932,7 +1934,7 @@ export function placeCaptions(mol: Mol, d: Pick<Drawing, "ink" | "scale">, width
       const s: P = [arrow.from[0] * k, -arrow.from[1] * k], t: P = [arrow.to[0] * k, -arrow.to[1] * k], mid = [(s[0] + t[0]) / 2, (s[1] + t[1]) / 2], above = c.on!.side === "above";
       const reach = Math.abs(t[0] - s[0]) >= 0.5 * Math.hypot(t[0] - s[0], t[1] - s[1]) ? (above ? mid[1] - frame[1] : frame[3] - mid[1]) : above ? mid[0] - frame[0] : frame[2] - mid[0];
       const key = `${arrow.id} ${c.on!.side}`;
-      beside.set(key, Math.max(beside.get(key) ?? 0, reach + 0.2 * size - GAP_ARROW_PT * scaleOf(arrow) * pt));
+      beside.set(key, Math.max(beside.get(key) ?? 0, reach + 0.2 * size));
     }
     const turned = c.angle ? ([[frame[0], frame[1]], [frame[2], frame[1]], [frame[2], frame[3]], [frame[0], frame[3]]] as P[]).map((q) => turnPx(q, [x, y], c.angle!)) : undefined;
     return [{

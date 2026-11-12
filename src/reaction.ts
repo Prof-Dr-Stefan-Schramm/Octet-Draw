@@ -357,7 +357,8 @@ export function cleanUpReaction(m: Mol, r: Reaction, arrows: Arrow[], o: Layout,
   }
   const kept = (id: number, side: "above" | "below") => (out.captions ?? []).filter((c) => c.on?.arrow === id && c.on.side === side);
   // How far text kept on an arrow reaches from it, as the renderer stacks it (render.ts placeCaptions).
-  const block = (cs: Caption[]) => (cs.length ? (GAP_ARROW_PT + cs.reduce((s, c) => s + (c.text.split("\n").length * LINE + 0.2) * (c.size ?? o.captionPt), 0)) / o.bondPt : 0);
+  // (A gap set on the text, arrowlabels.ts, counts as the largest one on the side.)
+  const block = (cs: Caption[]) => (cs.length ? (Math.max(...cs.map((c) => c.on?.gap ?? GAP_ARROW_PT)) + cs.reduce((s, c) => s + (c.text.split("\n").length * LINE + 0.2) * (c.size ?? o.captionPt), 0)) / o.bondPt : 0);
   // The widest text kept on an arrow across the page (beside an arrow down the page, text does not set its length).
   const textWidth = (cs: Caption[]) => (flat ? Math.max(0, ...cs.map((c) => { const b = o.captionBox(c.id); return b ? b[2] - b[0] : 0; })) : 0);
 

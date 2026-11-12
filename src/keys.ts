@@ -71,7 +71,7 @@ export const ACTIONS: Action[] = [
   ...([["select_structure", "Select the whole structure"], ["pairs", "Show or hide lone pairs"], ["number", "Number the compounds"], ["show_warnings", "Show hidden warnings"], ["hide_warnings", "Hide the selection's warnings"],
     ["caption.add", "Add a caption under the structure"], ["template.add", "Add the selection to the templates"], ["cycle.make", "Make a catalytic cycle"], ["align.row", "Line up structures in a row"],
     ["align.column", "Line up structures in a column"], ["align.spread-row", "Space structures evenly"], ["bond.flip", "Point the bond the other way"], ["caption.edit", "Edit the text"],
-    ["caption.attach", "Tie the text to its structure"], ["caption.detach", "Un-tie the text from its structure"], ["reaction.map", "Map the reaction's atoms"], ["reaction.unmap", "Clear the atom map"],
+    ["caption.attach", "Tie the text to its structure"], ["caption.detach", "Un-tie the text from its structure or arrow"], ["caption.gap.auto", "Set the automatic gap between the text and its arrow"], ["reaction.map", "Map the reaction's atoms"], ["reaction.unmap", "Clear the atom map"],
     ["cycle.centre", "Add a centre label to the cycle"], ["cycle.in", "Add a reagent coming in"], ["cycle.out", "Add a product going out"], ["cycle.tidy", "Tidy the cycle"],
     ["cycle.step.reversible", "Make the cycle's step reversible or one way"], ["cycle.step.balance.equal", "Balance the reversible step equally"],
     ["cycle.step.balance.forward", "Make the reversible step's forward half longer"], ["cycle.step.balance.back", "Make the reversible step's back half longer"],

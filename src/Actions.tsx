@@ -11,7 +11,7 @@ import {
   PencilSimpleLine, PlusCircle, SelectionAll, SlidersHorizontal, SquareSplitHorizontal, TagSimple, TextAlignCenter, TextAlignLeft,
   TextAlignJustify, TextAlignRight, Tag, TextB, TextItalic, TextUnderline, Trash, Warning, X, Plus as PlusIcon, Rows, RowsPlusBottom, RowsPlusTop, Columns, ColumnsPlusRight, ColumnsPlusLeft, ArrowsInLineHorizontal, Backspace, Broom, CirclesThree, FlowArrow, Subtitles, Textbox, WarningCircle, WaveSine, Circle, TextSubscript, TextSuperscript, Cube, Square, BoundingBox, SelectionSlash, AlignLeft, AlignRight, AlignTop, AlignBottom, ArrowsOutLineHorizontal, ArrowsOutLineVertical, BezierCurve, LineSegment, ArrowsMerge, ArrowsInCardinal, Crosshair, FadersHorizontal, Copy, ListDashes, Percent,
   EyeSlash, Angle, Resize, Unite, SelectionPlus, Paragraph, Checkerboard, CubeTransparent, CircleHalf, ClockCounterClockwise, Shuffle, ArrowBendDownRight, Path, Scissors, CircleNotch,
-  Question, EyeClosed, BellSlash, ArrowsInLineVertical, BracketsRound, TreeStructure, Asterisk, AsteriskSimple, BracketsSquare, SquaresFour, StarFour, TextTSlash,
+  Question, EyeClosed, BellSlash, ArrowsInLineVertical, Magnet, BracketsRound, TreeStructure, Asterisk, AsteriskSimple, BracketsSquare, SquaresFour, StarFour, TextTSlash,
 } from "@phosphor-icons/react";
 import type { Analysis } from "./chem";
 import type { Problem } from "./check";
@@ -68,8 +68,9 @@ export type Context =
       // shown when the document's is on and one of them reads as chemistry.
       script?: "sub" | "super"; font?: string; fonts?: string[]; labelable?: boolean; chemical?: boolean;
       // cycleSide: one picked caption that labels a cycle's side arrow (CycleSide). cycleName: one picked caption that is
-      // a step's name, moved from where Octet puts it.
-      cycleSide?: CycleSide; cycleName?: { moved: boolean } }
+      // a step's name, moved from where Octet puts it. arrowGap: conditions text on an arrow, its gap (pt) and whether any
+      // picked one has a gap set (not Automatic).
+      cycleSide?: CycleSide; cycleName?: { moved: boolean }; arrowGap?: { gap: number; custom: boolean } }
   // size: the heads' palette size ("own" for a size set by hand), when the arrows have heads. ratio: an equilibrium's.
   // fillable: closed curves and block arrows, which take a fill.
   | { kind: "arrow"; count: number; arrow: ArrowKind; curved: boolean; sweep?: number; style: string; orbital?: { shape: OrbitalShape; phase: Phase };
@@ -397,6 +398,7 @@ export function actionItems(context: Context, messy: boolean, hiddenWarnings = f
       if (context.cycleSide) items.push(...sideItems(context.cycleSide));
       if (context.cycleName?.moved) items.push(it(<ClockCounterClockwise size={18} />, "Reset position", "cycle.side.reset"));
       if (context.attached) items.push(it(<LinkBreak size={18} />, "Un-tie from structure", "caption.detach"));
+      else if (context.arrowGap) items.push(it(<LinkBreak size={18} />, "Un-tie from arrow", "caption.detach"), ...(context.arrowGap.custom ? [it(<Magnet size={18} />, "Automatic gap", "caption.gap.auto")] : []));
       else if (context.attachable) items.push(it(<LinkSimple size={18} />, "Tie to structure", "caption.attach"));
       items.push(...warnings(), small(it(<Paragraph size={18} />, "Line spacing…", "line_spacing")), ...turnings, rotate, centre, inWindow, ...order, keep, del);
       break;
@@ -851,6 +853,13 @@ export function Actions({ open, context, analysis, problems, fonts, hiddenWarnin
           ))}
           {/* The same control as an atom label's: the caption counts as chemistry, or it is text only. */}
           {context.chemical !== undefined && <button className="chip" aria-pressed={context.chemical} aria-label="Interpret chemically" data-tip="Interpret chemically" onClick={() => run("interpret")}><Graph size={16} /></button>}
+        </div>
+      )}
+
+      {context.kind === "caption" && context.mode === "picked" && context.arrowGap && (
+        // Conditions text: its gap from the arrow's line, in steps of 0.5 pt (Automatic is 3 pt).
+        <div className="sliders" role="group" aria-label="Arrow">
+          <Slider name="Gap from arrow" value={Math.min(30, context.arrowGap.gap)} min={0} max={30} step={0.5} show={(v) => `${v.toFixed(1)} pt`} onChange={(v) => run(`caption.gap.${Math.round(v * 10)}`)} />
         </div>
       )}
 

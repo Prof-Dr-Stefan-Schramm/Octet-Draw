@@ -87,7 +87,7 @@ import {
   ArrowGlyph, arrowName, arrowVariant, BondGlyph, BONDS, ChainGlyph, CYCLES, ELLIPSES, HOLD_MS, Palette, pickHead, RingGlyph, RINGS, SELECTS, SEQUENCES, SideGlyph, STRAIGHT, SymbolGlyph, SYMBOLS, TemplateGlyph,
   type ArrowPick, type BondKind, type RingKind, type SelectKind, type Tool,
 } from "./tools";
-import { arrowPath, arrowShapes, bendPoint, blockOutline, curved, ellipseArrow, headBarb, headSize, sizeOf, sizedHead, turnPx, scaleOf, fitArrows, HIGHLIGHT, SHADE, inShape, inDrawn, shapeBounds, turns, tlcLayout, spotPath, tableLayout, linesOf, TABLE_LINES, TABLE_PAD, curveBox, headsOf, takesHeads, shapesHeads, headMenu, HEAD_SHAPES, isBracket, isLine, isOrbital, markAt, straightArrow, shapeInk, SWEEPS, sweepBend, sweepOf, isNumber, labelTurn, placeCaptions, render, renderParts, type Arrow, type ArrowKind, type ArrowTarget, type Atom, type Bond, type Box, type Drawing, type PartCache, type Caption, type CurvePoint, type Head, type HeadShape, type CurveFill, type Mol, type Placed, type Shape, type ShapeKind, type Spot, type TableLine, type CellAlign, polymerLabelsAt, type AtomQuery, type BracketUsage, type Polymer, type Grid, ASCENT, DESCENT } from "./render";
+import { arrowPath, arrowShapes, bendPoint, blockOutline, curved, ellipseArrow, headBarb, headSize, sizeOf, sizedHead, turnPx, scaleOf, fitArrows, HIGHLIGHT, SHADE, inShape, inDrawn, shapeBounds, turns, tlcLayout, spotPath, tableLayout, linesOf, TABLE_LINES, TABLE_PAD, curveBox, headsOf, takesHeads, shapesHeads, headMenu, HEAD_SHAPES, isBracket, isLine, isOrbital, markAt, straightArrow, shapeInk, SWEEPS, sweepBend, sweepOf, isNumber, labelTurn, placeCaptions, render, renderParts, type Arrow, type ArrowKind, type ArrowTarget, type Atom, type Bond, type Box, type Drawing, type PartCache, type Caption, type CurvePoint, type Head, type HeadShape, type CurveFill, type Mol, type Placed, type Shape, type ShapeKind, type Spot, type TableLine, type CellAlign, polymerLabelsAt, type AtomQuery, type BracketUsage, type Polymer, type Grid, ASCENT, DESCENT, GAP_ARROW_PT } from "./render";
 import { cursorColour, dragCursor, drawCursors, type Cursors } from "./cursor";
 import { CURSORS, handlePoint, isCorner, percentOf, resizeBy, sideAt, SIDES, type Box as RBox, type Side } from "./resize";
 import { abbreviationOf, cleanOwnName, loadNames, mergeOwnNames, nameToSmiles, nameToAtoms, namesStarting, ownName, ownNamesFile, readOwnNamesFile, renameOwnName, setOwnNames, suggestName, knownName, looksLikeSmiles, withOwnName, withoutOwnName, type OwnName } from "./names";
@@ -128,6 +128,7 @@ import { Tooltips } from "./Tooltip";
 import { failure, fileName, type NoticeKind } from "./notice";
 import { history, type History } from "./history";
 import { PAIR_KEY, aimHead, hasLinks, linkEnds, linkFor, linkable, reconcileLinks, reverseLinks, type LinkStyle } from "./arrowlinks";
+import { movedText, setGap } from "./arrowlabels";
 import { logError } from "./crashlog";
 import "./editor.css";
 
@@ -3667,8 +3668,10 @@ export default function Editor() {
     set({ ...doc, captions: doc.captions?.map((c) => (picked.has(c.id) ? restyled(c) : c)) }, true);
   }
   // Moves the selected atoms and the moving captions. A caption under a structure that is not moving comes
-  // away from it and stays where it is dragged.
-  function moveAll(base: Mol, d: P, captions: Map<number, P>, arrowIds = new Set<number>(), cycleIds = new Set<number>(), atoms = selection): Mol {
+  // away from it and stays where it is dragged. Conditions text whose arrow stays keeps to its arrow, at the gap it is
+  // dragged to, until it is dragged past the arrow's end; free text moved on its own beside a straight arrow becomes
+  // its conditions, unless keepFree (⌘ or Ctrl held, as for catalytic cycles) (arrowlabels.ts).
+  function moveAll(base: Mol, d: P, captions: Map<number, P>, arrowIds = new Set<number>(), cycleIds = new Set<number>(), atoms = selection, keepFree = false): Mol {
     let m = atoms.size ? moveAtoms(base, atoms, d) : base;
     if (cycleIds.size) m = { ...m, cycles: m.cycles?.map((c) => (cycleIds.has(c.id) ? { ...c, centre: [c.centre[0] + d[0], c.centre[1] + d[1]] } : c)) };
     const shift = <T extends { id: number; from: [number, number]; to: [number, number] }>(a: T): T => (arrowIds.has(a.id) ? { ...a, from: [a.from[0] + d[0], a.from[1] + d[1]], to: [a.to[0] + d[0], a.to[1] + d[1]] } : a);
@@ -3680,11 +3683,16 @@ export default function Editor() {
       const t = m.captions?.find((x) => x.id === id)?.cycle, sb = t && branchOf(m, t);
       if (sb) m = dragEnd(m, cycleLayout, sb.c.id, sb.b.id, t!.side as "in" | "out", [(from[0] + d[0]) * L, -(from[1] + d[1]) * L], L).m;
     }
+    // Each moving caption's box as drawn at the press (px, y down), moved by d; the arrows staying, as drawn.
+    const boxes = moveBoxes.current, attach = !atoms.size && !arrowIds.size && !cycleIds.size && !keepFree, onOf = new Map((m.captions ?? []).map((c) => [c.id, c.on]));
+    const staying = arrows.filter((a) => !arrowIds.has(a.id)), others = placed.filter((p) => !captions.has(p.id)).map((p) => ({ box: p.box, on: onOf.get(p.id) }));
     return {
       ...m,
       captions: m.captions?.map((c) => {
-        const from = captions.get(c.id);
+        const from = captions.get(c.id), box = boxes.get(c.id);
         if (!from) return c;
+        const text = box && !c.cycle ? movedText(c, [from[0] + d[0], from[1] + d[1]], box, d, staying, others, L, pt, attach, c.on ? drawnAlign(c) : undefined) : undefined;
+        if (text) return text;
         // A cycle's reagent or product stays on its cycle: its arrow's outer end (from) goes where it is dragged. A
         // step's name goes along its step the same way; an intermediate written as text stays one.
         if (isSide(c.cycle)) return { ...c, x: from[0] + d[0], y: from[1] + d[1] };
@@ -4075,8 +4083,10 @@ export default function Editor() {
   // What moves with some atoms and picked objects: the picked arrows, shapes and cycles, and each picked caption that
   // does not simply follow its structure, arrow or cycle (it comes away and moves alone, from where it is drawn).
   // original: each copy's original, for copies not yet drawn.
+  // The moving captions' boxes as drawn at the press (px), for conditions text kept to its arrow (moveAll).
+  const moveBoxes = useRef(new Map<number, Box>());
   const movers = (base: Mol, atoms: Set<number>, picks: Set<number>, original = new Map<number, number>()) => {
-    const captions = new Map<number, P>(), arrowIds = new Set([...(base.arrows ?? []), ...(base.shapes ?? [])].filter((a) => picks.has(a.id)).map((a) => a.id));
+    const captions = new Map<number, P>(), boxes = new Map<number, Box>(), arrowIds = new Set([...(base.arrows ?? []), ...(base.shapes ?? [])].filter((a) => picks.has(a.id)).map((a) => a.id));
     const cycleIds = new Set((base.cycles ?? []).filter((c) => picks.has(c.id)).map((c) => c.id));
     for (const caption of base.captions ?? []) {
       const c = placed.find((x) => x.id === (original.get(caption.id) ?? caption.id));
@@ -4085,8 +4095,9 @@ export default function Editor() {
       // A cycle's reagent or product moves by its arrow's outer end, where it is at the press.
       // (A reagent's text is at its arrow's start, a product's at its end.)
       const start = cycleArrows.find((a) => a.caption === caption.id), end = cycleArrows.find((a) => a.captionEnd === caption.id);
-      if (c && picks.has(caption.id) && !follows) captions.set(caption.id, start ? start.from : end ? end.to : anchorOf(c));
+      if (c && picks.has(caption.id) && !follows) { captions.set(caption.id, start ? start.from : end ? end.to : anchorOf(c)); boxes.set(caption.id, c.box); }
     }
+    moveBoxes.current = boxes;
     return { captions, arrowIds, cycleIds };
   };
   // alone: the atoms move without becoming the selection (a bond tool's Shift-drag).
@@ -4991,7 +5002,7 @@ export default function Editor() {
           snapped.d = [snapped.d[0] + (free("x") ? nudge[0] ?? 0 : 0), snapped.d[1] + (free("y") ? nudge[1] ?? 0 : 0)];
         }
         // ⌘ (Ctrl) also keeps what moves off any catalytic cycle, but for Ctrl on a Ctrl-drag copy (keys.ts skipsCycle).
-        return setDrag({ ...drag, working: moveAll(base, snapped.d, drag.captions, drag.arrows, drag.cycles, moving), moved: true, guides: snapped.guides, point: snapped.point, skip: skipsCycle(e, pressCtrlCopy.current) });
+        return setDrag({ ...drag, working: moveAll(base, snapped.d, drag.captions, drag.arrows, drag.cycles, moving, skipsCycle(e, pressCtrlCopy.current)), moved: true, guides: snapped.guides, point: snapped.point, skip: skipsCycle(e, pressCtrlCopy.current) });
       }
     }
   }
@@ -5755,6 +5766,8 @@ export default function Editor() {
         return { kind: "caption", mode: "picked", colour: w.colour ?? style.colour, convertible: cs.length === 1 && namesLoaded && !!(nameToSmiles(c.text) || looksLikeSmiles(c.text) || suggestName(c.text, false)), count: cs.length, bold: !!w.bold, italic: !!w.italic, underline: !!w.underline, size: w.size ?? style.captionSize, align: c.align ?? "centre", attached: !!c.under, attachable: !c.under && !!p && !!structureAbove(anchorOf(p), 4) , font: w.font ?? style.captionFont, fonts: fontList, labelable: cs.some(labelable),
           ...(cs.length === 1 && isSide(c.cycle) && branchOf(doc, c.cycle!) ? { cycleSide: sideOf(branchOf(doc, c.cycle!)!.b, branchOf(doc, c.cycle!)!.c) } : {}),
           ...(cs.length === 1 && c.cycle?.side === "name" ? { cycleName: { moved: c.cycle.at !== undefined || c.cycle.reach !== undefined } } : {}),
+          // Conditions text on an arrow: its gap from the arrow (pt; the first one's), and whether any has a gap set.
+          ...(cs.every((x) => x.on && !x.cycle) ? { arrowGap: { gap: c.on!.gap ?? GAP_ARROW_PT, custom: cs.some((x) => x.on!.gap !== undefined) } } : {}),
           // Their Interpret chemically, while the document's is on: whether each one that reads as chemistry has it on.
           ...(style.interpret && cs.some(labelable) ? { chemical: cs.filter(labelable).every((x) => x.chemical !== false) } : {}) };
       }
@@ -6943,14 +6956,18 @@ export default function Editor() {
       if (what === "colour") return restyle(() => ({ colour: arg.toLowerCase() === style.colour.toLowerCase() ? undefined : arg }));
       const id = [...picked][0];
       if (what === "edit" && id !== undefined) return startWriting({ id });
+      // The gap between conditions text and its arrow (pt; auto: Automatic), one Undo step while the slider moves.
+      if (what === "gap") return set(setGap(doc, picked, arg === "auto" ? undefined : Number(arg) / 10), true, arg === "auto" ? undefined : `caption-gap-${[...picked].join()}`);
       if (what === "detach" || what === "attach") {
-        // Detach leaves the caption where it is, as free text. Attach centres it under the structure above it.
+        // Detach leaves the caption where it is, as free text (from its structure or its arrow, lined up as it is
+        // drawn). Attach centres it under the structure above it.
         const moves = new Map(placed.filter((c) => picked.has(c.id)).map((c) => [c.id, anchorOf(c)]));
         return set({
           ...doc,
           captions: doc.captions?.map((c) => {
             const at = moves.get(c.id);
             if (!at) return c;
+            if (what === "detach" && c.on && !c.cycle) { const { on: _o, placed: _p, ...free } = c, lined = drawnAlign(c); return { ...free, x: at[0], y: at[1], ...(lined ? { align: lined } : {}) }; }
             if (what === "detach") { const { under: _, ...free } = c; return { ...free, x: at[0], y: at[1] }; }
             const under = structureAbove(at, 4);
             return under ? { ...c, under, align: undefined } : c;

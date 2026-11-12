@@ -954,7 +954,8 @@ export function toCdxml(input: Mol, style: DocStyle, opts: CdxmlOptions = {}): s
   const basis = (atoms: Set<number>) => [...[...atoms].sort((p, q) => p - q).map((i) => nodeId.get(i)), ...mol.bonds.flatMap((b, n) => (atoms.has(b.atoms[0]) && atoms.has(b.atoms[1]) ? [bondId[n]] : []))].join(" ");
   // Conditions placed by hand stay where they are (placedAt), and the others on their side stack out past them. Those
   // stack away from their arrow in the order Octet draws them (placeCaptions): compound numbers first, then by id.
-  // Each one's distance (pt) past the gap.
+  // Each one's distance (pt) from the arrow's line: its own gap (Caption.on.gap, else GAP_ARROW_PT, at the arrow's
+  // scale), or past the text before it on its side, whichever is further.
   const besides = new Map<string, number>(), further = new Map<number, number>();
   for (const c of captions) {
     const arrow = c.on && mol.arrows?.find((a) => a.id === c.on!.arrow), hand = placedAt(c, mol.arrows);
@@ -964,14 +965,15 @@ export function toCdxml(input: Mol, style: DocStyle, opts: CdxmlOptions = {}): s
     const w = Math.max(...c.text.split("\n").map((l) => widthOf(l, size))), offs = lineOffsets(c, size, 1), own = c.align === "justify" ? "left" : c.align ?? "centre";
     const left = own === "left" ? q[0] : own === "right" ? q[0] - w : q[0] - w / 2, key = `${arrow.id} ${c.on!.side}`;
     const reach = Math.abs(d[0]) >= 0.5 * len(d) ? (above ? mid[1] - (q[1] - ASCENT * size) : q[1] + offs[offs.length - 1] + DESCENT * size - mid[1]) : above ? mid[0] - left : left + w - mid[0];
-    besides.set(key, Math.max(besides.get(key) ?? 0, reach + 0.2 * size - GAP_ARROW_PT * scaleOf(arrow)));
+    besides.set(key, Math.max(besides.get(key) ?? 0, reach + 0.2 * size));
   }
   for (const c of [...captions].sort((p, q) => Number(isNumber(q)) - Number(isNumber(p)) || p.id - q.id)) {
-    if (!c.on || !mol.arrows?.some((a) => a.id === c.on!.arrow) || placedAt(c, mol.arrows)) continue;
-    const size = c.size ?? style.captionSize, key = `${c.on.arrow} ${c.on.side}`, used = besides.get(key) ?? 0;
-    further.set(c.id, used);
+    const arrow = c.on && mol.arrows?.find((a) => a.id === c.on!.arrow);
+    if (!c.on || !arrow || placedAt(c, mol.arrows)) continue;
+    const size = c.size ?? style.captionSize, key = `${c.on.arrow} ${c.on.side}`, gap = Math.max((c.on.gap ?? GAP_ARROW_PT) * scaleOf(arrow), besides.get(key) ?? 0);
+    further.set(c.id, gap);
     const offs = lineOffsets(c, size, 1);
-    besides.set(key, used + offs[offs.length - 1] + (LINE + 0.2) * size);
+    besides.set(key, gap + offs[offs.length - 1] + (LINE + 0.2) * size);
   }
   for (const c of captions) {
     zOrder = c.order;
@@ -989,7 +991,7 @@ export function toCdxml(input: Mol, style: DocStyle, opts: CdxmlOptions = {}): s
       // As Octet draws conditions: centred over an arrow within 60° of level, else ending left of it (above) or starting
       // right of it (below), GAP_ARROW_PT clear, each further out than the last on its side (REL-15).
       const mid: P = [(arrow.from[0] + arrow.to[0]) / 2, (arrow.from[1] + arrow.to[1]) / 2], d = sub(arrow.to, arrow.from), flat = Math.abs(d[0]) >= 0.5 * len(d);
-      const above = c.on!.side === "above", gap = GAP_ARROW_PT * scaleOf(arrow) + (further.get(c.id) ?? 0), offs = lineOffsets(c, size, 1), block = offs[offs.length - 1];
+      const above = c.on!.side === "above", gap = further.get(c.id) ?? GAP_ARROW_PT * scaleOf(arrow), offs = lineOffsets(c, size, 1), block = offs[offs.length - 1];
       align = flat ? "centre" : above ? "right" : "left";
       x = flat ? mid[0] : mid[0] + ((above ? -1 : 1) * gap) / B;
       y = mid[1] + (flat ? (above ? gap + DESCENT * size + block : -(gap + ASCENT * size)) : (DESCENT * size) / 2 - (ASCENT * size - block) / 2) / B;
