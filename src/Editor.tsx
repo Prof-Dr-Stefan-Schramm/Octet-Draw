@@ -7,7 +7,7 @@ import {
   FileDashed, ArrowsLeftRight, Angle, CornersOut, Faders, FloppyDiskBack, Broom, Files, Unite, MagnetStraight, Paragraph, Resize, Ruler, GridFour, CrosshairSimple, Swatches, DotsNine, CompassTool, ArrowsVertical,
   EyeSlash, Crosshair, Repeat, CubeTransparent, ArrowsMerge, ArrowsInCardinal, FadersHorizontal, CaretLineUp, Sparkle, PencilRuler, CloudArrowDown, Bug, GraduationCap, CopySimple, IdentificationBadge, Key, FileCode, FileTxt, Notepad,
   File as PageIcon, CheckCircle, Asterisk, AsteriskSimple, BracketsSquare, SquaresFour, FlowArrow, BracketsRound,
-  TreeStructure, StarFour, Lightbulb, Prohibit, SelectionForeground, PaintRoller, WarningDiamond, TextTSlash, NotePencil, ArrowSquareOut, ImageSquare, MarkdownLogo, Notebook,
+  TreeStructure, StarFour, Lightbulb, Prohibit, SelectionForeground, PaintRoller, WarningDiamond, TextTSlash, NotePencil, ArrowSquareOut, ImageSquare, MarkdownLogo, Notebook, PlusSquare, ShuffleSimple, Triangle,
 } from "@phosphor-icons/react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "./listen";
@@ -87,7 +87,7 @@ import {
   ArrowGlyph, arrowName, arrowVariant, BondGlyph, BONDS, ChainGlyph, CYCLES, ELLIPSES, HOLD_MS, Palette, pickHead, RingGlyph, RINGS, SELECTS, SEQUENCES, SideGlyph, STRAIGHT, SymbolGlyph, SYMBOLS, TemplateGlyph,
   type ArrowPick, type BondKind, type RingKind, type SelectKind, type Tool,
 } from "./tools";
-import { arrowPath, arrowShapes, bendPoint, blockOutline, curved, ellipseArrow, headBarb, headSize, sizeOf, sizedHead, turnPx, scaleOf, fitArrows, HIGHLIGHT, SHADE, inShape, inDrawn, shapeBounds, turns, tlcLayout, spotPath, tableLayout, linesOf, TABLE_LINES, TABLE_PAD, curveBox, headsOf, takesHeads, shapesHeads, headMenu, HEAD_SHAPES, isBracket, isLine, isOrbital, markAt, straightArrow, shapeInk, SWEEPS, sweepBend, sweepOf, isNumber, labelTurn, placeCaptions, render, renderParts, type Arrow, type ArrowKind, type Atom, type Bond, type Box, type Drawing, type PartCache, type Caption, type CurvePoint, type Head, type HeadShape, type CurveFill, type Mol, type Placed, type Shape, type ShapeKind, type Spot, type TableLine, type CellAlign, polymerLabelsAt, type AtomQuery, type BracketUsage, type Polymer, type Grid, ASCENT, DESCENT } from "./render";
+import { HBOND, arrowPath, arrowShapes, bendPoint, blockOutline, curved, ellipseArrow, headBarb, headSize, sizeOf, sizedHead, turnPx, scaleOf, fitArrows, HIGHLIGHT, SHADE, inShape, inDrawn, shapeBounds, turns, tlcLayout, spotPath, tableLayout, linesOf, TABLE_LINES, TABLE_PAD, curveBox, headsOf, takesHeads, shapesHeads, headMenu, HEAD_SHAPES, isBracket, isLine, isOrbital, markAt, straightArrow, shapeInk, SWEEPS, sweepBend, sweepOf, isNumber, labelTurn, placeCaptions, render, renderParts, type Arrow, type ArrowKind, type Atom, type Bond, type Box, type Drawing, type PartCache, type Caption, type CurvePoint, type Head, type HeadShape, type CurveFill, type Mol, type Placed, type Shape, type ShapeKind, type Spot, type TableLine, type CellAlign, polymerLabelsAt, type AtomQuery, type BracketUsage, type Polymer, type Grid, ASCENT, DESCENT } from "./render";
 import { cursorColour, dragCursor, drawCursors, type Cursors } from "./cursor";
 import { CURSORS, handlePoint, isCorner, percentOf, resizeBy, sideAt, SIDES, type Box as RBox, type Side } from "./resize";
 import { abbreviationOf, cleanOwnName, loadNames, mergeOwnNames, nameToSmiles, nameToAtoms, namesStarting, ownName, ownNamesFile, readOwnNamesFile, renameOwnName, setOwnNames, suggestName, knownName, looksLikeSmiles, withOwnName, withoutOwnName, type OwnName } from "./names";
@@ -106,6 +106,8 @@ import { mixtureName, mixturesOf, withSalts, type Mixture } from "./mixtures";
 import { nameRuns } from "./nametype";
 import { atomText, bondText, changeText, describe, groupTitle, ringOn, type Item as AccessItem } from "./access";
 import { CanvasAccess, type HotItem } from "./CanvasAccess";
+import { stereoNames, stereoTexts } from "./stereonames";
+import { INVERT_DONE, INVERT_SELECT, invertAt, toFischer, toWedges } from "./projection";
 
 setNamer(iupacName);
 setComplexNamer((m) => complexName(m, { read: nameToSmiles, atoms: nameToAtoms, inchi: toInchi, aux: toInchiAux, cip: cipOf }));
@@ -561,8 +563,9 @@ export default function Editor() {
   const [cursors, setCursors] = useState<Record<"black" | "white", Cursors>>();
   const [settings, setSettings] = useState(loadSettings);
   const drawingPrefs = useMemo(() => ({ fixedLengths: settings.fixedLengths, fixedAngles: settings.fixedAngles, sproutRings: settings.sproutRings, clickTriple: settings.clickTriple, pairBars: settings.pairBars,
-    autoMap: settings.autoMap, stereoParens: settings.stereoParens, hideAbs: settings.hideAbs, mdlFlags: settings.mdlFlags, aromaticOnOpen: settings.aromaticOnOpen }),
-  [settings.fixedLengths, settings.fixedAngles, settings.sproutRings, settings.clickTriple, settings.pairBars, settings.autoMap, settings.stereoParens, settings.hideAbs, settings.mdlFlags, settings.aromaticOnOpen]);
+    autoMap: settings.autoMap, stereoParens: settings.stereoParens, hideAbs: settings.hideAbs, mdlFlags: settings.mdlFlags, aromaticOnOpen: settings.aromaticOnOpen,
+    dlNames: settings.dlNames, steroidNames: settings.steroidNames, unsetMark: settings.unsetMark }),
+  [settings.fixedLengths, settings.fixedAngles, settings.sproutRings, settings.clickTriple, settings.pairBars, settings.autoMap, settings.stereoParens, settings.hideAbs, settings.mdlFlags, settings.aromaticOnOpen, settings.dlNames, settings.steroidNames, settings.unsetMark]);
   // What this drawing shows over its page (View > Show Grid, Show Rulers, Show Crosshair). Not an edit: no undo step.
   const [guides, setGuides] = useState<Guides>({});
   // Where the pointer is (drawing coordinates), for the rulers' marks.
@@ -1209,10 +1212,11 @@ export default function Editor() {
   // write them. Each is made when it is first asked for and kept with the part (the drawing itself, or the selection's
   // part from selectedPart), so Export and Copy make only what they use, once for each version of the drawing. They are
   // made again when the style, the name, Indigo or the arrows of a catalytic cycle (what cdxmlOptions gives) change.
-  const made = useRef(new WeakMap<Mol, { style: DocStyle; name: string; loaded: boolean; derived: unknown; formats: Partial<Record<PartFormat, string>> }>());
+  const made = useRef(new WeakMap<Mol, { style: DocStyle; name: string; loaded: boolean; derived: unknown; names: string; formats: Partial<Record<PartFormat, string>> }>());
   function formatOf(part: Mol, f: PartFormat): string | undefined {
     let kept = made.current.get(part);
-    if (kept?.style !== style || kept.name !== name || kept.loaded !== loaded || kept.derived !== cycleArrows) made.current.set(part, kept = { style, name, loaded, derived: cycleArrows, formats: {} });
+    const names = `${settings.dlNames} ${settings.steroidNames} ${settings.unsetMark} ${settings.stereoParens}`;
+    if (kept?.style !== style || kept.name !== name || kept.loaded !== loaded || kept.derived !== cycleArrows || kept.names !== names) made.current.set(part, kept = { style, name, loaded, derived: cycleArrows, names, formats: {} });
     if (f in kept.formats) return kept.formats[f];
     const cdxml = f === "oct" || f === "cdx" ? formatOf(part, "cdxml") : undefined;
     let out: string | undefined;
@@ -1346,6 +1350,8 @@ export default function Editor() {
   // drawing), each written label's atoms for ChemDraw's abbreviations, and the document's name.
   const cdxmlOptions = (): CdxmlOptions => ({
     derived: cycleArrows, name,
+    // Show Stereochemistry's added names (D and L, steroid α and β, undefined marks) go as plain text (stereonames.ts).
+    stereoTexts: loaded && (settings.dlNames || settings.steroidNames || settings.unsetMark) ? (m) => stereoTexts(stereoLabels(m)?.atoms ?? [], stereoNames(m, { dl: settings.dlNames, steroid: settings.steroidNames, unset: settings.unsetMark }), (c) => (settings.stereoParens ? `(${c})` : c)) : undefined,
     expand: (text) => { const smiles = loaded ? labelSmiles(text) : undefined; try { return smiles ? parseStructure(smiles) : undefined; } catch { return undefined; } },
   });
   // What Octet could not hold from a ChemDraw file, said once: "Octet left out 6 annotations and 1 rotated shape."
@@ -2199,6 +2205,18 @@ export default function Editor() {
       set({ ...doc, atoms: doc.atoms.map((a, i) => { if (!atoms.has(i)) return a; const { shade: _, ...rest } = a; return on ? rest : { ...rest, shade: true as const }; }) }, true);
     },
     flatten: () => set(flattenAtoms(doc, selection.size ? selection : new Set(doc.atoms.map((_, i) => i))), true),
+    // Structure > Invert Configuration Here, Convert to Fischer Projection and Convert to Wedge Drawing (ReShiki's,
+    // projection.ts): each one Undo step, or a notice that says why nothing changed.
+    invert_here: () => {
+      const ids = [...selection].filter((i) => i < doc.atoms.length);
+      if (!loaded || ids.length !== 1) return setNotice(INVERT_SELECT, "info");
+      const r = invertAt(doc, ids[0]);
+      if (!r.mol) return setNotice(r.error, "info");
+      set(r.mol, true);
+      setNotice(INVERT_DONE, "done");
+    },
+    to_fischer: () => { if (!loaded) return; const r = toFischer(doc, selection); if (!r.mol) return setNotice(r.error, "info"); set(r.mol, true); },
+    to_wedges: () => { if (!loaded) return; const r = toWedges(doc, selection); if (!r.mol) return setNotice(r.error, "info"); set(r.mol, true); },
     // 3D Clean Up (⇧⌘D, Structure menu), as ChemDraw's: the selected structures (or every one) in 3D, with depth
     // shading on, up to 500 atoms each; again to improve it. Then, as ChemDraw does, Select is Structure Perspective, to turn them.
     clean_3d: () => {
@@ -5782,7 +5800,9 @@ export default function Editor() {
       // Its structure's and and or groups, and the lowest new one of each, for the stereo flag buttons.
       const centre = stereocentres(doc).includes(ids[0]), structure = centre ? fragments(doc).find((g) => g.includes(ids[0])) ?? [] : [];
       const groups = (kind: "&" | "or") => [...new Set([...structure.flatMap((i) => { const g = /^(&|or)(\d+)$/.exec(doc.atoms[i].enhanced ?? ""); return g && g[1] === kind ? [Number(g[2])] : []; }), nextGroup(doc, structure, kind)])].sort((p, q) => p - q);
-      return { kind: "atom", text: labelText([ids[0]]), label: a.text ?? a.label, charge: a.charge ?? 0, terminal: neighbours(doc, ids[0]).length === 1, carbon: a.label === "C" && !a.text, centre, enhanced: a.enhanced, groups: centre ? { and: groups("&"), or: groups("or") } : undefined, halo: a.halo, fill: fillOf(doc, selection), numbered: !!a.number, repeat: lastLabel.current };
+      return { kind: "atom", text: labelText([ids[0]]), label: a.text ?? a.label, charge: a.charge ?? 0, terminal: neighbours(doc, ids[0]).length === 1, carbon: a.label === "C" && !a.text, centre, enhanced: a.enhanced, groups: centre ? { and: groups("&"), or: groups("or") } : undefined, halo: a.halo, fill: fillOf(doc, selection), numbered: !!a.number, repeat: lastLabel.current,
+        // Invert Configuration Here is offered on a centre drawn with a wedge from it, in depth, or kept from ChemDraw.
+        invertible: [3, 4].includes(neighbours(doc, ids[0]).length) && (centre || !!a.kept || neighbours(doc, ids[0]).some((j) => Math.abs((doc.atoms[j].location[2] ?? 0) - (a.location[2] ?? 0)) >= 0.2)) };
     }
     const bi = ids.length === 2 ? doc.bonds.findIndex((b) => selection.has(b.atoms[0]) && selection.has(b.atoms[1])) : -1;
     if (bi >= 0) {
@@ -5798,7 +5818,9 @@ export default function Editor() {
     // A 3D structure (Structure Perspective): depth shading on or off.
     const solid = ids.some((i) => Math.abs(doc.atoms[i].location[2] ?? 0) > 1e-3);
     return { kind: "structure", text: labelText(ids), atoms: ids.length, generic: genericSites(doc, fragments(doc).filter((g) => g.some((i) => selection.has(i))).flat()), hydrogens: ids.some((i) => doc.atoms[i].label === "H" && !doc.atoms[i].text), structures: fragments(doc).filter((g) => g.some((i) => selection.has(i))).length, next: nextCompound(doc), roman: romanOrNone(), nameable, pairs, stereo, joinable: !!joinSelection(doc, selection),
-      ...(solid ? { depth: fragments(doc).filter((g) => g.some((i) => selection.has(i))).flat().some((i) => doc.atoms[i].shade) } : {}), cip: fragments(doc).filter((g) => g.some((i) => selection.has(i))).flat().every((i) => doc.atoms[i].cip), numbers: ids.every((i) => doc.atoms[i].number),
+      ...(solid ? { depth: fragments(doc).filter((g) => g.some((i) => selection.has(i))).flat().some((i) => doc.atoms[i].shade) } : {}),
+      // One acyclic structure with stereo bonds or depth: Convert to Fischer Projection is offered (projection.ts checks the rest).
+      acyclic: ((g) => g.length === 1 && doc.bonds.filter((b) => b.type !== HBOND && g[0].includes(b.atoms[0])).length + 1 === g[0].length && g[0].some((i) => doc.atoms[i].location[2] || doc.bonds.some((b) => b.stereo && b.atoms[0] === i)))(fragments(doc).filter((g) => g.some((i) => selection.has(i)))), cip: fragments(doc).filter((g) => g.some((i) => selection.has(i))).flat().every((i) => doc.atoms[i].cip), numbers: ids.every((i) => doc.atoms[i].number),
       // Aromatic rings drawn with circles, so the aromatic display action can name what it shows next.
       circles: fragments(doc).filter((g) => g.some((i) => selection.has(i))).flat().some((i) => doc.atoms[i].circle),
       // The highlight the selected atoms share, and the ring fill of the rings a fill would go in, if they share one.
@@ -6048,6 +6070,10 @@ export default function Editor() {
   // Each drawn atom's predicted shifts, shown beside it while the panel is open.
   const nmrShifts = new Map<number, number[]>(), nmrQuality = new Map<number, string>();
   const stereo = useMemo(() => { const m = exporting ?? doc; return loaded && m.atoms.some((a) => a.cip) ? stereoLabels(m) : undefined; }, [loaded, doc, exporting]);
+  // Show Stereochemistry's added names (Settings > Drawing > Stereochemistry): D and L, steroid α and β, and the marks
+  // on undefined stereocentres (stereonames.ts).
+  const stereoNamed = useMemo(() => { const m = exporting ?? doc; return loaded && m.atoms.some((a) => a.cip) && (settings.dlNames || settings.steroidNames || settings.unsetMark) ? stereoNames(m, { dl: settings.dlNames, steroid: settings.steroidNames, unset: settings.unsetMark }) : undefined; },
+    [loaded, doc, exporting, settings.dlNames, settings.steroidNames, settings.unsetMark]);
   const ringsOf = useMemo(() => (spectrum || doc.atoms.some((a) => a.cip || a.number) ? drawnRings(shown) : []), [spectrum, shown, doc]);
   // Opening the panel scrolls the canvas up if the panel would cover the structure (again once the spectrum is in,
   // as the panel grows).
@@ -6087,7 +6113,7 @@ export default function Editor() {
     for (const b of shown.bonds) if (bonded[b.atoms[0]] && bonded[b.atoms[1]]) { bonded[b.atoms[0]].push(b.atoms[1]); bonded[b.atoms[1]].push(b.atoms[0]); }
     // The marks already placed: atom numbers, (R) and (S), (E) and (Z), map numbers, electrons and charges, and text.
     const taken: Box[] = [
-      ...stereoMarks().map((m): Box => { const w = textWidth(m.text, m.size, false, !m.upright, family), x = m.anchor === "start" ? m.x : m.anchor === "end" ? m.x - w : m.x - w / 2; return [x, m.y - 0.4 * m.size, x + w, m.y + 0.4 * m.size]; }),
+      ...stereoMarks().map((m): Box => { const w = textWidth((m.prefix ?? "") + m.text, m.size, false, !m.upright, family), x = m.anchor === "start" ? m.x : m.anchor === "end" ? m.x - w : m.x - w / 2; return [x, m.y - 0.4 * m.size, x + w, m.y + 0.4 * m.size]; }),
       ...drawing.maps.map((n): Box => { const w = textWidth(n.text, n.size, false, false, family); return [n.at[0] - w / 2, n.at[1] - n.h / 2, n.at[0] + w / 2, n.at[1] + n.h / 2]; }),
       ...drawing.electrons.map((e): Box => [e.at[0] - 0.12 * L, e.at[1] - 0.12 * L, e.at[0] + 0.12 * L, e.at[1] + 0.12 * L]),
       ...placed.map((c) => c.frame ?? c.box),
@@ -6096,7 +6122,7 @@ export default function Editor() {
     const bondInk = drawing.parts.flatMap(({ drawing: d, at: [ax, ay], k, turn }) => { const c = Math.cos((turn * Math.PI) / 180) * k, s = Math.sin((turn * Math.PI) / 180) * k; return d.polygons.map((poly) => poly.map(([x, y]): P => [x * c - y * s + ax, x * s + y * c + ay])); });
     const items = [...texts].filter(([i]) => !has.has(i)).map(([i, text]) => { const px = sizeOf(i) * pt, [up, down] = textExtent(text, px, false, false, family); return { atom: i, w: textWidth(text, px, false, false, family), up, down, L: Ls[i] }; });
     return placeBeside(items, { at, bonded, rings: ringsOf, ink: bondInk, labels: drawing.label, taken }).map((s) => ({ ...s, text: texts.get(s.atom)!, size: sizeOf(s.atom) }));
-  }, [shiftKey, spectrum, shown, drawing, placed, ringsOf, stereo, style, pt, settings.stereoParens]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [shiftKey, spectrum, shown, drawing, placed, ringsOf, stereo, stereoNamed, style, pt, settings.stereoParens]); // eslint-disable-line react-hooks/exhaustive-deps
   const shiftLabels = () => shiftSpots;
   // A label's place beside an atom (px): in a gap between its bonds, out of its rings (or away from the atoms within
   // two bonds), clear of the atom's own label and of the boxes in `taken` (the chosen box is added to it).
@@ -6128,14 +6154,15 @@ export default function Editor() {
     // Settings > Drawing > Parentheses round R and S (ChemDraw's Include Parentheses When Showing Stereochemistry).
     const paren = (c: string) => (settings.stereoParens ? `(${c})` : c);
     // Each in its atom's scale (its bond's mean for E and Z).
-    const out: { key: string; x: number; y: number; anchor: "start" | "middle" | "end"; text: string; colour?: string; upright?: boolean; size: number }[] = [], taken: number[][] = [], base = style.captionSize * pt * 0.8;
+    const out: { key: string; x: number; y: number; anchor: "start" | "middle" | "end"; text: string; prefix?: string; colour?: string; upright?: boolean; muted?: boolean; size: number }[] = [], taken: number[][] = [], base = style.captionSize * pt * 0.8;
     shown.atoms.forEach((a, i) => { const size = base * scaleOf(a); if (a.number) out.push({ key: `n${i}`, ...besideAtom(i, a.number.length * size * 0.55, size, taken, 0.55 * scaleOf(a)), text: a.number, colour: a.colour, upright: true, size }); });
+    // D or L before R or S, a steroid face in place of it, a grey mark on an undefined centre (stereonames.ts).
+    for (const [i, t] of stereoTexts(stereo?.atoms ?? [], stereoNamed ?? { dl: new Map(), steroid: new Map(), unset: new Map() }, paren)) {
+      if (!shown.atoms[i]?.cip) continue;
+      const size = base * scaleOf(shown.atoms[i]), chars = (t.prefix ?? "").length + t.text.length;
+      out.push({ key: `a${i}`, ...besideAtom(i, chars * size * 0.55, size, taken, 0.55 * scaleOf(shown.atoms[i])), text: t.text, prefix: t.prefix, upright: t.upright, muted: t.muted, colour: shown.atoms[i].colour, size });
+    }
     if (!stereo) return out;
-    stereo.atoms.forEach((c, i) => {
-      if (!c || !shown.atoms[i]?.cip) return;
-      const text = paren(c), size = base * scaleOf(shown.atoms[i]);
-      out.push({ key: `a${i}`, ...besideAtom(i, text.length * size * 0.55, size, taken, 0.55 * scaleOf(shown.atoms[i])), text, colour: shown.atoms[i].colour, size });
-    });
     stereo.bonds.forEach((c, k) => {
       const b = shown.bonds[k];
       if (!c || !b || !shown.atoms[b.atoms[0]]?.cip) return;
@@ -6509,6 +6536,7 @@ export default function Editor() {
     interpretation: [settings.interpretation ? "Hide reaction interpretation" : "Show reaction interpretation", "", <Lightbulb size={18} />],
     mirror_h: ["Flip horizontal", "", <FlipHorizontal size={18} />], mirror_v: ["Flip vertical", "", <FlipVertical size={18} />],
     properties: [settings.properties ? "Hide the Properties panel" : "Show the Properties panel", "", <Flask size={18} />], aromatic_display: [commandsOpen && (selection.size ? fragments(doc).filter((g) => g.some((i) => selection.has(i))).flat() : doc.atoms.map((_, i) => i)).some((i) => doc.atoms[i].circle) ? "Show Kekulé bonds" : "Show aromatic circles", `⌥${MOD}K`, <Circle size={18} />], hydrogen_display: ["Toggle hydrogen display", "", <EyeSlash size={18} />], show_stereo: ["Show stereochemistry", "", <span className="glyph-text">R/S</span>], predict_1h: ["Predict ¹H-NMR shifts", "", <span className="glyph-text">¹H</span>], predict_13c: ["Predict ¹³C-NMR shifts", "", <span className="glyph-text">¹³C</span>], structure_perspective: ["Structure perspective", `⌥${MOD}S`, <Cube size={18} />], flatten: ["Flatten", "", <Square size={18} />], clean_3d: ["3D clean up", `⇧${MOD}D`, <CubeTransparent size={18} />],
+    invert_here: ["Invert configuration here", "", <ShuffleSimple size={18} />], to_fischer: ["Convert to Fischer projection", "", <PlusSquare size={18} />], to_wedges: ["Convert to wedge drawing", "", <Triangle size={18} />],
     rotate_dialog: ["Rotate…", `${MOD}R`, <Angle size={18} />], scale_dialog: ["Scale…", `${MOD}K`, <Resize size={18} />],
     group: ["Group", `${MOD}G`, <BoundingBox size={18} />], ungroup: ["Ungroup", `⇧${MOD}G`, <SelectionSlash size={18} />], group_integral: ["Pick as one", "", <Unite size={18} />],
     join: ["Join", `${MOD}J`, <ArrowsMerge size={18} />], centre_page: ["Centre on page", "", <ArrowsInCardinal size={18} />], repeat: ["Repeat", "", <Repeat size={18} />],
@@ -8197,10 +8225,10 @@ export default function Editor() {
           </g>
         );
       })}
-      {stereoMarks().map((m) => <text key={m.key} className="stereo-label" x={m.x} y={m.y} textAnchor={m.anchor} dominantBaseline="middle" fill={m.colour ?? "var(--ink)"} style={{ font: `${m.upright ? "" : "italic "}${m.size}px ${fontStack(style.captionFont)}` }}>{m.text}</text>)}
+      {stereoMarks().map((m) => <text key={m.key} className="stereo-label" x={m.x} y={m.y} textAnchor={m.anchor} dominantBaseline="middle" fill={m.colour ?? (m.muted ? "var(--ink-muted)" : "var(--ink)")} style={{ font: `${m.upright ? "" : "italic "}${m.size}px ${fontStack(style.captionFont)}` }}>{m.prefix && <tspan style={{ fontStyle: "normal" }}>{m.prefix}</tspan>}{m.text}</text>)}
       {problemMarks()}
     </>
-  ), [shown, drawing, frame, darkPaper, arrows, pt, gridKey, gridEdit, style, stereo, ringsOf, found, found.some((p) => p.caption !== undefined) && placed, doc.atoms, settings.stereoParens]); // eslint-disable-line react-hooks/exhaustive-deps
+  ), [shown, drawing, frame, darkPaper, arrows, pt, gridKey, gridEdit, style, stereo, stereoNamed, ringsOf, found, found.some((p) => p.caption !== undefined) && placed, doc.atoms, settings.stereoParens]); // eslint-disable-line react-hooks/exhaustive-deps
   // The selection's marks, and the mark on what is under the pointer (Live: a pointer move draws only that again).
   const marks = (
     <>

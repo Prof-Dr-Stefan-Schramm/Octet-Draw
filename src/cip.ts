@@ -313,6 +313,19 @@ export function handOf(m: Mol, i: number, ranked: number[]): "R" | "S" | undefin
   } catch { return undefined; }
 }
 
+// The hand of atom i with its neighbours taken in a given order, as the drawing gives it: "R" when order[0] → order[1]
+// → order[2] turn clockwise seen with order[3] away (the CIP sense, for any order). -1 stands for the hydrogen or lone
+// pair of an atom with three drawn neighbours. Undefined where the drawing sets no configuration, or the order is not
+// the atom's neighbours. The D/L names, steroid α/β and Invert Configuration Here read hands with it (projection.ts).
+export function handIn(m: Mol, i: number, order: number[]): "R" | "S" | undefined {
+  try {
+    const c = chemOf(m), near = c.adj[i]?.map((e) => e.to) ?? [];
+    if (order.length !== 4 || near.length < 3 || near.length > 4 || new Set(near).size !== near.length || m.bonds.some((b) => b.display === "wavy" && b.atoms.includes(i))) return undefined;
+    const around = arrangement(m, i, near, false, false, dirsOf(m, c)), odd = around && parity(around, order);
+    return odd === undefined ? undefined : odd ? "S" : "R";
+  } catch { return undefined; }
+}
+
 function stereoUnits(m: Mol, c: Chem): Unit[] {
   const units: Unit[] = [], n = m.atoms.length;
   const wavy = new Set(m.bonds.flatMap((b) => (b.display === "wavy" ? b.atoms : [])));

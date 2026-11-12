@@ -5,7 +5,7 @@
 // ChemDraw users expect it (menus and keys).
 import { useEffect, useId, useRef, useState } from "react";
 import {
-  AlignCenterHorizontal, AlignCenterVertical, Flask, Palette, Table, Repeat, ArrowsInSimple, ArrowsClockwise, ArrowsDownUp, CaretDown, CaretRight, ArrowsLeftRight, ArrowsHorizontal, ArrowsOutSimple, Atom, BookmarkSimple, BookOpenText, CaretUpDown, Graph,
+  AlignCenterHorizontal, AlignCenterVertical, Flask, Palette, Table, Repeat, ArrowsInSimple, ArrowsClockwise, ArrowsDownUp, CaretDown, CaretRight, ArrowsLeftRight, ArrowsHorizontal, PlusSquare, ShuffleSimple, Triangle, ArrowsOutSimple, Atom, BookmarkSimple, BookOpenText, CaretUpDown, Graph,
   AlignBottomSimple, AlignTopSimple, ArrowLineDown, ArrowLineUp, CursorText, DotsThree, DotsThreeVertical, Faders, Polygon, Rectangle, ArrowArcLeft, ArrowArcRight, ArrowsCounterClockwise, ArrowUDownLeft, CircleDashed, CornersOut, MagnifyingGlass, Swap,
   ArrowUUpLeft, ClipboardText, CopySimple, IdentificationBadge, Key, Target, LineSegments, Minus, Plus, Stack, StackSimple, Eye, FileArrowDown, FlipHorizontal, FlipVertical, GearSix, House, LinkBreak, LinkSimple, ListNumbers, Hash, MagicWand, MinusCircle,
   PencilSimpleLine, PlusCircle, SelectionAll, SlidersHorizontal, SquareSplitHorizontal, TagSimple, TextAlignCenter, TextAlignLeft,
@@ -61,7 +61,7 @@ export type Context =
   // Different kinds of thing picked together: count things; atoms, when structures are among them.
   // A group selected whole counts as one object. name: a lone whole group's name ("¹H NMR spectrum", "Group").
   | { kind: "selection"; count: number; name?: string; atoms: boolean; width?: number; joinable?: boolean } // width: lines picked together (no structures or text); joinable: Join applies (atoms or bonds in two structures)
-  | { kind: "structure"; text?: LabelText; atoms: number; structures: number; next: string; nameable: boolean; joinable?: boolean; pairs?: "shown" | "hidden"; stereo?: "absolute" | "racemic" | "relative" | "mixed"; depth?: boolean; cip?: boolean; numbers?: boolean; roman?: boolean; circles?: boolean; halo?: string; fill?: string; hydrogens?: boolean; properties?: boolean; generic?: boolean }
+  | { kind: "structure"; text?: LabelText; atoms: number; structures: number; next: string; nameable: boolean; joinable?: boolean; pairs?: "shown" | "hidden"; stereo?: "absolute" | "racemic" | "relative" | "mixed"; depth?: boolean; acyclic?: boolean; cip?: boolean; numbers?: boolean; roman?: boolean; circles?: boolean; halo?: string; fill?: string; hydrogens?: boolean; properties?: boolean; generic?: boolean }
   // mode: picked captions, the text being typed, or the style the next text starts with (Text tool in hand).
   | { kind: "caption"; mode: "picked" | "typing" | "next"; convertible: boolean; count: number; colour: string; bold: boolean; italic: boolean; underline: boolean; size: number; align: "left" | "centre" | "right" | "justify"; attached: boolean; attachable: boolean;
       // labelable: Octet can read a picked caption as an atom label (Make element). chemical: their Interpret chemically,
@@ -87,7 +87,7 @@ export type Context =
   // of the grid's rows or columns are hidden.
   | { kind: "grid"; product: boolean; limiting: boolean; hidden: boolean; rows: boolean }
   // groups: the and and or group numbers its structure uses, and the lowest new one of each.
-  | { kind: "atom"; text?: LabelText; label: string; charge: number; terminal: boolean; carbon: boolean; centre: boolean; enhanced?: string; groups?: { and: number[]; or: number[] }; halo?: string; fill?: string; numbered?: boolean; repeat?: string }
+  | { kind: "atom"; text?: LabelText; label: string; charge: number; terminal: boolean; carbon: boolean; centre: boolean; enhanced?: string; groups?: { and: number[]; or: number[] }; halo?: string; fill?: string; numbered?: boolean; repeat?: string; invertible?: boolean }
   | { kind: "bond"; style: BondKind | undefined; double: boolean; flippable: boolean; halo?: string; fill?: string; ring?: boolean }
   | { kind: "spot"; style: "filled" | "hollow" | "shaded"; dashed: boolean; bold: boolean; doubled: boolean; w: number; h: number; tail: number; rf: boolean; pt: number };
 
@@ -278,7 +278,7 @@ const KIND_OF: Record<string, string> = {
   "shape.hide.origin": "plate", "shape.hide.front": "plate", "shape.hide.border": "plate", "shape.ticks": "plate", "shape.transparent": "plate", "cycle.reverse": "cycle", "cycle.remove": "cycle",
   structure_to_name: "analysis", properties: "analysis", show_stereo: "analysis", predict_1h: "analysis", predict_13c: "analysis",
   search_reaxys: "search", search_reaxys_exact: "search", search_pubchem: "search", search_pubchem_sub: "search",
-  "rotate.cw15": "turn", "rotate.ccw15": "turn", flip_h: "turn", flip_v: "turn", mirror_h: "turn", mirror_v: "turn", structure_perspective: "turn", flatten: "turn", clean_3d: "turn", clean_reaction_augmented: "turn", rotate_dialog: "turn", scale_dialog: "turn",
+  "rotate.cw15": "turn", "rotate.ccw15": "turn", flip_h: "turn", flip_v: "turn", mirror_h: "turn", mirror_v: "turn", structure_perspective: "turn", flatten: "turn", to_wedges: "turn", to_fischer: "turn", clean_3d: "turn", clean_reaction_augmented: "turn", rotate_dialog: "turn", scale_dialog: "turn",
   pairs: "marks", number: "marks", "numbers.roman": "marks", atom_numbers: "marks", show_warnings: "marks", hide_warnings: "marks", explain_warning: "marks", "caption.add": "marks", colour_by_element: "marks", aromatic_display: "marks", hydrogen_display: "marks", contract_label: "marks",
   "cycle.make": "arrange", "align.row": "arrange", "align.column": "arrange", "align.spread-row": "arrange", group: "group", ungroup: "group", group_integral: "group",
   arrange_left: "arrange", arrange_centre: "arrange", arrange_right: "arrange", arrange_top: "arrange", arrange_middle: "arrange", arrange_bottom: "arrange",
@@ -370,7 +370,8 @@ export function actionItems(context: Context, messy: boolean, hiddenWarnings = f
         ...turnings, small(it(<CopySimple size={18} />, "Copy as SMILES", "copy_smiles")), small(it(<IdentificationBadge size={18} />, "Copy as InChI", "copy_inchi")), small(it(<Key size={18} />, "Copy as InChIKey", "copy_inchikey")), ...searches, keep, dict, small(it(<Flask size={18} />, context.properties ? "Hide the Properties panel" : "Show the Properties panel", "properties")), small(it(<span className="glyph-text">R/S</span>, context.cip ? "Hide stereochemistry" : "Show stereochemistry", "show_stereo")), small(it(<Palette size={18} />, "Colour by element", "colour_by_element")), small(it(<Circle size={18} />, context.circles ? "Show Kekulé bonds" : "Show aromatic circles", "aromatic_display")), ...(context.hydrogens ? [small(it(<EyeSlash size={18} />, "Toggle hydrogen display", "hydrogen_display"))] : []), small(it(<ArrowsInSimple size={18} />, "Contract label", "contract_label")), small(it(<span className="glyph-text">¹H</span>, "Predict ¹H-NMR shifts", "predict_1h")), small(it(<span className="glyph-text">¹³C</span>, "Predict ¹³C-NMR shifts", "predict_13c")));
       if (context.structures > 1) items.push(small(it(<ArrowsClockwise size={18} />, "Make a catalytic cycle", "cycle.make")), small(it(<DotsThree size={18} />, "Line up in a row", "align.row")),
         small(it(<DotsThreeVertical size={18} />, "Line up in a column", "align.column")), small(it(<SquareSplitHorizontal size={18} />, "Space evenly", "align.spread-row")));
-      if (context.depth !== undefined) items.push(small(it(<Cube size={18} />, context.depth ? "Turn depth shading off" : "Turn depth shading on", "structure_perspective")), small(it(<Square size={18} />, "Flatten", "flatten")));
+      if (context.depth !== undefined) items.push(small(it(<Cube size={18} />, context.depth ? "Turn depth shading off" : "Turn depth shading on", "structure_perspective")), small(it(<Square size={18} />, "Flatten", "flatten")), small(it(<Triangle size={18} />, "Convert to wedge drawing", "to_wedges")));
+      if (context.acyclic) items.push(small(it(<PlusSquare size={18} />, "Convert to Fischer projection", "to_fischer")));
       items.push(small(it(<CubeTransparent size={18} />, "3D clean up", "clean_3d")));
       // Query and Markush structures (ChemDraw's Structure menu): attachments on the selected atoms, and an R-group
       // definition round the selected structures.
@@ -381,6 +382,7 @@ export function actionItems(context: Context, messy: boolean, hiddenWarnings = f
     case "atom":
       items.push(it(<CursorText size={18} />, "Type a label", "atom.label"), ...(context.repeat ? [it(<Repeat size={18} />, `Repeat ${context.repeat}`, "repeat_label")] : []), it(<PlusCircle size={18} />, "Add a positive charge", "charge.plus"), it(<MinusCircle size={18} />, "Add a negative charge", "charge.minus"),
         ...((context.label.length > 2 || !/^[A-Z][a-z]?$/.test(context.label)) && context.text?.chemical !== false && !queryLabel(context.label) ? [it(<ArrowsOutSimple size={18} />, "Expand label", "expand_label")] : []), it(<Faders size={18} />, "Atom properties…", "atom_properties"), it(<Hash size={18} />, context.numbered ? "Hide atom number" : "Show atom number", "atom_numbers"),
+        ...(context.invertible ? [it(<ShuffleSimple size={18} />, "Invert configuration here", "invert_here")] : []),
         ...warnings(true), ...order, whole, inWindow, keep, dict, del);
       break;
     case "bond":

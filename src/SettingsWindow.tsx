@@ -25,6 +25,7 @@ export type ModuleId = "general" | "document" | "drawing" | "keys" | "appearance
 export type DrawingPrefs = {
   fixedLengths: boolean; fixedAngles: boolean; sproutRings: boolean; clickTriple: boolean; pairBars: boolean;
   autoMap: boolean; stereoParens: boolean; hideAbs: boolean; mdlFlags: boolean; aromaticOnOpen: "" | "kekule" | "circles";
+  dlNames: boolean; steroidNames: boolean; unsetMark: "" | "?" | "Ξ";
 };
 export type FilePrefs = {
   format: ExportFormat; dpi: number; background: "white" | "transparent" | "page"; margin: number; quality: number; // JPEG, 1 to 100
@@ -498,6 +499,12 @@ export function SettingsWindow(p: Props) {
       d("drawing", "Rings", "Sprout rings on a click", "ring tool click atom sprout spiro bond option", <Switch on={p.drawing.sproutRings} label="Sprout rings on a click" onChange={(on) => p.onDrawing({ sproutRings: on })} />),
       d("drawing", "Reactions", "Map the rest of a reaction", "automatic reaction mapping atom map tool auto map pair", <Switch on={p.drawing.autoMap} label="Map the rest of a reaction" onChange={(on) => p.onDrawing({ autoMap: on })} />),
       d("drawing", "Stereochemistry", "Parentheses round R and S", "include parentheses stereochemistry show stereo cip labels r s e z brackets", <Switch on={p.drawing.stereoParens} label="Parentheses round R and S" onChange={(on) => p.onDrawing({ stereoParens: on })} />),
+      // Show Stereochemistry's added names (stereonames.ts): ReShiki's, which ChemDraw does not have. Off by default.
+      d("drawing", "Stereochemistry", "D and L names", "d l dl fischer amino acid sugar carbohydrate configuration stereochemistry show stereo", <Switch on={p.drawing.dlNames} label="D and L names" onChange={(on) => p.onDrawing({ dlNames: on })} />),
+      d("drawing", "Stereochemistry", "Steroid alpha and beta", "steroid alpha beta α β face gonane nucleus stereochemistry show stereo", <Switch on={p.drawing.steroidNames} label="Steroid alpha and beta" onChange={(on) => p.onDrawing({ steroidNames: on })} />),
+      d("drawing", "Stereochemistry", "Undefined stereocentres", "undefined unknown stereocentre configuration xi ξ question mark stereochemistry show stereo", (
+        <Segmented label="Undefined stereocentres" value={p.drawing.unsetMark} options={[["", "None", "No mark"], ["?", "(?)", "Question mark"], ["Ξ", "(Ξ)", "Xi"]]} onChange={(v) => p.onDrawing({ unsetMark: v as "" | "?" | "Ξ" })} />
+      )),
       d("drawing", "Stereochemistry", "Hide abs flags", "hide absolute stereo flags enhanced stereochemistry abs", <Switch on={p.drawing.hideAbs} label="Hide abs flags" onChange={(on) => p.onDrawing({ hideAbs: on })} />),
       d("document", "Text", "Captions", "caption text font typeface", <FontPick label="Caption font" font={style.captionFont} fonts={FONTS} onPick={(v) => change({ captionFont: v })} className="select-field" />),
       num("captionSize", "Caption size", "pt", "caption text font size", "Text"),

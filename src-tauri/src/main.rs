@@ -692,6 +692,11 @@ fn menu(app: &AppHandle, palette: &[String], text: &(Vec<String>, Vec<f64>), ove
         &item("aromatic_display", "Toggle Aromatic Display", "Alt+CmdOrCtrl+K")?,
         &item("hydrogen_display", "Toggle Hydrogen Display", "")?,
         &item("structure_perspective", "Structure Perspective", "Alt+CmdOrCtrl+S")?,
+        // Stereo projection tools (ReShiki's; ChemDraw has none): Invert Configuration Here on one stereocentre, and a
+        // structure drawn as a Fischer projection or with wedges.
+        &item("invert_here", "Invert Configuration Here", "")?,
+        &item("to_fischer", "Convert to Fischer Projection", "")?,
+        &item("to_wedges", "Convert to Wedge Drawing", "")?,
         // Query and Markush structures, as ChemDraw's Structure menu has them.
         &item("add_multicentre", "Add Multi-Centre Attachment", "")?,
         &item("add_variable", "Add Variable Attachment", "")?,

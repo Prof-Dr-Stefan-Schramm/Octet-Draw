@@ -990,6 +990,22 @@ function placeWedges(m: Mol, hands: Map<number, number>, stereo = stereoFacts(m)
   return { ...m, atoms, bonds };
 }
 
+// Convert to Wedge Drawing (projection.ts): one wedge or hash for each of `centres` on m, a flat drawing, as placeWedges
+// puts them, with each centre's hand read from `from` (the same atoms and bonds, drawn in depth: a Fischer projection).
+// hs: where a centre's implicit H was drawn before it was taken away (else the centre stands in for it).
+export function wedgesFrom(m: Mol, from: Mol, centres: number[], hs = new Map<number, readonly number[]>()): Mol {
+  const at = bondedTo(m), hands = new Map<number, number>();
+  for (const c of centres) {
+    const around = [...at[c]].sort((p, q) => p - q), h0 = hs.get(c);
+    if (around.length < 3 || around.length > 4) continue;
+    const own: Mol = h0 && around.length === 3 ? { ...from, atoms: from.atoms.map((a, j) => (j === c ? { ...a, location: [h0[0], h0[1], h0[2] ?? 0] } : a)) } : from;
+    const z0 = own.atoms[c].location[2] ?? 0, h = handed(own, c, around, (j) => (own.atoms[j].location[2] ?? 0) - z0);
+    if (Math.abs(h) > 1e-6) hands.set(c, Math.sign(h));
+  }
+  // Indigo lists a structure's possible centres only where it has a wedge or Show Stereochemistry: read as if it had.
+  return placeWedges(m, hands, stereoFacts({ ...m, atoms: m.atoms.map((a) => ({ ...a, cip: true })) }).centres);
+}
+
 // Each label's group as Indigo reads it, kept by the label's text, so each label is read once. Not kept while Indigo
 // is loading. Cleared when it grows large.
 const labelGroups = new Map<string, Mol | undefined>();
