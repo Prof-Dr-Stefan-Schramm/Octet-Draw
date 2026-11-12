@@ -4,6 +4,7 @@ import { AROMATIC, HBOND, hydrogens, labelInk, NONMETAL, orderOf, QUADRUPLE, sca
 import { arialInk } from "./cdxml.ts";
 import { fontStack } from "./docstyle.ts";
 import { chemicalText, labelSmiles, writtenOxidation } from "./labels.ts";
+import { onNicknamesChange } from "./nicknames.ts";
 import { bondedTo, chairHydrogens, fragments, insertMol, labelPlacer, levelTurn, perspectiveBonds, pickAtoms, renumberCentre, sandwich, subset } from "./edit.ts";
 import { graphOf, type Graph } from "./naming.ts";
 import { clean2d } from "./clean2d.ts";
@@ -1002,6 +1003,7 @@ export function labelFragment(smiles: string): Mol {
 // Each label's group as Indigo reads it, kept by the label's text, so each label is read once. Not kept while Indigo
 // is loading. Cleared when it grows large.
 const labelGroups = new Map<string, Mol | undefined>();
+onNicknamesChange(() => labelGroups.clear());
 function labelGroup(text: string): Mol | undefined {
   if (labelGroups.has(text)) return labelGroups.get(text);
   let frag: Mol | undefined;
@@ -1710,6 +1712,8 @@ export function structures(mol: Mol, groups = fragments(mol)): (Structure | unde
 // standard InChI (names.ts abbreviationOf), given as each structure's abbreviation (TREN).
 export type Analysis = { formula: string; weight: number; exact: number; repeat?: Repeat; abbreviation?: string }[];
 const analysed = new Map<string, Analysis | undefined>(), inchis = new Map<string, string | undefined>();
+// A label of the user's own may mean another structure after their nicknames change: what was read is read again.
+onNicknamesChange(() => { analysed.clear(); inchis.clear(); labelled.clear(); factsKept.clear(); structured.clear(); });
 export function analyse(mol: Mol, limit = Infinity, cite?: (inchi: string | undefined) => string | undefined): Analysis | undefined {
   if (!indigo || !mol.atoms.length) return undefined;
   const out: Analysis = [], parts = pieces(mol);

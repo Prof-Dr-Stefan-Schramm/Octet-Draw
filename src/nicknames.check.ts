@@ -191,3 +191,170 @@ for (const e of BUNDLED.filter((x) => x.contract !== false)) {
   assert.equal(ac?.text, "Ac", "ChemDraw's nickname Ac is acetyl, never actinium");
 }
 console.log("nicknames.check: CDXML, .oct and ChemDraw's nickname nodes ok");
+
+// ——— The user's own nicknames (Structure > Define Nickname, Settings > Dictionary > Nicknames) ———
+const nick = await import("./nicknames.ts");
+const { checkNickname, nicknameFormula, nicknameFromSelection, reservedSpelling } = await import("./nicknamedefine.ts");
+const { contractLabel } = await import("./edit.ts");
+const read = (groups: unknown[]) => nick.readNicknamesFile(JSON.stringify({ format: 1, groups }), (e) => checkNickname(e));
+
+// A file with good and bad groups (ReShiki's invalid_entries_are_reported_and_valid_ones_kept): the good ones load, each
+// bad one is named with the reason.
+{
+  const { nicknames, errors } = read([
+    { label: "Good", smiles: "*CC(C)(C)C", formula: "C5H11" }, { label: "Two", smiles: "*CC*" }, { label: "Late", smiles: "C*" }, { label: "Bad", smiles: "*C((" },
+    { label: "Wrong", smiles: "*CC", formula: "C3H7" }, { label: "Good", smiles: "*C" }, { label: "has space", smiles: "*C" }, { label: "Chiral", smiles: "*[C@H](F)Cl" },
+    { label: "Alias", smiles: "*CC", aliases: ["Good"] }, { label: "Ring", smiles: "*C1CC1", contract: false }, { label: "Double", smiles: "*=CC" }, { label: "Radical", smiles: "*[CH2]" },
+    { label: "A,B", smiles: "*C" }, { label: "Heavy", smiles: "*[13CH3]" }, { label: "Typo", smile: "*C" }, { label: "Late2", smiles: "*CC" }, { label: "Azide", smiles: "*C", aliases: ["N3"] },
+    { label: "GoodO", smiles: "*CC", reverse: "Late2" }, { label: "ExplicitH", smiles: "*C[H]" },
+  ]);
+  assert.deepEqual(nicknames.map((e) => e.label), ["Good", "Ring", "Late2"]);
+  assert.equal(nicknames[1].contract, false);
+  assert.equal(nicknames[0].smiles, "CC(C)(C)C", "kept without the *");
+  const want = ["Group 2 (Two): The SMILES must start", "Group 3 (Late): The SMILES must start", "Group 4 (Bad): Octet cannot read the SMILES", "Group 5 (Wrong): The formula C3H7 is not the structure's (C2H5)",
+    "Group 6 (Good): \"Good\" is defined twice", "Group 7 (has space): Label \"has space\" must have", "Group 8 (Chiral): A nickname cannot keep stereochemistry", "Group 9 (Alias): \"Good\" is defined twice",
+    "Group 11 (Double): The group must join the drawing by a single bond", "Group 12 (Radical): A nickname cannot have radicals", "Group 13 (A,B): Label \"A,B\" must have 1 to 32 characters, with no spaces or commas",
+    "Group 14 (Heavy): A nickname with isotopes must have contract set to false", "Group 15 (Typo): Octet does not know the field \"smile\"", "Group 17 (Azide): \"N3\" means an element",
+    "Group 18 (GoodO): \"Late2\" is defined twice", "Group 19 (ExplicitH): Write hydrogens in the atoms"];
+  assert.equal(errors.length, want.length, errors.join("\n"));
+  errors.forEach((e, k) => assert.ok(e.startsWith(want[k]), e));
+  assert.ok(nick.readNicknamesFile("{", checkNickname).errors[0].includes("not a nicknames file"));
+  assert.ok(nick.readNicknamesFile(`{"format": 2, "groups": []}`, checkNickname).errors[0].includes("format 2"));
+}
+// Spellings a user's nickname cannot take (ReShiki's reserved test): elements, Octet's groups that are not nicknames,
+// formulas Octet reads its own way, isotopes and amino acids. Octet's nicknames (TBS) can be taken.
+for (const s of ["N3", "MgBr", "Cp", "OCH3", "C2H5", "Fe", "Np", "Ac", "*", "D", "T", "13C", "¹⁸O", "Ala", "D-Ala", "Gly", "R", "ALK", "NO2"]) {
+  assert.ok(reservedSpelling(s), s);
+  const { nicknames, errors } = read([{ label: s, smiles: "*OC" }, { label: "Fine", smiles: "*OC", aliases: [s] }]);
+  assert.equal(nicknames.length, 0, s);
+  assert.ok(errors.length === 2 && errors.every((e) => e.includes("means an element")), `${s}: ${errors}`);
+}
+assert.ok(!reservedSpelling("TBS") && !reservedSpelling("Bpin") && !reservedSpelling("Mine"));
+// Isotope groups load only with contract false and keep their formula (D as H, as ReShiki writes it).
+for (const [smiles, formula] of [["*C([2H])([2H])[2H]", "CH3"], ["*OC([2H])([2H])[2H]", "CH3O"], ["*O[2H]", "HO"]]) {
+  const { nicknames, errors } = read([{ label: "Heavy", smiles, formula, contract: false }]);
+  assert.deepEqual(errors, []);
+  assert.equal(nicknames[0].formula, formula);
+}
+assert.equal(nicknameFormula("[N+](C)(C)C"), "C3H9N+");
+console.log("nicknames.check: a nicknames file read, reserved spellings ok");
+
+// The user's nicknames come first and keep Octet's order (ReShiki's user_groups_win_label_clashes and
+// reverse_spellings_follow_labels_and_aliases): a user TBS takes the place of Octet's, a user alias TBDMS wins over
+// Octet's; a user label MeO wins over Octet's reverse spelling; Octet's label TBS wins over a user reverse spelling;
+// a user reverse spelling TBSO wins over Octet's.
+{
+  const { nicknames, errors } = read([{ label: "TBS", smiles: "*[Si](CC)(CC)CC" }, { label: "Mine", smiles: "*CC(F)(F)F", aliases: ["TBDMS"] }]);
+  assert.deepEqual(errors, []);
+  nick.setUserNicknames(nicknames);
+  assert.equal(nick.allNicknames().length, BUNDLED.length + 1);
+  assert.equal(nick.allNicknames().findIndex((e) => e.label === "TBS"), BUNDLED.findIndex((e) => e.label === "TBS"));
+  assert.equal(nick.allNicknames().at(-1)!.label, "Mine");
+  assert.ok(nick.lookupNickname("TBS")!.entry.user);
+  assert.equal(nick.lookupNickname("TBDMS")!.entry.label, "Mine");
+  // A user's nickname is read first, also over Octet's own groups, and the drawing reads it at once.
+  assert.equal(labelSmiles("TBS"), "[Si](CC)(CC)CC");
+  assert.equal(groupFormula(typed("TBS"))?.formula, "C6H15Si");
+  assert.equal(groupFormula(typed("Mine"))?.formula, "C2H2F3");
+  const second = read([{ label: "MeO", smiles: "*CF" }, { label: "Mine", reverse: "TBS", smiles: "*CCl" }, { label: "Yours", reverse: "TBSO", smiles: "*CBr" }]);
+  assert.deepEqual(second.errors, []);
+  nick.setUserNicknames(second.nicknames);
+  assert.ok(nick.lookupNickname("MeO")!.entry.user && nick.lookupNickname("MeO")!.spelling === "label");
+  assert.ok(!nick.lookupNickname("TBS")!.entry.user);
+  assert.deepEqual([nick.lookupNickname("TBSO")!.entry.label, nick.lookupNickname("TBSO")!.spelling], ["Yours", "reverse"]);
+  assert.equal(labelSmiles("TBS"), GROUPS.TBS, "back to Octet's TBS");
+  assert.equal(groupFormula(typed("MeO"))?.formula, "CH2F");
+  nick.setUserNicknames([]);
+  assert.equal(groupFormula(typed("MeO"))?.formula, "CH3O");
+  assert.equal(lookupNickname("Mine"), undefined);
+}
+console.log("nicknames.check: the user's nicknames first ok");
+
+// Define Nickname from the selection (ReShiki's define tests). CH3–O–C(=O)–C(CH3)3 with the methyl outside: the group is
+// pivaloyloxy, its SMILES from the O, its formula C5H9O2.
+const pivalate = (): Mol => ({
+  atoms: [[0, 0], [1, 0], [2, 0], [2, 1], [3, 0], [4, 0], [3, 1], [3, -1]].map(([x, y], k) => ({ label: k === 1 || k === 3 ? "O" : "C", location: [x, y, 0] as [number, number, number] })),
+  bonds: [[0, 1, 1], [1, 2, 1], [2, 3, 2], [2, 4, 1], [4, 5, 1], [4, 6, 1], [4, 7, 1]].map(([a, b, t]) => ({ type: t, atoms: [a, b] as [number, number] })),
+});
+{
+  const m = pivalate(), members = new Set([1, 2, 3, 4, 5, 6, 7]);
+  const d = nicknameFromSelection(m, members, " OPv ", "PvO");
+  assert.ok(typeof d !== "string", String(d));
+  assert.deepEqual([d.entry.label, d.entry.reverse, d.entry.formula, d.entry.category, d.keep], ["OPv", "PvO", "C5H9O2", "user", 1]);
+  assert.ok(d.entry.smiles.startsWith("O"), d.entry.smiles);
+  assert.equal(inchi(d.entry.smiles), inchi("OC(=O)C(C)(C)C"));
+  assert.deepEqual(d.group.sort(), [1, 2, 3, 4, 5, 6, 7]);
+  assert.equal(checkNickname(d.entry), undefined);
+  // Contracted to the label (as Define Nickname does once it is saved), the drawing keeps its formula.
+  nick.setUserNicknames([d.entry]);
+  const c = contractLabel(m, d.keep, new Set(d.group), "OPv");
+  assert.equal(c.atoms.length, 2);
+  assert.equal(chem.analyse(chem.expandLabels(c))?.[0].formula, chem.analyse(m)?.[0].formula);
+  assert.equal(labelSmiles("PvO"), d.entry.smiles, "its reverse spelling reads too");
+  // Saved in the settings and in a file, it reads back the same.
+  const back = nick.readNicknamesFile(nick.nicknamesFile([d.entry]), checkNickname);
+  assert.deepEqual(back.errors, []);
+  assert.deepEqual(back.nicknames, [d.entry]);
+  assert.deepEqual(nick.readNicknameList(JSON.parse(JSON.stringify([d.entry]))), [d.entry]);
+  assert.deepEqual(nick.readNicknameList([{ label: "x y", smiles: "C" }, { smiles: "C" }, 5]), []);
+  // CDXML: a user nickname is written with its atoms, so ChemDraw and another Octet read the structure.
+  const expand = (t: string) => { const s = labelSmiles(t); return s ? chem.labelFragment(s) : undefined; };
+  const x = toCdxml(c, DEFAULT_STYLE, { expand });
+  assert.ok(x.includes(`NodeType="Fragment"`));
+  nick.setUserNicknames([]);
+}
+// A selected attachment point on one single bond is where the group joins.
+{
+  const m: Mol = { atoms: [{ label: "C", location: [0, 0, 0], attach: true }, { label: "C", location: [1, 0, 0] }, { label: "F", location: [2, 0, 0] }], bonds: [{ type: 1, atoms: [0, 1] }, { type: 1, atoms: [1, 2] }] };
+  const d = nicknameFromSelection(m, new Set([0, 1, 2]), "CH2F2x");
+  assert.ok(typeof d !== "string", String(d));
+  assert.equal(d.entry.formula, "CH2F");
+  assert.deepEqual(d.group.sort(), [1, 2]);
+}
+// Refused: two bonds out, no bond out, nothing selected, a bad label, a double bond out, a wavy bond, a wedge, a label
+// Octet cannot read, a spelling that is an element.
+{
+  const m = pivalate(), members = [1, 2, 3, 4, 5, 6, 7];
+  for (const [ids, label] of [[[1, 2], "X1"], [[0, ...members], "X1"], [[], "X1"]] as const) assert.equal(typeof nicknameFromSelection(m, new Set(ids), label), "string");
+  assert.match(nicknameFromSelection(m, new Set(members), "two words") as string, /no spaces/);
+  assert.match(nicknameFromSelection(m, new Set(members), "Fe") as string, /means an element/);
+  const dbl: Mol = { ...m, bonds: m.bonds.map((b, k) => (k === 0 ? { ...b, type: 2 } : b)) };
+  assert.match(nicknameFromSelection(dbl, new Set(members), "X1") as string, /one single bond/);
+  const wavy: Mol = { ...m, bonds: m.bonds.map((b, k) => (k === 5 ? { ...b, display: "wavy" as const } : b)) };
+  assert.match(nicknameFromSelection(wavy, new Set(members), "OPv") as string, /stereochemistry/);
+  const wedge: Mol = { ...m, bonds: m.bonds.map((b, k) => (k === 5 ? { ...b, stereo: 1 } : b)) };
+  assert.match(nicknameFromSelection(wedge, new Set(members), "OPv") as string, /stereochemistry/);
+  const unknown: Mol = { ...m, atoms: m.atoms.map((a, k) => (k === 5 ? { ...a, text: "Qzx" } : a)) };
+  assert.match(nicknameFromSelection(unknown, new Set(members), "OPv") as string, /cannot read a label/);
+  // A label inside the group is drawn out: OMe in place of a methyl gives the group's full formula.
+  const labelled: Mol = { ...m, atoms: m.atoms.map((a, k) => (k === 5 ? { ...a, text: "OMe", label: "O" } : a)) };
+  const d = nicknameFromSelection(labelled, new Set(members), "OPvOMe");
+  assert.ok(typeof d !== "string", String(d));
+  assert.equal(d.entry.formula, "C5H9O3");
+  // A ring keeps its bonds: 4-fluorophenyl from a drawn ring.
+  const ring = chem.parseStructure("Cc1ccc(F)cc1");
+  const r = nicknameFromSelection(ring, new Set(ring.atoms.map((_, i) => i).filter((i) => i)), "FPh4");
+  assert.ok(typeof r !== "string", String(r));
+  assert.equal(inchi(r.entry.smiles), inchi("c1ccc(F)cc1"));
+  assert.equal(r.entry.formula, "C6H4F");
+  // E/Z drawn on a double bond is refused, as the nickname keeps no stereochemistry.
+  const ez = chem.parseStructure("C/C=C/CC");
+  assert.match(String(nicknameFromSelection(ez, new Set([0, 1, 2, 3]), "Pent")), /stereochemistry/);
+}
+// Changes to the list: added, replaced by label, removed, merged from a file (the user's own kept).
+{
+  const a = { label: "A1", smiles: "C", formula: "CH3", category: "user", names: [] }, b = { ...a, label: "B1", smiles: "CC", formula: "C2H5" };
+  let list = nick.withNickname([], a);
+  list = nick.withNickname(list, b);
+  list = nick.withNickname(list, { ...a, smiles: "CCC", formula: "C3H7" });
+  assert.deepEqual(list.map((e) => [e.label, e.smiles]), [["A1", "CCC"], ["B1", "CC"]]);
+  assert.deepEqual(nick.withoutNickname(list, "A1").map((e) => e.label), ["B1"]);
+  const merged = nick.mergeNicknames(list, [{ ...a, smiles: "N", formula: "H2N" }, { ...a, label: "C1" }]);
+  assert.deepEqual([merged.added, merged.kept, merged.list.map((e) => e.label).join()], [1, 1, "A1,B1,C1"]);
+  assert.equal(merged.list[0].smiles, "CCC");
+  // The file has one group a line, as ReShiki writes it, with ReShiki's "*".
+  const text = nick.nicknamesFile(list);
+  assert.equal(text.split("\n").filter(Boolean).length, 7);
+  assert.ok(text.includes(`"smiles":"*CCC"`));
+}
+console.log("nicknames.check: Define Nickname, the list and the file ok");

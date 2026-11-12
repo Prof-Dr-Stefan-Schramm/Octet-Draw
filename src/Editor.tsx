@@ -7,7 +7,7 @@ import {
   FileDashed, ArrowsLeftRight, Angle, CornersOut, Faders, FloppyDiskBack, Broom, Files, Unite, MagnetStraight, Paragraph, Resize, Ruler, GridFour, CrosshairSimple, Swatches, DotsNine, CompassTool, ArrowsVertical,
   EyeSlash, Crosshair, Repeat, CubeTransparent, ArrowsMerge, ArrowsInCardinal, FadersHorizontal, CaretLineUp, Sparkle, PencilRuler, CloudArrowDown, Bug, GraduationCap, CopySimple, IdentificationBadge, Key, FileCode, FileTxt, Notepad,
   File as PageIcon, CheckCircle, Asterisk, AsteriskSimple, BracketsSquare, SquaresFour, FlowArrow, BracketsRound,
-  TreeStructure, StarFour, Lightbulb, Prohibit, SelectionForeground, PaintRoller, WarningDiamond, TextTSlash, NotePencil, ArrowSquareOut, ImageSquare, MarkdownLogo, Notebook,
+  TreeStructure, StarFour, Lightbulb, Prohibit, TagChevron, ListMagnifyingGlass, SelectionForeground, PaintRoller, WarningDiamond, TextTSlash, NotePencil, ArrowSquareOut, ImageSquare, MarkdownLogo, Notebook,
 } from "@phosphor-icons/react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "./listen";
@@ -91,7 +91,8 @@ import { arrowPath, arrowShapes, bendPoint, blockOutline, curved, ellipseArrow, 
 import { cursorColour, dragCursor, drawCursors, type Cursors } from "./cursor";
 import { CURSORS, handlePoint, isCorner, percentOf, resizeBy, sideAt, SIDES, type Box as RBox, type Side } from "./resize";
 import { abbreviationOf, cleanOwnName, loadNames, mergeOwnNames, nameToSmiles, nameToAtoms, namesStarting, ownName, ownNamesFile, readOwnNamesFile, renameOwnName, setOwnNames, suggestName, knownName, looksLikeSmiles, withOwnName, withoutOwnName, type OwnName } from "./names";
-import { allNicknames, type Nickname } from "./nicknames";
+import { allNicknames, lookupNickname, mergeNicknames, nicknamesFile, readNicknamesFile, setUserNicknames, withNickname, withoutNickname, type Nickname } from "./nicknames";
+import { checkNickname, nicknameFromSelection } from "./nicknamedefine";
 import { isTemplateFile, readTemplateFile, writeTemplateFile } from "./ctp";
 import { casProblem, nameList } from "./dictionary";
 import { PEPTIDE, peptideProblem } from "./peptide";
@@ -434,6 +435,7 @@ const bondKindOf = (b: Bond) => (Object.keys(BONDS) as BondKind[]).find((k) => {
 // The Bond Properties list, in the order of ChemDraw's Bond Type list. A hydrogen bond is in it only on a hydrogen
 // bond: no bond becomes one, as in ChemDraw.
 const BOND_TYPES: BondKind[] = ["single", "dashed", "hashed", "hashwedge", "bold", "wedge", "wavy", "hollow", "dative", "double", "eitherdouble", "bolddouble", "aromaticdouble", "dasheddouble", "triple", "quadruple", "hydrogen"];
+let userNicknamesFor: Nickname[] | undefined;
 let contracted: [string, string][] | undefined, nicknamed: [string, string][] | undefined, nicknamedFor: Nickname[] | undefined;
 const inchiPairs = (names: string[]) => names.flatMap((name) => { const smiles = labelSmiles(name), inchi = smiles ? toInchi(`[Xe]${smiles}`) : undefined; return inchi ? [[name, inchi] as [string, string]] : []; });
 function contractLabelText(want: string): string | undefined {
@@ -746,6 +748,45 @@ export default function Editor() {
     setOwnNames(settings.dictionary);
     namedMols.clear();
     typedMols.clear();
+  }
+  // The user's own nicknames (Structure > Define Nickname…): labels.ts reads them from nicknames.ts, which they are given
+  // whenever they change; Choose Nickname draws them again.
+  if (userNicknamesFor !== settings.nicknames) {
+    userNicknamesFor = settings.nicknames;
+    setUserNicknames(settings.nicknames);
+    nicknameMols.clear();
+  }
+  // Define Nickname… (Structure menu, as ChemDraw's): the selected group, joined to the rest by one single bond (or with
+  // one attachment point), becomes a nickname of the user's: the label and its reverse spelling are asked for. A group
+  // Octet cannot keep is said at once.
+  function defineNickname() {
+    const group = [...selection].filter((i) => i < doc.atoms.length);
+    if (!group.length) return setNotice("Select a group joined to the rest of the structure by one bond.", "info");
+    const first = nicknameFromSelection(doc, new Set(group), "Mine");
+    if (typeof first === "string" && !/label|means an element/i.test(first)) return setNotice(first, "info");
+    setDialog({ kind: "nickname", label: "", reverse: "", group });
+  }
+  // Settings > Dictionary > Nicknames: Export… writes the user's nicknames as a nicknames file (JSON, as ReShiki's);
+  // Import… reads one and adds the nicknames the user does not have. Each is checked; one Octet cannot keep is left out.
+  async function exportNicknames() {
+    if (!TAURI) return;
+    try { await invoke("export_file", { export: { name: "Octet nicknames", format: "json", json: nicknamesFile(settings.nicknames) } }); }
+    catch (e) { setNotice(failure("Octet cannot export the nicknames.", e)); }
+  }
+  async function importNicknames() {
+    if (!TAURI) return;
+    try {
+      const picked = await invoke<[string, string] | null>("import_nicknames");
+      if (!picked) return;
+      await ready;
+      const { nicknames, errors } = readNicknamesFile(picked[1], (e) => checkNickname(e));
+      if (!nicknames.length) return setNotice(`There are no nicknames Octet can use in ${picked[0]}.${errors[0] ? ` ${errors[0]}` : ""}`);
+      const merged = mergeNicknames(settings.nicknames, nicknames);
+      setSettings((s) => ({ ...s, nicknames: mergeNicknames(s.nicknames, nicknames).list }));
+      setNotice(`Added ${merged.added} nickname${merged.added === 1 ? "" : "s"}.${merged.kept ? ` ${merged.kept} you had already stayed as ${merged.kept === 1 ? "it was" : "they were"}.` : ""}${errors.length ? ` ${errors.length} left out: ${errors[0]}` : ""}`, "done");
+    } catch (e) {
+      setNotice(failure("Octet cannot import this file.", e));
+    }
   }
   // Add to dictionary (right-click, the Actions panel, or Structure > Add Structure to Dictionary…): the selected
   // structure (or, with an atom or bond picked, its whole structure) is kept by a name the user gives (Dialog), with its
@@ -2448,6 +2489,9 @@ export default function Editor() {
     insert_dna: () => insertSequence("dna: "),
     // Structure > Add Structure to Dictionary…: a name of the user's own for the selected structure.
     dictionary_add: () => addToDictionary(),
+    // Structure > Define Nickname… and List Nicknames… (ChemDraw's): the user's own labels, kept in Settings > Dictionary.
+    define_nickname: () => defineNickname(),
+    list_nicknames: () => setSettingsOpen("dictionary"),
     // View > Templates: a set's floating palette shown or hidden (the user's sets, then Octet's, as the menu lists them).
     ...Object.fromEntries(menuSets.map((set, k) => [`templates_${k}`, () => togglePalette(set)])),
     // File > Save Templates for ChemDraw: a set as a ChemDraw template file (the sets in View > Templates' order).
@@ -2911,7 +2955,7 @@ export default function Editor() {
     | { kind: "template"; name: string; from: string } | { kind: "templateSet"; name: string; then: (set: string) => void } | { kind: "lossy"; lost: Record<string, number>; done: (saved: boolean) => void } | { kind: "revert" }
     | { kind: "changed"; done: (saved: boolean) => void }
     | { kind: "discard"; entries: RecoveredEntry[]; recents: RecentEntry[] } | { kind: "crashed"; log: string } | { kind: "update"; version: string }
-    | { kind: "dictionary"; name: string; smiles: string; inchi?: string }>();
+    | { kind: "dictionary"; name: string; smiles: string; inchi?: string } | { kind: "nickname"; label: string; reverse: string; group: number[]; problem?: string; replace?: string }>();
   // Check Structure's dialog: the problems, the one shown, and what runs after them (a copy or export that asked).
   // select: Check Structure itself, which selects each problem's objects as it shows it.
   const [checking, setChecking] = useState<{ list: Problem[]; at: number; then: () => void; select: boolean }>();
@@ -6497,7 +6541,8 @@ export default function Editor() {
     bracket_properties: ["Bracket properties…", "", <BracketsRound size={18} />], rlogic: ["R-Logic query…", "", <TreeStructure size={18} />],
     add_multicentre: ["Add multi-centre attachment", "", <Asterisk size={18} />], add_variable: ["Add variable attachment", "", <AsteriskSimple size={18} />],
     define_rgroup: ["Make an R-group definition", "", <BracketsSquare size={18} />], expand_generic: ["Expand generic structure", "", <SquaresFour size={18} />], atom_numbers: ["Show atom numbers", "", <Hash size={18} />],
-    expand_label: ["Expand label", "", <ArrowsOutSimple size={18} />], contract_label: ["Contract label", "", <ArrowsInSimple size={18} />], stoichiometry: ["Analyse stoichiometry", "", <Table size={18} />],
+    expand_label: ["Expand label", "", <ArrowsOutSimple size={18} />], contract_label: ["Contract label", "", <ArrowsInSimple size={18} />],
+    define_nickname: ["Define nickname…", "", <TagChevron size={18} />], list_nicknames: ["List nicknames…", "", <ListMagnifyingGlass size={18} />], stoichiometry: ["Analyse stoichiometry", "", <Table size={18} />],
     undo: ["Undo", `${MOD}Z`, <ArrowCounterClockwise size={18} />], redo: ["Redo", `${MOD}Y`, <ArrowClockwise size={18} />], invert_selection: ["Invert selection", `⇧${MOD}I`, <SelectionInverse size={18} />], clean_reaction: ["Clean up reaction", `⇧${MOD}X`, <Broom size={18} />],
     clean_reaction_augmented: ["Augmented clean up reaction", "", <StarFour size={18} />],
     map_reaction: ["Map atoms", "", <FlowArrow size={18} />], clear_reaction_map: ["Clear atom map", "", <X size={18} />],
@@ -8852,6 +8897,10 @@ export default function Editor() {
           onRemoveName={(name) => setSettings((s) => ({ ...s, dictionary: withoutOwnName(s.dictionary, name) }))}
           onExportNames={() => void exportNames()}
           onImportNames={() => void importNames()}
+          nicknames={settings.nicknames}
+          onRemoveNickname={(label) => setSettings((s) => ({ ...s, nicknames: withoutNickname(s.nicknames, label) }))}
+          onExportNicknames={() => void exportNicknames()}
+          onImportNicknames={() => void importNicknames()}
           onApplyFile={TAURI && !madeTemplate ? () => void applyStyleFile() : undefined}
           keys={settings.keys}
           onKeys={(keys) => setSettings((s) => ({ ...s, keys }))}
@@ -9157,6 +9206,32 @@ export default function Editor() {
             <label className="dialog-row"><span>Name</span><span className="unit-field text"><input aria-label="Name" value={dialog.name} maxLength={80} spellCheck={false} onChange={(e) => setDialog({ ...dialog, name: e.target.value })} /></span></label>
             {there && <p className="dialog-note">Your dictionary has “{there.name}” already. Replace gives it this structure.</p>}
             {octets && <p className="dialog-note">Octet reads this name already. Your structure comes first.</p>}
+          </Dialog>
+        );
+      })()}</Exit>
+      <Exit>{dialog?.kind === "nickname" && (() => {
+        // Define Nickname (ChemDraw's, with ReShiki's reverse spelling): the label, and the label as it reads with the bond
+        // to its right. Define checks the group and the label; a label the user has already is replaced, after the dialog
+        // says so once. A label of Octet's is then the user's group. The selection becomes the label (one Undo step).
+        const d = dialog, label = d.label.trim(), mine = settings.nicknames.some((n) => n.label === label), known = lookupNickname(label), octets = !!label && !mine && !!known && !known.entry.user;
+        const define = () => {
+          if (!label || !d.group.every((i) => doc.atoms[i])) return setDialog(undefined);
+          const r = nicknameFromSelection(doc, new Set(d.group), label, d.reverse);
+          if (typeof r === "string") return setDialog({ ...d, problem: r });
+          if (mine && d.replace !== label) return setDialog({ ...d, problem: undefined, replace: label });
+          setDialog(undefined);
+          setSettings((s) => ({ ...s, nicknames: withNickname(s.nicknames, r.entry) }));
+          set(contractLabel(doc, r.keep, new Set(r.group), label));
+          setSelection(new Set());
+          setNotice(`${label} is your nickname now (${r.entry.formula}). Type it on an atom to use it.`, "done");
+        };
+        return (
+          <Dialog title="Define Nickname" action={mine && d.replace === label ? "Replace" : "Define"} disabled={!label} onClose={() => setDialog(undefined)} onAction={define}>
+            <label className="dialog-row"><span>Label</span><span className="unit-field text"><input aria-label="Label" value={d.label} maxLength={32} spellCheck={false} autoFocus onChange={(e) => setDialog({ ...d, label: e.target.value, problem: undefined })} /></span></label>
+            <label className="dialog-row"><span>Bond to the right</span><span className="unit-field text"><input aria-label="Label with the bond to the right" placeholder="Optional" value={d.reverse} maxLength={32} spellCheck={false} onChange={(e) => setDialog({ ...d, reverse: e.target.value, problem: undefined })} /></span></label>
+            {d.problem && <p className="dialog-note">{d.problem}</p>}
+            {mine && d.replace === label && <p className="dialog-note">You have a nickname {label} already. Replace gives it this group.</p>}
+            {octets && <p className="dialog-note">Octet has a nickname {label}. Your group comes first.</p>}
           </Dialog>
         );
       })()}</Exit>

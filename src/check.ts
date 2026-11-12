@@ -2,6 +2,7 @@
 // marks on the drawing), and messy geometry. Messages follow the brief's style: what is wrong, the rule, then what to do.
 import { bondedTo, bondOrders, fragments, freePairs, LARGE, mayBeChairBond, neighbourSlots, neighbours, perspectiveBonds, pos, WIDE, type P } from "./edit.ts";
 import { chemicalText, labelSmiles, units } from "./labels.ts";
+import { onNicknamesChange } from "./nicknames.ts";
 import { HBOND, isBracket, orderOf, type Bond, type Mol } from "./render.ts";
 
 // The kinds of warning, as ChemDraw 26.1's Settings > Warnings lists them, each with its switch's default (all on but
@@ -82,6 +83,7 @@ const knownIsotope = (label: string, mass: number) => { const r = ISOTOPES[label
 
 // A label's attachment atom, from its SMILES: its bond orders inside the label, its charge, and its element.
 const firstAtoms = new Map<string, { inside: number; charge: number; element: string } | undefined>();
+onNicknamesChange(() => firstAtoms.clear());
 function firstAtom(text: string) {
   if (firstAtoms.has(text)) return firstAtoms.get(text);
   const smiles = labelSmiles(text);

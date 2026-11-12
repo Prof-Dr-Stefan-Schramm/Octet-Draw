@@ -366,7 +366,7 @@ fn packbits(line: &[u8], out: &mut Vec<u8>) {
 // are V3000, and V2000 apart, with ChemDraw's names. The pictures are ChemDraw's Save As pictures. A template set saved
 // as a ChemDraw template file (src/ctp.ts) is a template document (CTP) or stationery (CTS), with ChemDraw's names: the
 // same CDX file.
-const FORMATS: [(&str, &str, &[&str]); 24] = [
+const FORMATS: [(&str, &str, &[&str]); 25] = [
     ("oct", "Octet drawing", &["oct"]),
     ("pdf", "PDF", &["pdf"]),
     ("svg", "SVG", &["svg"]),
@@ -391,6 +391,7 @@ const FORMATS: [(&str, &str, &[&str]); 24] = [
     ("ctp", "ChemDraw Template (CTP)", &["ctp"]),
     ("cts", "ChemDraw Template Style Sheet (CTS)", &["cts"]),
     ("csv", "CSV", &["csv"]),
+    ("json", "Nicknames (JSON)", &["json"]),
 ];
 
 #[derive(serde::Deserialize)]
@@ -406,6 +407,7 @@ pub struct Export {
     smiles: Option<String>,
     inchi: Option<String>,
     csv: Option<String>, // Home's Experiments list
+    json: Option<String>, // the user's nicknames file (Settings > Dictionary > Nicknames)
     dpi: Option<f32>,
     transparent: Option<bool>,
     quality: Option<u8>, // JPEG
@@ -431,6 +433,7 @@ pub async fn export_file(app: AppHandle, exported: State<'_, Exported>, export: 
         "smi" => e.smiles.is_some(),
         "ctp" | "cts" => e.ctp.is_some(),
         "csv" => e.csv.is_some(),
+        "json" => e.json.is_some(),
         _ => e.mdl.is_some(),
     };
     let offered: Vec<_> = FORMATS.iter().filter(|f| has(f.0) && e.format.as_deref().is_none_or(|x| x == f.0)).collect();
@@ -472,6 +475,7 @@ pub async fn export_file(app: AppHandle, exported: State<'_, Exported>, export: 
         "inchi" => format!("{}\n", e.inchi.as_deref().unwrap_or_default().trim()).into_bytes(),
         "smi" => format!("{}\n", e.smiles.as_deref().unwrap_or_default().trim()).into_bytes(),
         "csv" => text(&e.csv),
+        "json" => text(&e.json),
         _ => text(&e.mdl),
     };
     crate::write_atomic(&path, &bytes).map_err(|e| e.to_string())?;

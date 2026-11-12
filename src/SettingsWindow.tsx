@@ -100,6 +100,12 @@ type Props = {
   onRemoveName: (name: string) => void;
   onExportNames: () => void;
   onImportNames: () => void;
+  // The user's own nicknames (Structure > Define Nickname…, ChemDraw's List Nicknames): each to remove here, and the
+  // whole list exported or imported as a nicknames file.
+  nicknames: { label: string; reverse?: string; formula: string; smiles: string }[];
+  onRemoveNickname: (label: string) => void;
+  onExportNicknames: () => void;
+  onImportNicknames: () => void;
   onClose: () => void;
 };
 
@@ -200,6 +206,23 @@ function OwnDictionary({ list, onRename, onRemove }: { list: { name: string; smi
             onKeyDown={(e) => { if (e.key === "Enter") e.currentTarget.blur(); if (e.key === "Escape") { e.stopPropagation(); setNames(({ [n.name]: _, ...rest }) => rest); } }} />
           <span className="dictionary-smiles" data-tip={n.smiles}>{n.smiles}</span>
           <button className="text-button" aria-label={`Remove ${n.name}`} data-tip="Remove" onClick={() => onRemove(n.name)}><X size={12} /></button>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// The user's own nicknames: each one's label (and its spelling with the bond to the right), formula and SMILES, and its
+// remove button, as the dictionary's names. With none, how to define one.
+function OwnNicknames({ list, onRemove }: { list: { label: string; reverse?: string; formula: string; smiles: string }[]; onRemove: (label: string) => void }) {
+  if (!list.length) return <p className="dictionary-empty">To define a nickname, select a group joined to the rest by one bond. Then choose Structure &gt; Define Nickname.</p>;
+  return (
+    <div className="palette-editor dictionary-list">
+      {list.map((n) => (
+        <div key={n.label} className="palette-line">
+          <span className="palette-name">{n.label}{n.reverse ? ` · ${n.reverse}` : ""}</span>
+          <span className="dictionary-smiles" data-tip={`${n.formula} · ${n.smiles}`}>{n.formula}</span>
+          <button className="text-button" aria-label={`Remove ${n.label}`} data-tip="Remove" onClick={() => onRemove(n.label)}><X size={12} /></button>
         </div>
       ))}
     </div>
@@ -605,8 +628,10 @@ export function SettingsWindow(p: Props) {
       d("files", "Online", "Online search", "online search reaxys pubchem internet web browser network privacy offline", <Switch on={p.onlineSearch} label="Online search" onChange={p.onOnlineSearch} />),
       // ChemDraw's Add Structure to Dictionary keeps names; here they are renamed, removed, exported and imported.
       d("dictionary", "Names", "Your names", "dictionary names name to structure own words abbreviations rename remove export import smiles", <OwnDictionary list={p.dictionary} onRename={p.onRenameName} onRemove={p.onRemoveName} />, true),
+      // ChemDraw's Define Nickname and List Nicknames: the user's own labels, removed, exported and imported here.
+      d("dictionary", "Nicknames", "Your nicknames", "nicknames nickname labels abbreviations groups define list remove export import", <OwnNicknames list={p.nicknames} onRemove={p.onRemoveNickname} />, true),
     ];
-  }, [style, map, recording, note, files, p.palette, p.elementColours, p.adding, p.panelMenus, p.captionOptionReturn, p.labelReturnNewLine, p.onlineSearch, p.rulerUnit, p.selectColour, p.outlines, p.menuKeys.length, p.purposes, p.ownTemplates, p.drawing, p.template, p.updates, p.warnings, p.warningTypes, p.checkCopy, p.windows, p.cursor, p.dictionary]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [style, map, recording, note, files, p.palette, p.elementColours, p.adding, p.panelMenus, p.captionOptionReturn, p.labelReturnNewLine, p.onlineSearch, p.rulerUnit, p.selectColour, p.outlines, p.menuKeys.length, p.purposes, p.ownTemplates, p.drawing, p.template, p.updates, p.warnings, p.warningTypes, p.checkCopy, p.windows, p.cursor, p.dictionary, p.nicknames]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const found = query.trim() ? defs.filter((def) => matches(def, query) && (!p.template || def.module === "document")) : [];
   const counts = new Map(MODULES.map((m) => [m.id, found.filter((f) => f.module === m.id).length]));
@@ -644,6 +669,8 @@ export function SettingsWindow(p: Props) {
     return <>{sections(module, list).map((s) => <Section key={s} title={s} defs={list.filter((x) => x.module === module && x.section === s)}
       aside={s === "Updates" ? <button className="text-button" onClick={p.onCheckUpdates}>Check Now</button> : s === "Names" && !query ? (
         <span className="section-buttons"><button className="text-button" onClick={p.onImportNames}>Import…</button><button className="text-button" onClick={p.onExportNames} disabled={!p.dictionary.length}>Export…</button></span>
+      ) : s === "Nicknames" && !query ? (
+        <span className="section-buttons"><button className="text-button" onClick={p.onImportNicknames}>Import…</button><button className="text-button" onClick={p.onExportNicknames} disabled={!p.nicknames.length}>Export…</button></span>
       ) : undefined} />)}</>;
   };
 

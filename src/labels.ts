@@ -217,6 +217,7 @@ const FORMULAS: Record<string, string> = {
   N3: "N=[N+]=[N-]", SO3H: "S(=O)(=O)O", SO2: "S(=O)=O", SO2Ph: "S(=O)(=O)c1ccccc1", COMe: "C(C)=O", COPh: "C(=O)c1ccccc1",
   CONH2: "C(N)=O", OCN: "OC#N", SCN: "SC#N", NCO: "N=C=O", NCS: "N=C=S", CHN2: "C=[N+]=[N-]", PO3H2: "P(=O)(O)O",
 };
+export const FORMULA_NAMES = new Set(Object.keys(FORMULAS));
 
 // The label as SMILES with its attachment point first, for chemistry (SMILES export, formulas).
 // Groups and the formulas above are looked up. Other condensed formulas are read left to right: each heavy
