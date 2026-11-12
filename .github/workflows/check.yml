@@ -40,7 +40,7 @@ jobs:
       - name: Type check and check files
         run: npm test
       - name: Rust tests
-        run: cargo test --manifest-path src-tauri/Cargo.toml
+        run: cargo test --manifest-path src-tauri/Cargo.toml && cargo test --manifest-path src-tauri/Cargo.toml -p octet-geometry
       - name: npm audit
         run: npm audit
       - name: cargo audit
