@@ -7,6 +7,7 @@ import type { DocStyle } from "./docstyle.ts";
 import { aromaticAtoms, rings as ringsOf } from "./rings.ts";
 import { plainOf, styled, whole, without, type TextRun } from "./richtext.ts";
 import { OCENES } from "./metals.ts";
+import { remapModels, modelsWithin, rollModels, tiltModels } from "./model3d.ts";
 
 export type P = [number, number];
 export const EMPTY: Mol = { atoms: [], bonds: [] };
@@ -920,7 +921,7 @@ function removeAtoms(m: Mol, gone: Set<number>, before = m.bonds): Mol {
   const keptCycles = new Set(cycles?.map((c) => c.id));
   return tidyGroups({ ...m, atoms, bonds: bonds.map((b) => ({ ...b, atoms: [map.get(b.atoms[0])!, map.get(b.atoms[1])!] })), captions: captions?.filter((c) => !c.cycle || keptCycles.has(c.cycle.cycle)), cycles,
     shapes: m.shapes?.map(kept),
-    groups: m.groups?.map((g) => ({ ...g, atoms: g.atoms.filter((i) => map.has(i)).map((i) => map.get(i)!) })), fills: refill(m.fills, map) });
+    groups: m.groups?.map((g) => ({ ...g, atoms: g.atoms.filter((i) => map.has(i)).map((i) => map.get(i)!) })), fills: refill(m.fills, map), models: remapModels(m.models, (i) => map.get(i)) });
 }
 // Ring fills follow their atoms' new numbers; a fill goes when one of its atoms goes.
 const refill = (fills: Mol["fills"], map: Map<number, number>) => {
@@ -1213,6 +1214,7 @@ export function merge(m: Mol, frag: Mol, offset: P): Mol {
     atoms: [...m.atoms, ...frag.atoms.map((a) => renumberCentre({ ...a, location: [a.location[0] + offset[0], a.location[1] + offset[1], a.location[2] ?? 0] as [number, number, number] }, (i) => i + base))],
     bonds: [...m.bonds, ...frag.bonds.map((b) => ({ ...b, atoms: [b.atoms[0] + base, b.atoms[1] + base] as [number, number] }))],
     ...(frag.fills?.length ? { fills: [...(m.fills ?? []), ...frag.fills.map((f) => ({ ...f, atoms: f.atoms.map((i) => i + base) }))] } : {}),
+    ...(frag.models?.length ? { models: [...(m.models ?? []), ...remapModels(frag.models, (i) => i + base)!] } : {}),
   };
 }
 
@@ -1802,7 +1804,7 @@ export function rotateAtoms(m: Mol, ids: Set<number>, degrees: number): Mol {
     if (!ids.has(i)) return a;
     const r = add(c, rot(sub(pos(m, i), c), degrees * deg));
     return { ...a, location: [r[0], r[1], a.location[2] ?? 0], ...turnMarks(a, (t) => t + degrees) };
-  }) };
+  }), ...(m.models ? { models: rollModels(m.models, ids, degrees) } : {}) };
 }
 // Marks placed by hand (Atom.angles) turn and flip with their atom, so they keep their place beside it.
 const turnMarks = (a: Atom, f: (degrees: number) => number) =>
@@ -2608,7 +2610,10 @@ export function levelTurn(m: Mol, atoms: number[]): number {
 
 // Structure Perspective. Tilts atoms through 3D about a centre: yaw turns them about the vertical axis (a drag
 // across), pitch about the horizontal one (a drag up or down). Degrees; depth (z) points at the viewer.
+// A structure shown as a 3D model (model3d.ts) turns its model instead: its atoms stay as drawn.
 export function tiltAtoms(m: Mol, ids: Set<number>, centre: [number, number, number], yaw: number, pitch: number): Mol {
+  const { mol, held } = tiltModels(m, ids, yaw, pitch);
+  if (held.size) { m = mol; ids = new Set([...ids].filter((i) => !held.has(i))); }
   const [cy, sy, cp, sp] = [Math.cos((yaw * Math.PI) / 180), Math.sin((yaw * Math.PI) / 180), Math.cos((pitch * Math.PI) / 180), Math.sin((pitch * Math.PI) / 180)];
   return {
     ...m,
@@ -2714,6 +2719,7 @@ export function extractSelection(m: Mol, atoms: Set<number>, items: Set<number>,
     groups: (m.groups ?? []).filter((g) => g.atoms.every((i) => map.has(i)) && g.items.every((id) => ids.has(id))).map((g) => ({ ...g, atoms: g.atoms.map((i) => map.get(i)!) })),
     fills: refill(m.fills, map),
     grids: (m.grids ?? []).filter((g) => keep.has(g.arrow)),
+    models: modelsWithin(m.models, map),
   };
 }
 // Paste: another drawing added to this one, moved by offset, with new ids for its objects. Returns the drawing, the
@@ -2744,6 +2750,7 @@ export function insertMol(m: Mol, add: Mol, offset: P = [0, 0]) {
     groups: [...(m.groups ?? []), ...(add.groups ?? []).map((g) => ({ ...g, id: ids.get(g.id)!, atoms: g.atoms.map(at), items: g.items.map((x) => ids.get(x) ?? x) }))],
     ...(add.grids?.length ? { grids: [...(m.grids ?? []), ...add.grids.flatMap((g) => (ids.has(g.arrow) ? [{ ...g, arrow: ids.get(g.arrow)! }] : []))] } : {}),
     ...(add.fills?.length ? { fills: [...(m.fills ?? []), ...add.fills.map((f) => ({ ...f, atoms: f.atoms.map(at) }))] } : {}),
+    ...(add.models?.length ? { models: [...(m.models ?? []), ...remapModels(add.models, at)!] } : {}),
   };
   return { mol, atoms: new Set(add.atoms.map((_, i) => at(i))), items: new Set([...(add.captions ?? []), ...(add.arrows ?? []), ...(add.shapes ?? []), ...(add.cycles ?? [])].map((x) => ids.get(x.id)!)), ids };
 }

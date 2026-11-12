@@ -17,6 +17,7 @@ import type { DocStyle, Guides } from "./docstyle.ts";
 import type { Cycle, CycleText } from "./cycle.ts";
 import type { Measured } from "./measured.ts";
 import type { Plot, PlotPart } from "./pageplot.ts";
+import type { Model3d } from "./model3d.ts";
 
 type P = [number, number];
 // text: a label that is not one element (OMe, CO2Et, Ph). label then holds the element it attaches through.
@@ -432,7 +433,8 @@ export const HIGHLIGHT = "#DCE4F6";
 // Captions, arrows, shapes and cycles share one set of ids.
 // guides: what the file asks the window to show (grid, rulers, crosshair), when Octet saved it; files only.
 // spectra: measured spectra (measured.ts), at most one for each key (¹H, ¹³C, IR and so on), shown in the Spectrum panel.
-export type Mol = { atoms: Atom[]; bonds: Bond[]; captions?: Caption[]; arrows?: Arrow[]; shapes?: Shape[]; cycles?: Cycle[]; groups?: Group[]; grids?: Grid[]; fills?: RingFill[]; annotations?: Annotation[]; style?: DocStyle; guides?: Guides; spectra?: Measured[] };
+// models: 3D models of structures (model3d.ts), drawn beside or in place of them.
+export type Mol = { atoms: Atom[]; bonds: Bond[]; captions?: Caption[]; arrows?: Arrow[]; shapes?: Shape[]; cycles?: Cycle[]; groups?: Group[]; grids?: Grid[]; fills?: RingFill[]; annotations?: Annotation[]; style?: DocStyle; guides?: Guides; spectra?: Measured[]; models?: Model3d[] };
 // A ring fill (ChemDraw's Ring Fill colours, its ColoredMolecularArea): one ring, by its atoms in ring order, filled
 // with the colour at 30% opacity behind the bonds. Each ring keeps its own fill, so fused rings can differ. A fill
 // whose ring is broken is not drawn.

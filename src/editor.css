@@ -171,6 +171,15 @@ circle.mark {
   stroke: var(--select);
   stroke-linecap: round;
 }
+/* A selected 3D model: its frame tinted. A changed structure's model: a note under its frame (not exported). */
+.selection-marks .model-pick {
+  fill: var(--select);
+}
+.model-stale {
+  fill: var(--warning);
+  font: 500 11px var(--font-sans);
+  pointer-events: none;
+}
 
 /* A group wholly selected: a dotted frame round it, a hairline at any zoom. */
 .group-frame rect {

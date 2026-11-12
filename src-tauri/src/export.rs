@@ -955,6 +955,20 @@ mod tests {
         assert_eq!(cdxml_document("<CDXML/>"), doc);
     }
 
+    // A 3D model's ball (src/model3d.ts): a radial gradient in user space, inside the canvas's scaled group, lit at the
+    // top left. The PNG draws its highlight where it is drawn on the canvas, and the PDF keeps it as a radial shading.
+    #[test]
+    fn shaded_balls_keep_their_gradient_in_png_and_pdf() {
+        let svg = r##"<svg xmlns="http://www.w3.org/2000/svg" width="60pt" height="60pt" viewBox="0 0 60 60"><g transform="scale(2)"><defs><radialGradient id="b" gradientUnits="userSpaceOnUse" cx="15" cy="15" r="10" fx="11.2" fy="10.8" fr="0.5"><stop offset="0" stop-color="#ffffff"/><stop offset="0.6" stop-color="#8d949b"/><stop offset="1" stop-color="#202020"/></radialGradient></defs><circle cx="15" cy="15" r="10" fill="url(#b)"/></g></svg>"##;
+        let pixmap = draw(&tree(svg).unwrap(), 72.0, false).unwrap();
+        let red = |x: u32, y: u32| pixmap.pixel(x, y).unwrap().red();
+        // 1 pt a pixel: the ball's centre is at (30, 30), radius 20; the highlight at (22.4, 21.6).
+        assert!(red(22, 22) > 220 && red(30, 30) < red(22, 22) && red(43, 43) < 80, "{} {} {}", red(22, 22), red(30, 30), red(43, 43));
+        assert!(red(2, 2) == 255, "outside the ball is paper");
+        let pdf = make_pdf(svg, None).unwrap();
+        assert!(find(&pdf, b"/ShadingType 3").is_some(), "a radial shading, not one flat colour");
+    }
+
     #[test]
     fn pdf_without_cdxml_has_no_metadata() {
         let pdf = make_pdf(SVG, None).unwrap();

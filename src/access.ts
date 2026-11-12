@@ -11,6 +11,7 @@ import { HBOND, curved, hydrogens, isBracket, orderOf, straightArrow, type Arrow
 import { plotName } from "./pageplot.ts";
 import { ELEMENTS } from "./metals.ts";
 import { rings } from "./rings.ts";
+import { describeModel, modelOf } from "./model3d.ts";
 import { USAGES, polymerLabel } from "./query.ts";
 import type { Reaction, Step } from "./reaction.ts";
 
@@ -121,7 +122,9 @@ export function structureText(m: Mol, atoms: number[], s: Pick<Sources, "name" |
     const [x, y] = b.atoms.map(root);
     if (x !== y) { up.set(x, y); pieces--; }
   }
-  const shape = `${s.formula?.(atoms) ?? count(atoms.length, "atom")}, ${count(bonds - atoms.length + pieces, "ring")}`, name = s.name?.(atoms);
+  // A structure shown as a 3D model says so (model3d.ts).
+  const k3 = modelOf(m, atoms), model = k3 === undefined || m.models![k3].display === "2d" ? "" : `, ${describeModel(m.models![k3])}`;
+  const shape = `${s.formula?.(atoms) ?? count(atoms.length, "atom")}, ${count(bonds - atoms.length + pieces, "ring")}${model}`, name = s.name?.(atoms);
   return name ? { name, more: shape } : { name: shape };
 }
 // A part of a reaction as a sentence names it: a structure's name or formula, or text.

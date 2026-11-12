@@ -9,6 +9,7 @@ import { readAtomQuery, readBondQuery, readPolymer, readRgroup } from "./query.t
 import { ALL_ARROW_KINDS, HBOND, isBracket, ORBITAL_SHAPES, QUADRUPLE, PHASES, SHAPE_KINDS, type Annotation, type CurveFill, type Head, type HeadShape, type Arrow, type ArrowKind, type LineStyle, type OrbitalShape, type Phase, type Shape, type ShapeKind, type Shade, type Curve, type Table, type TableLine, type CellAlign, type Tlc, type Atom, type Bond, type Caption, type Display, type Kept, type Mol, type HeadSize } from "./render.ts";
 import { readGrid } from "./stoich.ts";
 import { keyOf, readMeasured, writeMeasured } from "./measured.ts";
+import { readModel, writeModel } from "./model3d.ts";
 import { readPart, readPlot, type PlotPart } from "./pageplot.ts";
 import pkg from "../package.json" with { type: "json" };
 
@@ -84,7 +85,7 @@ export function serialize(mol: Mol): string {
   const groups = (mol.groups ?? []).map((g) => ({ atoms: g.atoms, items: g.items.map(ref).filter(Boolean), ...(g.integral ? { integral: true } : {}), ...(g.annotations?.length ? { annotations: g.annotations } : {}), ...(g.plot ? { plot: g.plot } : {}) }));
   // Stoichiometry grids name their arrow by its place in the list above.
   const grids = (mol.grids ?? []).map((g) => ({ ...g, arrow: arrowList.findIndex((a) => a.id === g.arrow) })).filter((g) => g.arrow >= 0);
-  return JSON.stringify({ format: FORMAT, version: VERSION, app: pkg.version, structure: { atoms, bonds }, ...(arrows.length ? { arrows } : {}), ...(cycles.length ? { cycles } : {}), ...(shapes.length ? { shapes } : {}), ...(captions.length ? { captions } : {}), ...(groups.length ? { groups } : {}), ...(grids.length ? { grids } : {}), ...(mol.fills?.length ? { fills: mol.fills } : {}), ...(mol.annotations?.length ? { annotations: mol.annotations } : {}), ...(mol.style ? { style: mol.style } : {}), ...(mol.guides ? { guides: mol.guides } : {}), ...(mol.spectra?.length ? { spectra: mol.spectra.map(writeMeasured) } : {}) }, null, 1) + "\n";
+  return JSON.stringify({ format: FORMAT, version: VERSION, app: pkg.version, structure: { atoms, bonds }, ...(arrows.length ? { arrows } : {}), ...(cycles.length ? { cycles } : {}), ...(shapes.length ? { shapes } : {}), ...(captions.length ? { captions } : {}), ...(groups.length ? { groups } : {}), ...(grids.length ? { grids } : {}), ...(mol.fills?.length ? { fills: mol.fills } : {}), ...(mol.annotations?.length ? { annotations: mol.annotations } : {}), ...(mol.style ? { style: mol.style } : {}), ...(mol.guides ? { guides: mol.guides } : {}), ...(mol.spectra?.length ? { spectra: mol.spectra.map(writeMeasured) } : {}), ...(mol.models?.length ? { models: mol.models.map(writeModel) } : {}) }, null, 1) + "\n";
 }
 const round = (n: number) => Math.round(n * 1e4) / 1e4;
 // A page spectrum's part (pageplot.ts): its role and where Octet put it. Octet 1.1.0 leaves both out.
@@ -178,7 +179,7 @@ function readTlc(v: unknown): Tlc | undefined {
 export function parse(text: string): Mol {
   let data: unknown;
   try { data = JSON.parse(text); } catch { throw new Error("This file is not an Octet drawing."); }
-  const d = data as { format?: unknown; version?: unknown; app?: unknown; structure?: { atoms?: unknown; bonds?: unknown }; captions?: unknown; arrows?: unknown; style?: unknown; cycles?: unknown; shapes?: unknown; groups?: unknown; grids?: unknown; fills?: unknown; annotations?: unknown; guides?: unknown; spectra?: unknown };
+  const d = data as { format?: unknown; version?: unknown; app?: unknown; structure?: { atoms?: unknown; bonds?: unknown }; captions?: unknown; arrows?: unknown; style?: unknown; cycles?: unknown; shapes?: unknown; groups?: unknown; grids?: unknown; fills?: unknown; annotations?: unknown; guides?: unknown; spectra?: unknown; models?: unknown };
   if (d?.format !== FORMAT) throw new Error("This file is not an Octet drawing.");
   if (typeof d.version !== "number" || d.version > VERSION) throw new Error("This drawing comes from a newer version of Octet. Update Octet to open it.");
   const atoms = d.structure?.atoms, bonds = d.structure?.bonds;
@@ -402,6 +403,11 @@ export function parse(text: string): Mol {
     out.spectra = d.spectra.map(readMeasured);
     const ids = out.spectra.flatMap((s) => s.groups.map((g) => g.id));
     if (new Set(ids).size !== ids.length || new Set(out.spectra.map(keyOf)).size !== out.spectra.length) throw new Error("This drawing is damaged.");
+  }
+  // 3D models (model3d.ts): one that is not sound is left out, and its structure stays. An older Octet passes over them.
+  if (Array.isArray(d.models)) {
+    const models = d.models.slice(0, MAX_CAPTIONS).map((x) => readModel(x, out.atoms.length)).filter((x) => x !== undefined);
+    if (models.length) out.models = models;
   }
   const known = new Set((out.spectra ?? []).flatMap((s) => s.groups.map((g) => g.id)));
   for (const a of [...out.atoms, ...out.bonds]) if (a.peaks) { const kept = a.peaks.filter((k) => known.has(k)); if (kept.length) a.peaks = kept; else delete a.peaks; }

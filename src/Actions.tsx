@@ -12,6 +12,7 @@ import {
   TextAlignJustify, TextAlignRight, Tag, TextB, TextItalic, TextUnderline, Trash, Warning, X, Plus as PlusIcon, Rows, RowsPlusBottom, RowsPlusTop, Columns, ColumnsPlusRight, ColumnsPlusLeft, ArrowsInLineHorizontal, Backspace, Broom, CirclesThree, FlowArrow, Subtitles, Textbox, WarningCircle, WaveSine, Circle, TextSubscript, TextSuperscript, Cube, Square, BoundingBox, SelectionSlash, AlignLeft, AlignRight, AlignTop, AlignBottom, ArrowsOutLineHorizontal, ArrowsOutLineVertical, BezierCurve, LineSegment, ArrowsMerge, ArrowsInCardinal, Crosshair, FadersHorizontal, Copy, ListDashes, Percent,
   EyeSlash, Angle, Resize, Unite, SelectionPlus, Paragraph, Checkerboard, CubeTransparent, CircleHalf, ClockCounterClockwise, Shuffle, ArrowBendDownRight, Path, Scissors, CircleNotch,
   Question, EyeClosed, BellSlash, ArrowsInLineVertical, BracketsRound, TreeStructure, Asterisk, AsteriskSimple, BracketsSquare, SquaresFour, StarFour, TextTSlash,
+  CubeFocus, Sphere, SquareSplitVertical, SquareHalf, ShareNetwork, Cylinder, Hexagon, TagChevron, SunDim, DropHalf, ArrowUUpRight, Recycle, DiceFive,
 } from "@phosphor-icons/react";
 import type { Analysis } from "./chem";
 import type { Problem } from "./check";
@@ -61,7 +62,7 @@ export type Context =
   // Different kinds of thing picked together: count things; atoms, when structures are among them.
   // A group selected whole counts as one object. name: a lone whole group's name ("¹H NMR spectrum", "Group").
   | { kind: "selection"; count: number; name?: string; atoms: boolean; width?: number; joinable?: boolean } // width: lines picked together (no structures or text); joinable: Join applies (atoms or bonds in two structures)
-  | { kind: "structure"; text?: LabelText; atoms: number; structures: number; next: string; nameable: boolean; joinable?: boolean; pairs?: "shown" | "hidden"; stereo?: "absolute" | "racemic" | "relative" | "mixed"; depth?: boolean; cip?: boolean; numbers?: boolean; roman?: boolean; circles?: boolean; halo?: string; fill?: string; hydrogens?: boolean; properties?: boolean; generic?: boolean }
+  | { kind: "structure"; text?: LabelText; atoms: number; structures: number; next: string; nameable: boolean; joinable?: boolean; pairs?: "shown" | "hidden"; stereo?: "absolute" | "racemic" | "relative" | "mixed"; depth?: boolean; cip?: boolean; numbers?: boolean; roman?: boolean; circles?: boolean; halo?: string; fill?: string; hydrogens?: boolean; properties?: boolean; generic?: boolean; model?: ModelContext }
   // mode: picked captions, the text being typed, or the style the next text starts with (Text tool in hand).
   | { kind: "caption"; mode: "picked" | "typing" | "next"; convertible: boolean; count: number; colour: string; bold: boolean; italic: boolean; underline: boolean; size: number; align: "left" | "centre" | "right" | "justify"; attached: boolean; attachable: boolean;
       // labelable: Octet can read a picked caption as an atom label (Make element). chemical: their Interpret chemically,
@@ -286,12 +287,37 @@ const KIND_OF: Record<string, string> = {
   frame_brackets: "frame", frame_parens: "frame", frame_braces: "frame", frame_box: "frame", frame_rounded: "frame", frame_box_shadow: "frame", frame_rounded_shadow: "frame",
   copy_smiles: "library", copy_inchi: "library", copy_inchikey: "library", "template.add": "library", "dictionary.add": "library", delete: "delete",
 };
-const kindOf = (command: string) => KIND_OF[command] ?? "other";
+const kindOf = (command: string) => KIND_OF[command] ?? (command.startsWith("model.") ? "turn" : "other");
 const setOf = (command: string) => SET_FOR[kindOf(command)];
 
 // Search Reaxys and Search PubChem: Phosphor's magnifier and the site's first letter. No logos.
 export function SearchGlyph({ letter }: { letter: string }) {
   return <span className="glyph-text search-glyph" aria-hidden><MagnifyingGlass size={16} />{letter}</span>;
+}
+
+// A selected structure's 3D model (model3d.ts), for its actions: how it shows, and whether its structure changed.
+export type ModelContext = { display: "3d" | "both" | "2d"; style: string; hydrogens: string; labels: string; look: string; scheme: string; stale: boolean; optimise: boolean };
+// Each command its own icon (look.check): the styles, and one button each that steps hydrogens, labels and colours on.
+const STYLE_ITEMS: [string, string, React.ReactNode][] = [["ballStick", "Ball and stick", <ShareNetwork size={18} />], ["stick", "Stick", <Cylinder size={18} />], ["wireframe", "Wireframe", <Hexagon size={18} />], ["spaceFilling", "Space-filling", <Sphere size={18} />]];
+// Show as 3D model, Show 2D and 3D and Show as 2D (ReShiki's), and with a model shown, its style, hydrogens, labels,
+// look and colours.
+function modelItems(model?: ModelContext): Item[] {
+  const it = (icon: React.ReactNode, name: string, command: string): Item => ({ icon, name, command, small: true });
+  if (!model) return [{ ...it(<CubeFocus size={18} />, "Show as 3D model", "model.show.3d"), small: false }, it(<SquareSplitVertical size={18} />, "Show 2D and 3D", "model.show.both")];
+  const items: Item[] = [];
+  if (model.stale) items.push({ ...it(<Recycle size={18} />, "Update 3D model", "model.update"), small: false, accent: true });
+  if (model.display !== "3d") items.push(it(<CubeFocus size={18} />, "Show as 3D model", "model.show.3d"));
+  if (model.display !== "both") items.push(it(<SquareSplitVertical size={18} />, "Show 2D and 3D", "model.show.both"));
+  if (model.display !== "2d") items.push(it(<SquareHalf size={18} />, "Show as 2D", "model.show.2d"));
+  if (model.display === "2d") return items;
+  for (const [k, name, icon] of STYLE_ITEMS) if (k !== model.style) items.push(it(icon, name, `model.style.${k}`));
+  items.push(it(<span className="glyph-text">Hₓ</span>, { all: "Show polar hydrogens only", polar: "Hide hydrogens", none: "Show all hydrogens" }[model.hydrogens] ?? "Show all hydrogens", "model.hydrogens"));
+  items.push(it(<TagChevron size={18} />, { none: "Label heteroatoms", heteroatoms: "Label all atoms", all: "Hide atom labels" }[model.labels] ?? "Label heteroatoms", "model.labels"));
+  items.push(it(<SunDim size={18} />, model.look === "glossy" ? "Flat look" : "Glossy look", "model.look"));
+  items.push(it(<DropHalf size={18} />, { octet: "VESTA colours", vesta: "Jmol colours", jmol: "Octet colours" }[model.scheme] ?? "VESTA colours", "model.scheme"));
+  items.push(it(<ArrowUUpRight size={18} />, "Reset 3D view", "model.reset"));
+  if (model.optimise) items.push(it(<DiceFive size={18} />, "Make a new 3D shape", "model.regenerate"));
+  return items;
 }
 
 // The actions for a selection, likeliest first. The panel shows them; the command palette lists them too.
@@ -372,6 +398,7 @@ export function actionItems(context: Context, messy: boolean, hiddenWarnings = f
         small(it(<DotsThreeVertical size={18} />, "Line up in a column", "align.column")), small(it(<SquareSplitHorizontal size={18} />, "Space evenly", "align.spread-row")));
       if (context.depth !== undefined) items.push(small(it(<Cube size={18} />, context.depth ? "Turn depth shading off" : "Turn depth shading on", "structure_perspective")), small(it(<Square size={18} />, "Flatten", "flatten")));
       items.push(small(it(<CubeTransparent size={18} />, "3D clean up", "clean_3d")));
+      items.push(...modelItems(context.model));
       // Query and Markush structures (ChemDraw's Structure menu): attachments on the selected atoms, and an R-group
       // definition round the selected structures.
       if (context.atoms > 1) items.push(small(it(<Asterisk size={18} />, "Add multi-centre attachment", "add_multicentre")), small(it(<AsteriskSimple size={18} />, "Add variable attachment", "add_variable")));
