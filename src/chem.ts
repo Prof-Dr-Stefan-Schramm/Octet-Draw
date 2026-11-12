@@ -1220,6 +1220,10 @@ export function toReaction(drawn: Mol, steps: RxnStep[], kind: "rxn" | "rdf" | "
   const date = `${two(d.getMonth() + 1)}/${two(d.getDate())}/${two(d.getFullYear() % 100)} ${two(d.getHours())}:${two(d.getMinutes())}`;
   return [`$RDFILE 1`, `$DATM    ${date}`, ...steps.flatMap((s) => ["$RFMT", convert(reactionKet(drawn, s), "rxnfile", mode)])].join("\n") + "\n";
 }
+// One step as a V2000 RXN file with Kekulé bonds (an aromatic ring as alternating single and double bonds) and without
+// its agents, laid out in a row as reactionKet lays it out: what Copy for SciFinder (scifinder.ts) writes as ChemDoodle JSON.
+export const toKekuleRxn = (drawn: Mol, step: RxnStep): string =>
+  convert(reactionKet(drawn, { ...step, agents: [] }), "rxnfile", { "molfile-saving-mode": "2000", "dearomatize-on-load": "true" });
 // Generic labels as query atoms (any atom A, heteroatom Q, metal M, halogen X, and each with H, as ChemDraw's).
 // SMILES cannot keep them; a molfile can, for a Reaxys search. undefined when the drawing has none.
 // As ChemDraw 26.1 writes a molfile (CoreChemistry IsAcceptableGeneric): A, Q and X go as the atom symbol; the

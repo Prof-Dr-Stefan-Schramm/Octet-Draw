@@ -7,7 +7,7 @@ import {
   FileDashed, ArrowsLeftRight, Angle, CornersOut, Faders, FloppyDiskBack, Broom, Files, Unite, MagnetStraight, Paragraph, Resize, Ruler, GridFour, CrosshairSimple, Swatches, DotsNine, CompassTool, ArrowsVertical,
   EyeSlash, Crosshair, Repeat, CubeTransparent, ArrowsMerge, ArrowsInCardinal, FadersHorizontal, CaretLineUp, Sparkle, PencilRuler, CloudArrowDown, Bug, GraduationCap, CopySimple, IdentificationBadge, Key, FileCode, FileTxt, Notepad,
   File as PageIcon, CheckCircle, Asterisk, AsteriskSimple, BracketsSquare, SquaresFour, FlowArrow, BracketsRound,
-  TreeStructure, StarFour, Lightbulb, Prohibit, SelectionForeground, PaintRoller, WarningDiamond, TextTSlash, NotePencil, ArrowSquareOut, ImageSquare, MarkdownLogo, Notebook,
+  TreeStructure, StarFour, Lightbulb, Prohibit, SelectionForeground, PaintRoller, WarningDiamond, TextTSlash, NotePencil, ArrowSquareOut, ImageSquare, MarkdownLogo, Notebook, Binoculars,
 } from "@phosphor-icons/react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "./listen";
@@ -113,6 +113,7 @@ import { addSet, addSetOf, addTo, closePalette, duplicateTemplate, freeSetName, 
 import { formulaCaption, formulaRuns } from "./labels";
 import { expandEscapes, expandRuns, keptText } from "./escapes";
 import { CharMap, inMap } from "./CharMap";
+import { forSciFinder } from "./scifinder";
 import { captionAtom, captionsToAtoms, chemicalCaption, interpretLabels, labelable, sandwich, scriptLabels, setLabelRuns, withCaptionAtoms } from "./edit";
 import { bendOf, crossedBonds, cutEndAt, cutPoints, cutSides, cutThrough, extendCut } from "./masscut";
 import { common, edited, labelStyle, lines as richLines, normalise, plainOf, runsOf, shareColour, styleRange, styled, trimLines, whole, without, type RunStyle, type TextRun } from "./richtext";
@@ -2437,6 +2438,7 @@ export default function Editor() {
     copy_cdxml: () => copyAs("cdxml"),
     copy_mol: () => copyAs("mol"),
     copy_mol_v2000: () => copyAs("mol_v2000"),
+    copy_scifinder: () => copyForSciFinder(),
     // File > Open Recent: the drawing at that place in the list (the menu lists them in the list's order).
     ...Object.fromEntries(Array.from({ length: 10 }, (_, k) => [`recent_${k}`, () => {
       if (TAURI) void invoke<RecentEntry[]>("recent_list").then((list) => { if (list[k]) openRecent(list[k]); }).catch(() => {});
@@ -6375,16 +6377,18 @@ export default function Editor() {
   }, [paletteNames, fronted]); // eslint-disable-line react-hooks/exhaustive-deps
   const untidy = useMemo(() => messy(doc, selection), [doc, selection]);
   // Text the panel asked to copy; the copy handler uses it instead of SMILES.
-  const copyText = useRef<string>(undefined);
+  const copyText = useRef<string>(undefined), copyDone = useRef("Copied.");
   // Text on the clipboard, as text only (a value from a panel, Copy As SMILES). In the app, the app puts it there
   // (CH-7): the webview lets a page copy only during a click, and a menu command is not one. In a browser, the copy
   // event puts it there, or else the Clipboard API.
-  const copyPlain = (text: string) => {
-    if (NATIVE_CLIP) return void copyToClipboard({ text }).then(() => setNotice("Copied.", "done"), (err) => setNotice(failure("Octet cannot copy this.", err)));
+  // done: the notice when the text is on the clipboard.
+  const copyPlain = (text: string, done = "Copied.") => {
+    if (NATIVE_CLIP) return void copyToClipboard({ text }).then(() => setNotice(done, "done"), (err) => setNotice(failure("Octet cannot copy this.", err)));
     copyText.current = text;
+    copyDone.current = done;
     if (document.execCommand("copy")) return;
     copyText.current = undefined;
-    void (navigator.clipboard?.writeText(text) ?? Promise.reject()).then(() => setNotice("Copied.", "done"), () => setNotice("Octet cannot copy this."));
+    void (navigator.clipboard?.writeText(text) ?? Promise.reject()).then(() => setNotice(done, "done"), () => setNotice("Octet cannot copy this."));
   };
   // Edit > Cut, Copy and Paste on Linux, where they are Octet's own menu items (main.rs) and GTK gives them Ctrl+X, C
   // and V before the page. In a text field they work on its text through the app's clipboard, as copyPlain does (the
@@ -6419,6 +6423,20 @@ export default function Editor() {
     if (text) copyPlain(text);
     else if (mol.atoms.length) setNotice(`Octet cannot write this structure as ${name}.`);
     else setNotice("There is no structure to copy.", "info");
+  };
+  // Edit > Copy As > SciFinder (issue #113, after ReShiki's chemical text copy): the selected structures (or all of them)
+  // as SMILES for CAS Draw's text field, or one reaction step as ChemDoodle JSON for SciFinder's ChemDoodle editor
+  // (scifinder.ts). The notice says where to paste it. Nothing goes to SciFinder: the user pastes it there.
+  const copyForSciFinder = () => {
+    const part = selectedPart() ?? doc, mol = withCaptionAtoms(part, style.interpret).mol;
+    if (!mol.atoms.length) return setNotice("There is no structure to copy.", "info");
+    if (!loaded) return setNotice("Octet cannot write this structure for SciFinder yet. Try again in a moment.");
+    let out: ReturnType<typeof forSciFinder>;
+    try { out = forSciFinder(mol, stepsIn(part)); } catch { out = { refused: "Octet cannot write this structure for SciFinder." }; }
+    if ("refused" in out) return setNotice(out.refused);
+    copyPlain(out.text, out.reaction
+      ? `Copied the reaction for SciFinder. In SciFinder, open the ChemDoodle editor and choose Open. Paste the text, then choose Load.${out.agents ? " The structures above and below the arrow are not included." : ""}`
+      : "Copied as SMILES for SciFinder. In CAS Draw, paste it into the text field, then choose Add to Editor.");
   };
 
   // The key to show beside an action: menu shortcuts, then the user's shortcut table.
@@ -6468,6 +6486,7 @@ export default function Editor() {
     save: ["Save", `${MOD}S`, <FloppyDisk size={18} />], save_as: ["Save as…", `⇧${MOD}S`, <FloppyDiskBack size={18} />],
     copy_smiles: ["Copy as SMILES", `⌥${MOD}C`, <CopySimple size={18} />], copy_inchi: ["Copy as InChI", "", <IdentificationBadge size={18} />], copy_inchikey: ["Copy as InChIKey", "", <Key size={18} />],
     copy_cdxml: ["Copy as CDXML text", `${MOD}D`, <FileCode size={18} />], copy_mol: ["Copy as MOL text", `⌥${MOD}O`, <FileTxt size={18} />], copy_mol_v2000: ["Copy as MOL V2000 text", `⇧⌥${MOD}O`, <Notepad size={18} />],
+    copy_scifinder: ["Copy for SciFinder", "", <Binoculars size={18} />],
     export: ["Export…", EXPORT_KEYS, <ExportIcon size={18} />], print: ["Print…", `${MOD}P`, <Printer size={18} />], print_selection: ["Print selection…", "", <SelectionForeground size={18} />], apply_style_file: ["Apply settings from file…", "", <PaintRoller size={18} />], page_setup: ["Page setup…", `⇧${MOD}P`, <FileDashed size={18} />],
     about: ["About Octet Draw", "", <Info size={18} />], check_updates: ["Check for updates…", "", <CloudArrowDown size={18} />], report_problem: ["Report a problem…", "", <Bug size={18} />], tutorial: ["Tutorial", "", <GraduationCap size={18} />], atom_properties: ["Atom properties…", "", <Faders size={18} />], bond_properties: ["Bond properties…", "", <FadersHorizontal size={18} />],
     bracket_properties: ["Bracket properties…", "", <BracketsRound size={18} />], rlogic: ["R-Logic query…", "", <TreeStructure size={18} />],
@@ -6657,6 +6676,7 @@ export default function Editor() {
     }
 
     if (["copy_smiles", "copy_inchi", "copy_inchikey", "copy_cdxml", "copy_mol", "copy_mol_v2000"].includes(command)) return copyAs(command.slice(5));
+    if (command === "copy_scifinder") return copyForSciFinder();
     if (command === "copy") return void document.execCommand("copy");
     if (command === "paste_hint") return setNotice(`Copy a name, SMILES string or MOL file. Then press ${MOD}V here.`, "info");
     if (command.startsWith("copy_text:")) return copyPlain(command.slice(10));
@@ -7633,7 +7653,8 @@ export default function Editor() {
         e.clipboardData?.setData("text/plain", copyText.current);
         e.preventDefault();
         copyText.current = undefined;
-        setNotice("Copied.", "done");
+        setNotice(copyDone.current, "done");
+        copyDone.current = "Copied.";
         return Promise.resolve(true);
       }
       if (partPick) return Promise.resolve(false);

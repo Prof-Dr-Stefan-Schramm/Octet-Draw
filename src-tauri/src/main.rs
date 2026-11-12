@@ -575,7 +575,7 @@ fn menu(app: &AppHandle, palette: &[String], text: &(Vec<String>, Vec<f64>), ove
         file.append(&item("quit", "Exit", "CmdOrCtrl+Q")?)?;
     }
     // Copy As, as ChemDraw's: each puts the selected structures (or all of them) on the clipboard as text. ChemDraw's
-    // keys: ⌥⌘C SMILES, ⌘D CDXML Text, ⌥⌘O MOL Text (V3000 since ChemDraw 26.1), ⇧⌥⌘O MOL V2000 Text.
+    // keys: ⌥⌘C SMILES, ⌘D CDXML Text, ⌥⌘O MOL Text (V3000 since ChemDraw 26.1), ⇧⌥⌘O MOL V2000 Text. Then SciFinder.
     section.replace("Edit › Copy As".into());
     let copy_as = Submenu::with_items(app, "Copy As", true, &[
         &item("copy_smiles", "SMILES", "Alt+CmdOrCtrl+C")?,
@@ -584,6 +584,9 @@ fn menu(app: &AppHandle, palette: &[String], text: &(Vec<String>, Vec<f64>), ove
         &item("copy_cdxml", "CDXML Text", "CmdOrCtrl+D")?,
         &item("copy_mol", "MOL Text", "Alt+CmdOrCtrl+O")?,
         &item("copy_mol_v2000", "MOL V2000 Text", "Alt+Shift+CmdOrCtrl+O")?,
+        // Octet's own (issue #113): SMILES for CAS Draw's text field, or one reaction as ChemDoodle JSON (scifinder.ts).
+        &sep()?,
+        &item("copy_scifinder", "SciFinder", "")?,
     ])?;
     section.replace("Edit".into());
     // Cut, Copy and Paste: the system's items on the Mac, and on Windows, where they press the keys in the window.
