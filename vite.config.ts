@@ -13,8 +13,11 @@ export default defineConfig(() => ({
   // same variable.
   define: { __FEEDBACK__: JSON.stringify(process.env.OCTET_FEEDBACK !== "0") },
 
-  // Pre-bundling breaks the relative URL Indigo uses to find its .wasm file.
-  optimizeDeps: { exclude: ["indigo-ketcher"] },
+  // Pre-bundling breaks the relative URL Indigo uses to find its .wasm file, and ONNX Runtime's (picture to
+  // structure, decision 0023).
+  optimizeDeps: { exclude: ["indigo-ketcher", "onnxruntime-web"] },
+  // The recognition worker (src/recognise.worker.ts) imports ONNX Runtime as a module.
+  worker: { format: "es" as const },
 
   // Vite options tailored for Tauri development and only applied in `tauri dev` or `tauri build`
   //
@@ -32,6 +35,9 @@ export default defineConfig(() => ({
           port: 1421,
         }
       : undefined,
+    // In development in a browser, picture to structure reads its model files from the folder VITE_RECOGNISE_MODELS
+    // names (the app reads them from its data folder).
+    fs: { allow: [".", ...(process.env.VITE_RECOGNISE_MODELS ? [process.env.VITE_RECOGNISE_MODELS] : [])] },
     watch: {
       // 3. tell Vite to ignore watching `src-tauri`
       ignored: ["**/src-tauri/**"],

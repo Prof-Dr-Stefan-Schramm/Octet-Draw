@@ -35,6 +35,9 @@ tauri-plugin-updater = { version = "2.14", default-features = false, features = 
 # same features, so nothing new is built.
 reqwest = { version = "0.13", default-features = false, features = ["rustls-no-provider", "system-proxy"] }
 rustls = { version = "0.23", default-features = false, features = ["ring"] }
+# Picture to structure's model files are checked by SHA-256 (src/recognise.rs, decision 0023). Already in the build
+# through Tauri.
+sha2 = "0.10"
 
 # A second launch on Windows and Linux gives its files to the Octet that runs (src/open.rs).
 [target.'cfg(any(windows, target_os = "linux"))'.dependencies]

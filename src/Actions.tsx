@@ -5,7 +5,7 @@
 // ChemDraw users expect it (menus and keys).
 import { useEffect, useId, useRef, useState } from "react";
 import {
-  AlignCenterHorizontal, AlignCenterVertical, Flask, Palette, Table, Repeat, ArrowsInSimple, ArrowsClockwise, ArrowsDownUp, CaretDown, CaretRight, ArrowsLeftRight, ArrowsHorizontal, ArrowsOutSimple, Atom, BookmarkSimple, BookOpenText, CaretUpDown, Graph,
+  AlignCenterHorizontal, Scan, AlignCenterVertical, Flask, Palette, Table, Repeat, ArrowsInSimple, ArrowsClockwise, ArrowsDownUp, CaretDown, CaretRight, ArrowsLeftRight, ArrowsHorizontal, ArrowsOutSimple, Atom, BookmarkSimple, BookOpenText, CaretUpDown, Graph,
   AlignBottomSimple, AlignTopSimple, ArrowLineDown, ArrowLineUp, CursorText, DotsThree, DotsThreeVertical, Faders, Polygon, Rectangle, ArrowArcLeft, ArrowArcRight, ArrowsCounterClockwise, ArrowUDownLeft, CircleDashed, CornersOut, MagnifyingGlass, Swap,
   ArrowUUpLeft, ClipboardText, CopySimple, IdentificationBadge, Key, Target, LineSegments, Minus, Plus, Stack, StackSimple, Eye, FileArrowDown, FlipHorizontal, FlipVertical, GearSix, House, LinkBreak, LinkSimple, ListNumbers, Hash, MagicWand, MinusCircle,
   PencilSimpleLine, PlusCircle, SelectionAll, SlidersHorizontal, SquareSplitHorizontal, TagSimple, TextAlignCenter, TextAlignLeft,
@@ -276,7 +276,7 @@ const KIND_OF: Record<string, string> = {
   select_all: "view", zoom_fit: "view", centre_view: "view", import: "file", select_structure: "view",
   "shape.row.before": "table", "shape.col.before": "table", "shape.row.delete": "table", "shape.col.delete": "table", "shape.fit": "table", "shape.clear": "table", "shape.dashed": "table",
   "shape.hide.origin": "plate", "shape.hide.front": "plate", "shape.hide.border": "plate", "shape.ticks": "plate", "shape.transparent": "plate", "cycle.reverse": "cycle", "cycle.remove": "cycle",
-  structure_to_name: "analysis", properties: "analysis", show_stereo: "analysis", predict_1h: "analysis", predict_13c: "analysis",
+  structure_to_name: "analysis", recognise_structures: "analysis", properties: "analysis", show_stereo: "analysis", predict_1h: "analysis", predict_13c: "analysis",
   search_reaxys: "search", search_reaxys_exact: "search", search_pubchem: "search", search_pubchem_sub: "search",
   "rotate.cw15": "turn", "rotate.ccw15": "turn", flip_h: "turn", flip_v: "turn", mirror_h: "turn", mirror_v: "turn", structure_perspective: "turn", flatten: "turn", clean_3d: "turn", clean_reaction_augmented: "turn", rotate_dialog: "turn", scale_dialog: "turn",
   pairs: "marks", number: "marks", "numbers.roman": "marks", atom_numbers: "marks", show_warnings: "marks", hide_warnings: "marks", explain_warning: "marks", "caption.add": "marks", colour_by_element: "marks", aromatic_display: "marks", hydrogen_display: "marks", contract_label: "marks",
@@ -455,6 +455,8 @@ export function actionItems(context: Context, messy: boolean, hiddenWarnings = f
       }
       if (isBracket({ kind: context.shape })) items.push(it(<BracketsRound size={18} />, "Bracket properties…", "bracket_properties"), it(<LineSegments size={18} />, context.dashed ? "Solid lines" : "Dashed lines", "shape.dashed"), ...warnings());
       if (context.rgroup) items.push(it(<TreeStructure size={18} />, "R-Logic…", "rlogic"));
+      // A picture: its structures as atoms and bonds (decision 0023).
+      if (context.shape === "picture") items.push({ ...it(<Scan size={18} />, "Convert picture to structures", "recognise_structures"), short: "Picture to structures" });
       items.push(...turnsAndFlips, ...objects, ...order, keep, del);
       break;
     case "spot":

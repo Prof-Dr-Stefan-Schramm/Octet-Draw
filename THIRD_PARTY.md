@@ -45,6 +45,11 @@ Every dependency Octet uses, with its licence. Rules: [docs/licence.md](docs/lic
 | Instrument Sans (@fontsource/instrument-sans) | 5.3 | OFL-1.1 | UI font |
 | IBM Plex Mono (@fontsource/ibm-plex-mono) | 5.3 | OFL-1.1 | SMILES, InChI and formula font |
 | @phosphor-icons/react | 2.1 | MIT | UI icons |
+| onnxruntime-web (Microsoft) | 1.31 | MIT | Picture to structure (decision 0023): runs the two reading models as WebAssembly, on one thread, in a worker. Only its WASM build is used (`onnxruntime-web/wasm`). Its packages onnxruntime-common (MIT), flatbuffers (Apache-2.0), long (Apache-2.0), protobufjs (BSD-3-Clause) and guid-typescript (ISC) come with it |
+| sha2 (Rust, RustCrypto) | 0.10 | MIT OR Apache-2.0 | Checks the picture recognition model files by SHA-256 (`src-tauri/src/recognise.rs`). Already in the build through Tauri |
+| MolScribe model (Yujie Qian et al., MIT) | swin_base_char_aux_1m680k | MIT (code and weights) | Picture to structure. Not in the installer: downloaded or installed by the user, once, as `molscribe.octmodel` (exported to ONNX with 8-bit weights by `tools/recognise`) |
+| OCSRGlyph model (Edison Scientific) | 2026 | Apache-2.0 (code and weights) | Picture to structure. Not in the installer: downloaded or installed by the user, once, as `glyph.octmodel` (exported to ONNX with 8-bit weights by `tools/recognise`) |
+| PP-OCRv5 English text line model (PaddlePaddle, ONNX by monkt/paddleocr-onnx) | PP-OCRv5 | Apache-2.0 | Picture to structure: reads the conditions over and under reaction arrows. Not in the installer: downloaded or installed by the user, once, as `text.octmodel` (7.8 MB) |
 | OPSIN | 2.8.0 | MIT | Name to structure, compiled to JavaScript ([tools/opsin](tools/opsin/README.md)). Octet adds phthalocyanine and corrole to its data (`tools/opsin/pack/arylGroups.patch`) |
 | dk.brics.automaton | 1.12-4 | BSD-3-Clause | Used by OPSIN (one class modified) |
 | TeaVM class library and runtime | 0.16.0 | Apache-2.0 | Runs OPSIN's Java as JavaScript |

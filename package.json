@@ -16,6 +16,7 @@
     "@phosphor-icons/react": "^2.1.10",
     "@tauri-apps/api": "^2.12.4",
     "indigo-ketcher": "^1.46.0",
+    "onnxruntime-web": "1.31.1",
     "react": "^19.3.0",
     "react-dom": "^19.3.0"
   },

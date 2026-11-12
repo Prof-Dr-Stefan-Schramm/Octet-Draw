@@ -1,0 +1,37 @@
+{
+ "drawn": {
+  "found.exact": 98,
+  "molscribe.exact": 87,
+  "glyph.exact": 85,
+  "octet.exact": 92,
+  "molscribe.skeleton": 87,
+  "glyph.skeleton": 88,
+  "octet.skeleton": 92,
+  "arrows.exact": 98,
+  "arrows.skeleton": 98,
+  "conditions.exact": 98,
+  "conditions.skeleton": 98
+ },
+ "new": {
+  "found.exact": 98,
+  "molscribe.exact": 78,
+  "glyph.exact": 49,
+  "octet.exact": 82,
+  "molscribe.skeleton": 80,
+  "glyph.skeleton": 67,
+  "octet.skeleton": 84,
+  "arrows.exact": 98,
+  "arrows.skeleton": 98,
+  "conditions.exact": 98,
+  "conditions.skeleton": 98
+ },
+ "old": {
+  "found.exact": 86,
+  "molscribe.exact": 11,
+  "glyph.exact": 14,
+  "octet.exact": 11,
+  "molscribe.skeleton": 14,
+  "glyph.skeleton": 14,
+  "octet.skeleton": 14
+ }
+}
