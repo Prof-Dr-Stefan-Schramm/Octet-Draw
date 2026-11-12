@@ -5,7 +5,7 @@
 // ChemDraw users expect it (menus and keys).
 import { useEffect, useId, useRef, useState } from "react";
 import {
-  AlignCenterHorizontal, AlignCenterVertical, Flask, Palette, Table, Repeat, ArrowsInSimple, ArrowsClockwise, ArrowsDownUp, CaretDown, CaretRight, ArrowsLeftRight, ArrowsHorizontal, ArrowsOutSimple, Atom, BookmarkSimple, BookOpenText, CaretUpDown, Graph,
+  AlignCenterHorizontal, AlignCenterVertical, Flask, Palette, Table, GridNine, Repeat, ArrowsInSimple, ArrowsClockwise, ArrowsDownUp, CaretDown, CaretRight, ArrowsLeftRight, ArrowsHorizontal, ArrowsOutSimple, Atom, BookmarkSimple, BookOpenText, CaretUpDown, Graph,
   AlignBottomSimple, AlignTopSimple, ArrowLineDown, ArrowLineUp, CursorText, DotsThree, DotsThreeVertical, Faders, Polygon, Rectangle, ArrowArcLeft, ArrowArcRight, ArrowsCounterClockwise, ArrowUDownLeft, CircleDashed, CornersOut, MagnifyingGlass, Swap,
   ArrowUUpLeft, ClipboardText, CopySimple, IdentificationBadge, Key, Target, LineSegments, Minus, Plus, Stack, StackSimple, Eye, FileArrowDown, FlipHorizontal, FlipVertical, GearSix, House, LinkBreak, LinkSimple, ListNumbers, Hash, MagicWand, MinusCircle,
   PencilSimpleLine, PlusCircle, SelectionAll, SlidersHorizontal, SquareSplitHorizontal, TagSimple, TextAlignCenter, TextAlignLeft,
@@ -774,6 +774,8 @@ export function Actions({ open, context, analysis, problems, fonts, hiddenWarnin
                 {el}
               </button>
             ))}
+            {/* Any of the 118 elements: the periodic table window (PeriodicTable.tsx). */}
+            <button className="chip" aria-label="Periodic table" data-tip="Periodic table" onClick={() => run("periodic_table")}><GridNine size={16} /></button>
           </div>
           {/* ChemDraw's Insert Generic Label: A, M, Q, X and R, then the Reaxys classes, each with what it stands for. */}
           <div className="chips groups" role="group" aria-label="Generic label">

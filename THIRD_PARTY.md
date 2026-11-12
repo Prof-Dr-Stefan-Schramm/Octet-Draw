@@ -38,6 +38,7 @@ Every dependency Octet uses, with its licence. Rules: [docs/licence.md](docs/lic
 | MPL-2.0 crates inside Tauri: cssparser, selectors, dtoa-short (through tauri-utils' dom_query), option-ext (through dirs) | 0.37, 0.38, 0.3, 0.2 | MPL-2.0, not changed. Sam approved, 18 October 2026 | Octet does not call them. Tauri needs them. Their text and source location are in the shipped licences file |
 | Unicode-3.0 code crates inside Tauri: icu_collections, icu_normalizer, icu_properties, icu_provider and the ICU4X crates they use (through url) | 2.3 | Unicode-3.0. Sam approved, 18 October 2026 (code and data) | Octet does not call them. Tauri needs them for web addresses |
 | Indigo's MoleculeCleaner2d and BiconnectedDecomposer (indigo-core) | 1.46.0 | Apache-2.0 | Clean Up's geometry, ported to TypeScript and changed in `src/clean2d.ts` (EPAM's copyright notice kept there) |
+| ReShiki's atom palette layout (`src/app/palettes.rs`, Ameyanagi and ReShiki contributors, github.com/Ameyanagi/ReShiki) | commit fb508e2 (v0.14) | MIT OR Apache-2.0 (used under Apache-2.0) | The periodic table window's 18-column layout with the f-block rows, in `src/periodic.ts` (credit comment at the top of it and of `src/periodic.check.ts`). No element colours |
 | react, react-dom | 19.3 | MIT | UI |
 | vite, @vitejs/plugin-react | 8.3, 6.1 | MIT | Bundler (dev only) |
 | typescript | 7.0 | Apache-2.0 | Type checking (dev only) |

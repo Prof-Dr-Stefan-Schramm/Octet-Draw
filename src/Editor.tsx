@@ -6,7 +6,7 @@ import {
   TextB, TextItalic, TextT, TextUnderline, Warning, Stack, StackSimple, ArrowsDownUp, FileText, CaretDown, ClockCounterClockwise, X, Info, Printer, Export as ExportIcon, Hash, ArrowsInSimple, Table,
   FileDashed, ArrowsLeftRight, Angle, CornersOut, Faders, FloppyDiskBack, Broom, Files, Unite, MagnetStraight, Paragraph, Resize, Ruler, GridFour, CrosshairSimple, Swatches, DotsNine, CompassTool, ArrowsVertical,
   EyeSlash, Crosshair, Repeat, CubeTransparent, ArrowsMerge, ArrowsInCardinal, FadersHorizontal, CaretLineUp, Sparkle, PencilRuler, CloudArrowDown, Bug, GraduationCap, CopySimple, IdentificationBadge, Key, FileCode, FileTxt, Notepad,
-  File as PageIcon, CheckCircle, Asterisk, AsteriskSimple, BracketsSquare, SquaresFour, FlowArrow, BracketsRound,
+  File as PageIcon, GridNine, CheckCircle, Asterisk, AsteriskSimple, BracketsSquare, SquaresFour, FlowArrow, BracketsRound,
   TreeStructure, StarFour, Lightbulb, Prohibit, SelectionForeground, PaintRoller, WarningDiamond, TextTSlash, NotePencil, ArrowSquareOut, ImageSquare, MarkdownLogo, Notebook,
 } from "@phosphor-icons/react";
 import { invoke } from "@tauri-apps/api/core";
@@ -24,7 +24,7 @@ import {
   EMPTY, extent, stack, addArrow, addCaption, addCycle, addCharge, addRing, lowerBond, updateArrow, deleteGraphics, deleteChosen, inPolygon, updateCaption, atomAt, atomsIn, bondAt, bounds, complete, deleteAtom, deleteAtoms, flipBond,
   addChair, addGroup, addLane, addTemplate, alignFragments, arrangeShifts, partBox, type Arrange, cutReaction, deleteLane, moveLane, restyleSpot, atomsInPolygon, flipAtoms, fragments, joinOverlaps, joinSelection, setLabel, merge, moveAtoms, neighbours, onSelection, pos, setBondSpec, setElement, setPosition, sprout, subset,
   addShape, addSymbol, markNear, moveMark, bondOrders, toggleHydrogens, freePairs, nextDirection, appendCurvePoint, moveCurvePoint, nearestOnCurve, removeCurvePoint, splitCurve, withCurve, setAtomMarks, toggleLonePairs, updateShape, type BondSpec, type Group, type P, type SymbolKind, newTable, resizeTable, setTableCell, expandLabel, contractLabel, spliceTable, sizeTable, fitTable, clearTable, pairMap, clearMap, scaleSettings, scaleSizes, transformParts, medianBond, fitSizes, scaleAt, stereocentres, setEnhanced, markDirections, tiltAtoms, turnAboutBond, flattenAtoms, hingeOf, carryDepth, groupsOf, groupSelection, ungroupSelection, duplicateSelection, extractSelection, insertMol, inRow, wholeIntegral, wholeGroups, groupTargets, selectedGroups, outermost, outerGroups, pivotOf,
-  labelHooks, toFront, addChain, chainPoints, chainThrough, snake, clickBond, keyBond, dragBond, etaRing, addGroupAt, farBond, jumpHot, keepHot, walkHot, type Hot, keyElement, placeCentres, pickAtoms, nextGroup,
+  labelHooks, toFront, addChain, chainPoints, chainThrough, snake, clickBond, keyBond, dragBond, etaRing, addGroupAt, farBond, jumpHot, keepHot, walkHot, type Hot, keyElement, elementAt, placeCentres, pickAtoms, nextGroup,
 } from "./edit";
 import { snapBoxes, snapMove, type Guide } from "./snap";
 import { clean3d, MOST_3D } from "./clean3d";
@@ -113,6 +113,8 @@ import { addSet, addSetOf, addTo, closePalette, duplicateTemplate, freeSetName, 
 import { formulaCaption, formulaRuns } from "./labels";
 import { expandEscapes, expandRuns, keptText } from "./escapes";
 import { CharMap, inMap } from "./CharMap";
+import { PeriodicTable } from "./PeriodicTable";
+import { capital, elementInfo } from "./periodic";
 import { captionAtom, captionsToAtoms, chemicalCaption, interpretLabels, labelable, sandwich, scriptLabels, setLabelRuns, withCaptionAtoms } from "./edit";
 import { bendOf, crossedBonds, cutEndAt, cutPoints, cutSides, cutThrough, extendCut } from "./masscut";
 import { common, edited, labelStyle, lines as richLines, normalise, plainOf, runsOf, shareColour, styleRange, styled, trimLines, whole, without, type RunStyle, type TextRun } from "./richtext";
@@ -2466,6 +2468,8 @@ export default function Editor() {
       charFocus.current = byKey;
       setCharMap((o) => !o);
     },
+    // View > Show or Hide Periodic Table (PeriodicTable.tsx).
+    periodic_table: () => setPeriodic((o) => !o),
     // Text > Font: Other Font… finds any font on the computer (the menu's own fonts are added with the font list).
     font_other: () => {
       const c = contextOf();
@@ -2898,6 +2902,11 @@ export default function Editor() {
   // (⇧⌘Space) was last pressed, so the map takes the focus from the text only when opened with the key; from the menu
   // with the mouse, the caret stays in the text.
   const [charMap, setCharMap] = useState(false);
+  // View > Show or Hide Periodic Table (PeriodicTable.tsx), and the element it holds for the Text tool: as in ChemDraw, a
+  // click on an atom with the Text tool makes it that element, and a click on empty space adds a lone atom of it. The
+  // element is let go when the window closes or another tool is taken.
+  const [periodic, setPeriodic] = useState(false), [heldElement, setHeldElement] = useState<string>();
+  useEffect(() => { if (!periodic || tool !== "text") setHeldElement(undefined); }, [periodic, tool]);
   const charKey = useRef(-Infinity), charFocus = useRef(true);
   useEffect(() => {
     const down = (e: KeyboardEvent) => { if ((e.code === "Space" || e.key === " ") && e.shiftKey && (e.metaKey || e.ctrlKey)) charKey.current = performance.now(); };
@@ -6490,7 +6499,7 @@ export default function Editor() {
     clean_up: ["Clean up structure", `⇧${MOD}K`, <MagicWand size={18} />], flip_h: ["Rotate 180° horizontal", `⇧${MOD}H`, <ArrowsLeftRight size={18} />], flip_v: ["Rotate 180° vertical", `⇧${MOD}V`, <ArrowsDownUp size={18} />],
     zoom_in: ["Magnify", `⇧${MOD}+`, <MagnifyingGlassPlus size={18} />], zoom_out: ["Reduce", `⇧${MOD}−`, <MagnifyingGlassMinus size={18} />],
     zoom_actual: ["Actual size", `${MOD}\\`, <FrameCorners size={18} />], zoom_fit: ["Fit to window", `${MOD}/`, <CornersOut size={18} />], centre_view: ["Centre in window", `⌥${MOD}/`, <Crosshair size={18} />], show_page: ["Show page", "", <PageIcon size={18} />],
-    name_to_structure: ["Convert name to structure", `⇧${MOD}N`, <AtomIcon size={18} />], insert_peptide: ["Insert peptide…", "", <Dna size={18} />], insert_rna: ["Insert RNA…", "", <span className="glyph-text">RNA</span>], insert_dna: ["Insert DNA…", "", <span className="glyph-text">DNA</span>], char_map: [charMap ? "Hide character map" : "Character map", `⇧${MOD}Space`, <span className="glyph-text">αβ</span>],
+    name_to_structure: ["Convert name to structure", `⇧${MOD}N`, <AtomIcon size={18} />], insert_peptide: ["Insert peptide…", "", <Dna size={18} />], insert_rna: ["Insert RNA…", "", <span className="glyph-text">RNA</span>], insert_dna: ["Insert DNA…", "", <span className="glyph-text">DNA</span>], char_map: [charMap ? "Hide character map" : "Character map", `⇧${MOD}Space`, <span className="glyph-text">αβ</span>], periodic_table: [periodic ? "Hide periodic table" : "Periodic table", "", <GridNine size={18} />],
     check_structure: ["Check structure", "", <CheckCircle size={18} />], stereo_clear: ["Clear enhanced stereochemistry", "", <Prohibit size={18} />],
     stereo_abs: ["Mark as absolute", "", <span className="glyph-text">abs</span>], stereo_or: ["Create or group", "", <span className="glyph-text">or</span>], stereo_and: ["Create and group", "", <span className="glyph-text">&amp;</span>],
     snap: [settings.snap ? "Turn snapping off" : "Turn snapping on", undefined, <MagnetStraight size={18} />],
@@ -6585,6 +6594,26 @@ export default function Editor() {
     const own = [...settings.palette, ...(style.palette ?? []).filter((c) => !settings.palette.some((u) => u.hex.toLowerCase() === c.hex.toLowerCase()))].slice(0, 24);
     return own.length ? { ...style, palette: own } : style;
   };
+  // The periodic table window: a pick sets every selected atom to the element, as one step, and the selection stays.
+  // With no atom selected, the Text tool takes it (a second click on the same element lets it go). Returns what the
+  // window says.
+  const selectedAtoms = () => [...selection].filter((i) => i < doc.atoms.length);
+  function pickElement(symbol: string): string {
+    const atoms = selectedAtoms(), name = elementInfo(symbol)?.name ?? symbol;
+    if (atoms.length) {
+      set(atoms.reduce((m, i) => keyElement(m, i, symbol), doc), true);
+      return `Set ${atoms.length === 1 ? "the atom" : `${atoms.length} atoms`} to ${name}.`;
+    }
+    if (heldElement === symbol && tool === "text") { setHeldElement(undefined); return `${capital(name)} is not chosen now.`; }
+    setTool("text");
+    setHeldElement(symbol);
+    return `${capital(name)} is chosen. Click an atom to change it, or click empty space to add it.`;
+  }
+  // The element the window marks: the selected atoms' own element, when they all have the same one, else the one held.
+  function periodicCurrent(): string | undefined {
+    const atoms = selectedAtoms(), labels = new Set(atoms.map((i) => (doc.atoms[i].text ? "" : doc.atoms[i].label)));
+    return atoms.length ? (labels.size === 1 ? [...labels][0] || undefined : undefined) : heldElement;
+  }
   function runAction(command: string) {
     const ids = [...selection];
     if (commands.current[command]) return commands.current[command]();
@@ -7134,6 +7163,11 @@ export default function Editor() {
       // Shift makes its first bond single.
       const sproutIt = t.atom !== undefined && alt !== settings.sproutRings;
       return set(addRing(doc, r.n, r.aromatic || !!more.meta, t.bond !== undefined ? { bond: t.bond } : t.atom !== undefined ? { atom: t.atom } : { point: at }, { sprout: sproutIt, firstSingle: more.shift, circle: more.meta }), false, undefined, "placed");
+    }
+    // An element held in the periodic table: the atom clicked becomes it, or a lone atom of it goes on empty space.
+    if (tool === "text" && heldElement && t.caption === undefined) {
+      if (t.atom !== undefined) return set(keyElement(doc, t.atom, heldElement));
+      return set(elementAt(doc, at, heldElement)[0], false, undefined, "placed");
     }
     if (tool === "text") {
       // Option-click repeats the last label typed, as in ChemDraw.
@@ -8716,6 +8750,7 @@ export default function Editor() {
         );
       }}</Live>}
       <Exit>{charMap && <CharMap focus={charFocus.current} onClose={() => setCharMap(false)} />}</Exit>
+      <Exit>{periodic && <PeriodicTable current={periodicCurrent()} held={heldElement} onPick={pickElement} onClose={() => setPeriodic(false)} />}</Exit>
       <Exit>{naming !== undefined && seqParts && (
         // A sequence's kind and ends, under the field. The field keeps the focus, so the codes go on being typed. Another
         // kind starts with the usual ends: an N-acetyl is not a 5'-phosphate.

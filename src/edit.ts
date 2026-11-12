@@ -291,6 +291,12 @@ export const setElement = (m: Mol, i: number, label: string) => setAtom(m, i, { 
 export const showCarbon = (m: Mol, i: number) => setAtom(m, i, { label: "C", text: undefined, runs: undefined, shown: true });
 // An element key (or an element picked from a menu) on an atom: that element. C shows the carbon's label.
 export const keyElement = (m: Mol, i: number, label: string) => (label === "C" ? showCarbon(m, i) : setElement(m, i, label));
+// An element held in the periodic table window, clicked with the Text tool (PeriodicTable.tsx): the atom at p becomes it,
+// or a lone atom of it goes there, its label shown (carbon as CH4), as ChemDraw's.
+export function elementAt(m: Mol, p: P, label: string): [Mol, number] {
+  const [n, i] = atomOrNew(m, p);
+  return [keyElement(n, i, label), i];
+}
 // Sets what an atom reads as. One element symbol makes it that element; anything else (OMe, CO2Et, Ph) is a
 // written label attached through its first element, or through carbon for a group. Empty text clears it to carbon.
 // A residue label (its bonds say which kept atom each joins) given another name: the new residue's atoms when the

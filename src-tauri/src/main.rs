@@ -661,6 +661,8 @@ fn menu(app: &AppHandle, palette: &[String], text: &(Vec<String>, Vec<f64>), ove
         &interpretation,
         &item("actions", "Show or Hide Actions", "")?,
         &item("properties", "Show or Hide Properties", "")?,
+        // As ChemDraw's View > Show Periodic Table Window: any element for the selected atoms or the Text tool (PeriodicTable.tsx).
+        &item("periodic_table", "Show or Hide Periodic Table", "")?,
         &templates,
         // Not ⌘K, which is ChemDraw's Scale.
         &item("command_palette", "Command Palette…", "CmdOrCtrl+Shift+A")?,
