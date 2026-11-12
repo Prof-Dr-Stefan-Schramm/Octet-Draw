@@ -254,8 +254,18 @@ pub const MAX_BYTES: u64 = 64 * 1024 * 1024;
 // files.
 const OPEN: (&str, &[&str]) = ("Drawings", &["oct", "cdxml", "cdx", "octet"]);
 // File > Open also opens measured spectra (JCAMP-DX and SPC), which go into the drawing that is open (src/jcamp.ts),
-// and ChemDraw template files (.ctp, and .cts stationery), whose panes become a set of templates (src/ctp.ts).
-const OPEN_ALL: (&str, &[&str]) = ("Drawings, spectra and templates", &["oct", "cdxml", "cdx", "octet", "jdx", "dx", "jcamp", "spc", "ctp", "cts"]);
+// ChemDraw template files (.ctp, and .cts stationery), whose panes become a set of templates (src/ctp.ts), and crystal
+// and structure files (CIF, PDB, VASP POSCAR, XYZ), which open as a new drawing with a 3D model (src/crystal.ts).
+const OPEN_ALL: (&str, &[&str]) = ("Drawings, spectra, templates and crystals", &["oct", "cdxml", "cdx", "octet", "jdx", "dx", "jcamp", "spc", "ctp", "cts", "cif", "pdb", "ent", "vasp", "poscar", "contcar", "xyz", "extxyz"]);
+// A crystal or structure file (src/crystal.ts crystalFormat): read, but never a drawing Octet saves over or lists on
+// Home. VASP's POSCAR and CONTCAR files often have no extension.
+pub fn is_crystal_file(path: &Path) -> bool {
+    let name = path.file_name().map(|n| n.to_string_lossy().to_ascii_lowercase()).unwrap_or_default();
+    let ext = path.extension().and_then(|e| e.to_str()).map(str::to_ascii_lowercase).unwrap_or_default();
+    // Named POSCAR… or CONTCAR… with no extension, or a number for one (POSCAR.1); POSCAR study.oct is a drawing.
+    let plain = ext.is_empty() || ext.chars().all(|c| c.is_ascii_digit());
+    ["cif", "pdb", "ent", "vasp", "poscar", "contcar", "xyz", "extxyz"].contains(&ext.as_str()) || (plain && (name.starts_with("poscar") || name.starts_with("contcar")))
+}
 // A ChemDraw template file: read, but never a drawing Octet saves over or lists on Home.
 pub fn is_template_file(path: &Path) -> bool {
     path.extension().and_then(|e| e.to_str()).is_some_and(|e| e.eq_ignore_ascii_case("ctp") || e.eq_ignore_ascii_case("cts"))
@@ -311,8 +321,9 @@ async fn open_drawing(app: AppHandle, picked: State<'_, Picked>) -> Result<Optio
     }
     stamp(&app, &path);
     let text = read_text_or_cdx(&path).map_err(|e| e.to_string())?;
-    // A template file's panes become templates: it is not a drawing to save over or to list on Home.
-    if !is_template_file(&path) {
+    // A template file's panes become templates, and a crystal file a new drawing: neither is a drawing to save over or
+    // to list on Home.
+    if !is_template_file(&path) && !is_crystal_file(&path) {
         picked.0.lock().unwrap().insert(path.clone());
         recent::note(&app, &path);
     }
@@ -409,18 +420,19 @@ async fn open_licences(app: AppHandle) -> Result<(), String> {
     open_external(&path).map_err(|e| e.to_string())
 }
 
-// Import a structure or reaction from another program's file (MOL, SDF, RXN, RDF, CML, SMILES, InChI, CDXML, CDX).
+// Import a structure or reaction from another program's file (MOL, SDF, RXN, RDF, CML, SMILES, InChI, CDXML, CDX), or
+// a crystal or structure file (CIF, PDB, POSCAR, XYZ).
 // Returns its name and text (a CDX file's bytes in base64).
 #[tauri::command]
 async fn import_structure(app: AppHandle) -> Result<Option<(String, String)>, String> {
-    let Some(file) = app.dialog().file().add_filter("Structures", &["mol", "sdf", "sd", "rxn", "rdf", "rd", "cml", "smi", "smiles", "inchi", "cdxml", "cdx", "ket", "txt"]).blocking_pick_file() else {
+    let Some(file) = app.dialog().file().add_filter("Structures", &["mol", "sdf", "sd", "rxn", "rdf", "rd", "cml", "smi", "smiles", "inchi", "cdxml", "cdx", "ket", "txt", "cif", "pdb", "ent", "vasp", "poscar", "contcar", "xyz", "extxyz"]).blocking_pick_file() else {
         return Ok(None);
     };
     let path = file.into_path().map_err(|e| e.to_string())?;
     if fs::metadata(&path).map_err(|e| e.to_string())?.len() > MAX_BYTES {
         return Err("This file is larger than 64 MB. Octet cannot import it.".into());
     }
-    let text = read_text_or_cdx(&path).map_err(|_| "Octet can only import structure files (MOL, SDF, RXN, RDF, CML, SMILES, InChI, CDXML, CDX).".to_string())?;
+    let text = read_text_or_cdx(&path).map_err(|_| "Octet can only import structure files (MOL, SDF, RXN, RDF, CML, SMILES, InChI, CDXML, CDX, CIF, PDB, POSCAR, XYZ).".to_string())?;
     let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
     Ok(Some((name, text)))
 }

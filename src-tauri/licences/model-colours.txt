@@ -28,3 +28,8 @@ Octet's own model colours and radii, and the model and painter design, are adapt
 (https://github.com/Ameyanagi/ReShiki), MIT OR Apache-2.0, (c) 2026 Ameyanagi and ReShiki contributors, used under
 
 Apache-2.0.
+
+The crystal readers, unit cell drawing and ORTEP ellipsoid maths (src/crystal.ts, src/crystalcell.ts, src/ortep.ts)
+are adapted from ReShiki's crates/io/src/crystal/ and crates/model/src/models3d/ (crystal.rs, ellipsoids.rs), MIT OR
+Apache-2.0, (c) 2026 Ameyanagi and ReShiki contributors, used under Apache-2.0. Covalent radii: B. Cordero et al.,
+Dalton Trans. 2008, 2832 (published data).

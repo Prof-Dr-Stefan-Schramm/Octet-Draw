@@ -14,15 +14,19 @@
 
 import { clean3d } from "./clean3d.ts";
 import { HBOND, type Mol } from "./render.ts";
+import { crystalPrimitives, crystalView, readCrystal, writeCrystal } from "./crystalcell.ts";
+import { ellipseExit, ellipsoidSections, FIXED_RADIUS, FOCAL_RADIUS, projectEllipsoid, radiusAlong, type Ellipsoid } from "./ortep.ts";
 
 export type V3 = [number, number, number];
 type P = [number, number];
 export type Quat = [number, number, number, number]; // [w, x, y, z], a unit quaternion
-export type Style3d = "ballStick" | "stick" | "wireframe" | "spaceFilling";
+export type Style3d = "ballStick" | "stick" | "wireframe" | "spaceFilling" | "ellipsoids"; // ellipsoids: ORTEP, crystals only
 export type Display3d = "3d" | "both" | "2d";
 export type Scheme3d = "octet" | "vesta" | "jmol";
 export type ForceField = "MMFF94s" | "MMFF94" | "UFF";
 export const STYLES_3D: Style3d[] = ["ballStick", "stick", "wireframe", "spaceFilling"];
+// ORTEP ellipsoids are for crystals whose file gave displacement parameters (crystalcell.ts).
+export const CRYSTAL_STYLES_3D: Style3d[] = [...STYLES_3D, "ellipsoids"];
 
 // A model, kept in Mol.models. Its geometry is frozen when it is made: atoms (one per atom of the structure, in the
 // structure's order then) and bonds between them, and the hydrogens added for the 3D shape. sources: the drawing's
@@ -46,6 +50,30 @@ export type Model3d = {
   scheme?: Scheme3d; // unset: Octet's colours
   field?: ForceField; // the force field that made the shape; unset: Octet's own 3D Clean Up
   seed?: number;
+  crystal?: Crystal; // a crystal structure's unit cell and what its file said of each site (crystal.ts, crystalcell.ts)
+};
+
+// A crystal's displacement parameters in Å² as U (B values are converted): isotropic, or U11 U22 U33 U12 U13 U23 as
+// CIF gives them, in the basis of the reciprocal-length-scaled lattice vectors.
+export type Adp = { iso: number } | { aniso: [number, number, number, number, number, number] };
+export type Along = "a" | "b" | "c" | "111";
+// A model's unit cell (ReShiki's Cell, Site and crystal settings). The model's xyz are Cartesian Å in the lattice's
+// frame, the cell's origin at 0. Atoms are named by their place in the model (sources), so they follow renumbering.
+// crossing: bonds of a network that leave the cell, from atom a to the copy of atom b `image` cells away (a ≤ b).
+// sites: each atom's label, displacement parameters, and whether it is a listed CIF input site (asymmetric).
+// notes: what Octet said when it read the file. The rest are display settings, unset at their defaults: repeat 1 × 1
+// × 1, copies at 55% opacity, the opening view, 50% probability ellipsoids, all molecules, solvent shown.
+export type Crystal = {
+  vectors: [V3, V3, V3];
+  crossing?: { a: number; b: number; image: V3 }[];
+  sites?: { atom: number; label?: string; adp?: Adp; asymmetric?: true }[];
+  notes?: string[];
+  repeat?: V3;
+  copyOpacity?: number;
+  along?: Along;
+  probability?: 30 | 70 | 90;
+  moleculeOnly?: true;
+  includeSolvent?: false;
 };
 
 // ---- Colours and radii ----
@@ -89,6 +117,7 @@ export function radiusOf(symbol: string, style: Style3d = "ballStick"): number {
   if (style === "spaceFilling") return VDW[symbol] ?? 1.8;
   if (style === "stick") return STICK_RADIUS;
   if (style === "wireframe") return WIRE_RADIUS;
+  if (style === "ellipsoids") return FIXED_RADIUS;
   return OWN[symbol]?.[1] ?? 0.35;
 }
 
@@ -121,7 +150,7 @@ export const tiltQuat = (q: Quat, yaw: number, pitch: number): Quat => unit(comp
 export const rollQuat = (q: Quat, degrees: number): Quat => unit(compose(about((degrees * Math.PI) / 180, 2), q), q);
 
 // The unit quaternion of a proper rotation matrix (rows).
-function quaternion(m: number[][]): Quat {
+export function quaternion(m: number[][]): Quat {
   const t = m[0][0] + m[1][1] + m[2][2];
   let q: Quat;
   if (t > 0) { const s = Math.sqrt(t + 1) * 2; q = [s / 4, (m[2][1] - m[1][2]) / s, (m[0][2] - m[2][0]) / s, (m[1][0] - m[0][1]) / s]; }
@@ -154,7 +183,7 @@ function principalBasis(points: V3[]): V3[] {
   return [x, y, cross3(x, y)];
 }
 // The basis tilted a little (about x, then y) so the opening view reads as 3D.
-function tilted(basis: V3[], ax: number, ay: number): Quat {
+export function tilted(basis: V3[], ax: number, ay: number): Quat {
   const [sx, cx, sy, cy] = [Math.sin(ax), Math.cos(ax), Math.sin(ay), Math.cos(ay)];
   const rx = [[1, 0, 0], [0, cx, -sx], [0, sx, cx]], ry = [[cy, 0, sy], [0, 1, 0], [-sy, 0, cy]];
   const mul = (a: number[][], b: number[][]) => a.map((row) => [0, 1, 2].map((j) => row[0] * b[0][j] + row[1] * b[1][j] + row[2] * b[2][j]));
@@ -220,13 +249,16 @@ export function shownAs3d(m: Mol): Set<number> {
 // Defaults, as ReShiki's: depth fade towards the paper, and perspective (0 none, 1 strong).
 const DEPTH_FADE = 0.35, PERSPECTIVE = 0.2;
 // ReShiki's size-relative widths are in its world units (42 a bond length); Octet's are bond lengths.
-const WORLD = 42;
+export const WORLD = 42;
 export type View3d = { centre: V3; rotated: V3[]; symbols: string[]; shown: boolean[]; bonds: [number, number][]; style: Style3d; reach: number; origin: P; scale: number; camera: number; perspective: number; wire: number };
 // Centre: the heavy atoms' centroid. reach: the farthest shown ball edge from it (Å).
-export function sceneView(points: { symbol: string; xyz: V3 }[], shown: boolean[], bonds: [number, number][], style: Style3d, rotation: Quat, origin: P, size: number, perspective = PERSPECTIVE): View3d {
-  const heavy = points.filter((p) => p.symbol !== "H"), use = heavy.length ? heavy : points, n = use.length || 1;
+// hold: points the view must hold besides the shown balls (a crystal's cell corners); the centre is then their middle.
+// radii: a point's own radius (Å) where it is not its style's ball (an ORTEP ellipsoid's largest semi-axis).
+export function sceneView(points: { symbol: string; xyz: V3 }[], shown: boolean[], bonds: [number, number][], style: Style3d, rotation: Quat, origin: P, size: number, perspective = PERSPECTIVE, extra: { hold?: V3[]; radii?: (number | undefined)[] } = {}): View3d {
+  const heavy = points.filter((p) => p.symbol !== "H"), use = extra.hold?.length ? extra.hold.map((xyz) => ({ xyz })) : heavy.length ? heavy : points, n = use.length || 1;
   const centre = use.reduce<V3>((c, p) => [c[0] + p.xyz[0] / n, c[1] + p.xyz[1] / n, c[2] + p.xyz[2] / n], [0, 0, 0]);
-  const reach = Math.max(0.1, ...points.filter((_, i) => shown[i]).map((p) => Math.hypot(p.xyz[0] - centre[0], p.xyz[1] - centre[1], p.xyz[2] - centre[2]) + radiusOf(p.symbol, style)));
+  const from = (p: V3) => Math.hypot(p[0] - centre[0], p[1] - centre[1], p[2] - centre[2]);
+  const reach = Math.max(0.1, ...points.flatMap((p, i) => (shown[i] ? [from(p.xyz) + (extra.radii?.[i] ?? radiusOf(p.symbol, style))] : [])), ...(extra.hold ?? []).map(from));
   return {
     centre, rotated: points.map((p) => rotate(rotation, [p.xyz[0] - centre[0], p.xyz[1] - centre[1], p.xyz[2] - centre[2]])), symbols: points.map((p) => p.symbol), shown,
     bonds: style === "spaceFilling" ? [] : bonds.filter(([a, b]) => shown[a] && shown[b]), style, reach, origin, scale: (0.44 * size) / reach,
@@ -236,6 +268,7 @@ export function sceneView(points: { symbol: string; xyz: V3 }[], shown: boolean[
 export function viewOf(m: Mol, model: Model3d): View3d | undefined {
   const middle = middleOf(m, model);
   if (!middle) return undefined;
+  if (model.crystal) return crystalView(m, model, [middle[0] + model.offset[0], middle[1] + model.offset[1]]).view;
   return sceneView(pointsOf(model), shownOf(model), bondsOf(model), model.style ?? "ballStick", model.rotation, [middle[0] + model.offset[0], middle[1] + model.offset[1]], model.size);
 }
 // A turned point on the page (drawing units, y down) and its perspective factor.
@@ -274,8 +307,11 @@ export type Prim3d =
   | { kind: "sphere"; c: P; r: number; focal: P; stops: Stop[]; outline?: Outline }
   | { kind: "quad"; corners: [P, P, P, P]; from: P; to: P; stops: Stop[]; outline?: Outline }
   | { kind: "contour"; polygons: P[][]; outline: Outline }
-  | { kind: "wire"; from: P; to: P; width: number; colour: string }
-  | { kind: "text"; at: P; text: string; size: number; colour: string }
+  | { kind: "wire"; from: P; to: P; width: number; colour: string; dash?: number }
+  // An ORTEP ellipsoid: its outline (centre and semi-axis vectors), the light's focal point in its own unit disc, and
+  // for an anisotropic one its principal-plane lines and front octant (ortep.ts).
+  | { kind: "ellipsoid"; c: P; axes: [P, P]; focal: P; stops: Stop[]; outline?: Outline; section?: { octant: P[]; arcs: P[][]; fill: string; colour: string; width: number } }
+  | { kind: "text"; at: P; text: string; size: number; colour: string; italic?: true }
   | { kind: "opacity"; alpha: number; inner: Prim3d };
 
 type RGB = [number, number, number];
@@ -293,7 +329,34 @@ export type PaintOptions = {
   ink?: string; // the outlines' colour (the canvas's ink, so exports draw them as on white paper); unset: ReShiki's
   morph?: { e: number; flat: (V3 | undefined)[]; fading: boolean[] }; // 0 flat on the drawing, 1 the model
   font?: string;
+  alpha?: (number | undefined)[]; // each point's opacity, where it is not 1 (a crystal's copies)
+  ellipsoids?: (Ellipsoid | undefined)[]; // the ellipsoids style: each point's ellipsoid in view space, or a fixed sphere
 };
+
+// With ellipsoids, a half-bond starts at its atom's centre (the atom is drawn over the end) and the two halves meet
+// midway between where the stick leaves each outline on the page; none where the two surfaces touch.
+function ortepHalf(v: View3d, ellipsoids: (Ellipsoid | undefined)[], s: number, o: number): [P, P, number, number] | undefined {
+  const ps = v.rotated[s], po = v.rotated[o], d: V3 = [po[0] - ps[0], po[1] - ps[1], po[2] - ps[2]], distance = Math.hypot(...d);
+  if (distance === 0) return undefined;
+  const dir = d.map((x) => x / distance) as V3, radius = (i: number) => (ellipsoids[i] ? radiusAlong(ellipsoids[i]!, dir) : FIXED_RADIUS);
+  const [rs, ro] = [radius(s), radius(o)];
+  if (rs + ro >= distance) return undefined;
+  const a = ps.map((p, k) => p + dir[k] * rs) as V3, b = po.map((p, k) => p - dir[k] * ro) as V3;
+  const [start, fs] = project(v, ps), [end] = project(v, po);
+  let [middle, fm] = project(v, [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2, (a[2] + b[2]) / 2]);
+  const length = Math.hypot(end[0] - start[0], end[1] - start[1]);
+  if (length > 0) {
+    const u: P = [(end[0] - start[0]) / length, (end[1] - start[1]) / length], lens = { scale: v.scale, origin: v.origin, ...(v.perspective > 0 ? { camera: v.camera } : {}) };
+    const exit = (i: number, from: P, towards: P) => {
+      const e = ellipsoids[i], outline = e && projectEllipsoid(e, v.rotated[i], lens);
+      return outline ? ellipseExit(outline, from, towards) : FIXED_RADIUS * v.scale * project(v, v.rotated[i])[1];
+    };
+    const ea = exit(s, start, u), eb = exit(o, end, [-u[0], -u[1]]);
+    if (ea !== undefined && eb !== undefined) { const t = (ea + length - eb) / 2; middle = [start[0] + u[0] * t, start[1] + u[1] * t]; }
+  }
+  const r = BOND_RADIUS * v.scale;
+  return [start, middle, r * fs, r * fm];
+}
 
 // The half-bond from point s towards o: its projected start, the projected middle and its half width at each.
 function halfBond(v: View3d, s: number, o: number): [P, P, number, number] {
@@ -317,7 +380,9 @@ export function paintScene(v: View3d, o: PaintOptions): Prim3d[] {
   const items: Item[] = [];
   // Each half-bond sorts at its own depth but never after its atom, so the ball covers the half that points towards
   // the viewer, yet a half-bond still passes in front of a farther atom.
+  const ells = o.ellipsoids ?? [], half = (s: number, t: number) => (style === "ellipsoids" ? ortepHalf(v, ells, s, t) : halfBond(v, s, t));
   for (const [a, b] of v.bonds) {
+    if (style === "ellipsoids" && !half(a, b)) continue;
     const mz = (v.rotated[a][2] + v.rotated[b][2]) / 2;
     for (const [s, t] of [[a, b], [b, a]]) {
       const z = (v.rotated[s][2] + mz) / 2 - 0.05;
@@ -350,9 +415,17 @@ export function paintScene(v: View3d, o: PaintOptions): Prim3d[] {
       const surface = style === "wireframe" || style === "stick" ? paper : base, light = surface[0] * 0.2126 + surface[1] * 0.7152 + surface[2] * 0.0722;
       prim = { kind: "text", at: [c[0], c[1] + size * 0.35], text: symbol, size, colour: hexOf(mix(light < 135 ? WHITE : [24, 24, 24], paper, fade(z))) };
     } else if ("atom" in it) {
-      const [c, f] = project(v, v.rotated[i]);
+      const [c, f] = project(v, v.rotated[i]), ell = style === "ellipsoids" ? ells[i] : undefined;
+      const lens = { scale: v.scale, origin: v.origin, ...(v.perspective > 0 ? { camera: v.camera } : {}) }, outlined = ell && projectEllipsoid(ell, v.rotated[i], lens);
       if (style === "wireframe") prim = { kind: "sphere", c, r: v.wire, focal: c, stops: [[0, wire], [1, wire]] };
-      else {
+      else if (ell && outlined) {
+        // The light's focal point in the ellipse's own unit disc: up and left, along each semi-axis.
+        const focal = outlined.axes.map((a) => (-0.38 * a[0] - 0.42 * a[1]) / Math.hypot(a[0], a[1])) as P, rim = outline(line);
+        const sections = ell.anisotropic ? ellipsoidSections(ell, v.rotated[i], lens) : undefined;
+        prim = { kind: "ellipsoid", c: outlined.c, axes: outlined.axes, focal,
+          stops: glossy ? shade(base, [[0, WHITE, 0.85], [0.18, WHITE, 0.35], [0.75, base, 0], [1, BLACK, 0.45]]) : shade(base, [[0, WHITE, 0.45], [0.6, base, 0], [1, BLACK, 0.18]]),
+          ...(rim ? { outline: rim } : {}), ...(sections ? { section: { ...sections, fill: hexOf(mix(base, BLACK, 0.26)), colour: hexOf(mix(base, BLACK, 0.65)), width: rim?.width ?? 0.7 / WORLD } } : {}) };
+      } else {
         const r = radiusOf(symbol, style) * v.scale * f;
         if (style === "stick") rims.push(Array.from({ length: 48 }, (_, k): P => [c[0] + r * Math.cos((Math.PI * k) / 24), c[1] + r * Math.sin((Math.PI * k) / 24)]));
         prim = { kind: "sphere", c, r, focal: [c[0] - r * 0.38, c[1] - r * 0.42],
@@ -360,8 +433,8 @@ export function paintScene(v: View3d, o: PaintOptions): Prim3d[] {
           outline: style === "stick" ? undefined : outline(line) };
       }
     } else {
-      const [s, t] = it.bond, [a, end0, start, half] = halfBond(v, s, t);
-      if (style === "wireframe") prim = { kind: "wire", from: a, to: end0, width: half * 2, colour: wire };
+      const [s, t] = it.bond, [a, end0, start, halfWidth] = half(s, t)!;
+      if (style === "wireframe") prim = { kind: "wire", from: a, to: end0, width: halfWidth * 2, colour: wire };
       else {
         const dx = end0[0] - a[0], dy = end0[1] - a[1], len = Math.hypot(dx, dy);
         if (len < line * 0.5 && style !== "stick") return;
@@ -369,20 +442,21 @@ export function paintScene(v: View3d, o: PaintOptions): Prim3d[] {
         // The lit side faces up and left, as the balls' highlight, the same for both halves.
         const side = 0.38 * dy - 0.42 * dx < 0 ? -1 : 1, nx = (-dy / len) * side, ny = (dx / len) * side;
         // The half drawn first runs on under the other, so their edges never meet in a pale seam.
-        let end = end0, width = half;
+        let end = end0, width = halfWidth;
         const later = order.get(`${t},${s}`);
         if (later !== undefined && later > n && (v.symbols[t] !== "H" || e >= 1)) {
-          const [b, , far] = halfBond(v, t, s), other = Math.hypot(b[0] - end0[0], b[1] - end0[1]);
-          if (other >= line * 0.5) { const reachOn = Math.min(half, other / 2), k = reachOn / other; end = [end0[0] + (dx / len) * reachOn, end0[1] + (dy / len) * reachOn]; width = half + (far - half) * k; }
+          const [b, , far] = half(t, s)!, other = Math.hypot(b[0] - end0[0], b[1] - end0[1]);
+          if (other >= line * 0.5) { const reachOn = Math.min(halfWidth, other / 2), k = reachOn / other; end = [end0[0] + (dx / len) * reachOn, end0[1] + (dy / len) * reachOn]; width = halfWidth + (far - halfWidth) * k; }
         }
         const corners: [P, P, P, P] = [[a[0] + nx * start, a[1] + ny * start], [end[0] + nx * width, end[1] + ny * width], [end[0] - nx * width, end[1] - ny * width], [a[0] - nx * start, a[1] - ny * start]];
         if (style === "stick") rims.push(corners);
-        prim = { kind: "quad", corners, from: [end0[0] + nx * half, end0[1] + ny * half], to: [end0[0] - nx * half, end0[1] - ny * half],
+        prim = { kind: "quad", corners, from: [end0[0] + nx * halfWidth, end0[1] + ny * halfWidth], to: [end0[0] - nx * halfWidth, end0[1] - ny * halfWidth],
           stops: glossy ? shade(base, [[0, BLACK, 0.4], [0.3, WHITE, 0.55], [1, BLACK, 0.45]]) : shade(base, [[0, BLACK, 0.2], [0.4, WHITE, 0.3], [1, BLACK, 0.22]]),
-          outline: style === "ballStick" ? outline(line * 0.8) : undefined };
+          outline: style === "ballStick" || style === "ellipsoids" ? outline(line * 0.8) : undefined };
       }
     }
-    if (prim) drawn.push(fadingIn ? { kind: "opacity", alpha: e, inner: prim } : prim);
+    const alpha = (fadingIn ? e : 1) * (o.alpha?.[i] ?? 1);
+    if (prim) drawn.push(alpha < 1 ? { kind: "opacity", alpha, inner: prim } : prim);
   });
   // Stick: one outline round every shape, behind them all.
   const rim = style === "stick" && rims.length ? outline(line * 2) : undefined;
@@ -391,6 +465,7 @@ export function paintScene(v: View3d, o: PaintOptions): Prim3d[] {
 
 // A model's primitives in the drawing, with its morph from the drawing (0) to the model (1) if it is still growing.
 export function modelPrimitives(m: Mol, model: Model3d, o: Omit<PaintOptions, "size" | "style" | "look" | "labels" | "scheme" | "morph"> & { morph?: number } = {}): Prim3d[] {
+  if (model.crystal) return crystalPrimitives(m, model, o);
   const v = viewOf(m, model);
   if (!v) return [];
   let morph: PaintOptions["morph"];
@@ -432,12 +507,23 @@ export function primitiveNodes(prims: Prim3d[], prefix: string): SvgNode[] {
         const [a, b, c, d] = p.corners;
         return { tag: "g", attrs: {}, children: [fill, { tag: "path", attrs: { d: `M${pts([a])}L${pts([b])}M${pts([d])}L${pts([c])}`, fill: "none", ...outlineAttrs(p.outline) } }] };
       }
+      case "ellipsoid": {
+        // The gradient in the ellipse's own frame: a unit disc scaled to its semi-axes, turned with it.
+        const [a, b] = p.axes.map((x) => Math.hypot(x[0], x[1])), angle = (Math.atan2(p.axes[0][1], p.axes[0][0]) * 180) / Math.PI, id = `${prefix}${defs.length}`;
+        defs.push({ tag: "radialGradient", attrs: { id, gradientUnits: "userSpaceOnUse", cx: 0, cy: 0, r: 1, fx: n4(p.focal[0]), fy: n4(p.focal[1]), fr: FOCAL_RADIUS, gradientTransform: `scale(${n4(a)} ${n4(b)})` }, children: stops(p.stops) });
+        const shape: SvgNode = { tag: "g", attrs: { transform: `translate(${n4(p.c[0])} ${n4(p.c[1])}) rotate(${n4(angle)})` }, children: [{ tag: "ellipse", attrs: { rx: n4(a), ry: n4(b), fill: `url(#${id})`, ...outlineAttrs(p.outline) } }] };
+        if (!p.section) return shape;
+        const s = p.section, line = (q: P[]) => `M${pts(q).replace(/ /g, "L")}`;
+        return { tag: "g", attrs: {}, children: [shape,
+          { tag: "path", attrs: { d: `${line(s.octant)}Z`, fill: s.fill, stroke: s.colour, "stroke-width": n4(s.width), "stroke-linejoin": "round" } },
+          ...(s.arcs.length ? [{ tag: "path", attrs: { d: s.arcs.map(line).join(""), fill: "none", stroke: s.colour, "stroke-width": n4(s.width), "stroke-linecap": "round" } }] : [])] };
+      }
       case "contour":
         return { tag: "path", attrs: { d: p.polygons.map((q) => `M${pts(q).replace(/ /g, "L")}Z`).join(""), fill: "none", "stroke-linejoin": "round", ...outlineAttrs(p.outline) } };
       case "wire":
-        return { tag: "line", attrs: { x1: n4(p.from[0]), y1: n4(p.from[1]), x2: n4(p.to[0]), y2: n4(p.to[1]), stroke: p.colour, "stroke-width": n4(p.width), "stroke-linecap": "round" } };
+        return { tag: "line", attrs: { x1: n4(p.from[0]), y1: n4(p.from[1]), x2: n4(p.to[0]), y2: n4(p.to[1]), stroke: p.colour, "stroke-width": n4(p.width), "stroke-linecap": p.dash ? "butt" : "round", ...(p.dash ? { "stroke-dasharray": `${n4(p.dash)} ${n4(p.dash)}` } : {}) } };
       case "text":
-        return { tag: "text", attrs: { x: n4(p.at[0]), y: n4(p.at[1]), "font-size": n4(p.size), "font-weight": "bold", "text-anchor": "middle", fill: p.colour }, children: [p.text] };
+        return { tag: "text", attrs: { x: n4(p.at[0]), y: n4(p.at[1]), "font-size": n4(p.size), ...(p.italic ? { "font-style": "italic" } : { "font-weight": "bold" }), "text-anchor": "middle", fill: p.colour }, children: [p.text] };
       case "opacity":
         return { tag: "g", attrs: { opacity: n4(p.alpha) }, children: [one(p.inner)] };
     }
@@ -456,12 +542,13 @@ const ANGSTROM = 1.52; // Å in a bond length: Octet's 3D Clean Up makes a C–C
 // The fingerprint of a structure's chemistry, in the model's atom order: each atom's element, label, charge, isotope,
 // radical and hydrogens; each bond's order and wedge; and any atom joined to the structure that the model lacks.
 // Moving atoms or colouring them leaves it as it is.
-export function fingerprintOf(m: Mol, sources: (number | null)[]): string {
+// crystal: a crystal model keeps its cell when an atom's element or charge changes (Na+ to K+), so these are left out.
+export function fingerprintOf(m: Mol, sources: (number | null)[], crystal = false): string {
   const at = new Map<number, number>();
   sources.forEach((s, k) => { if (s !== null && s < m.atoms.length) at.set(s, k); });
   const atoms = sources.map((s) => {
     const a = s === null ? undefined : m.atoms[s];
-    return a ? [a.label, a.text ?? "", a.charge ?? 0, a.isotope ?? 0, a.radical ?? 0, a.implicitHCount ?? -1].join(":") : "-";
+    return a ? (crystal ? [a.text ?? "", a.isotope ?? 0, a.radical ?? 0] : [a.label, a.text ?? "", a.charge ?? 0, a.isotope ?? 0, a.radical ?? 0, a.implicitHCount ?? -1]).join(":") : "-";
   });
   const bonds: string[] = [];
   let extra = 0;
@@ -475,7 +562,7 @@ export function fingerprintOf(m: Mol, sources: (number | null)[]): string {
   }
   return `${atoms.join(",")}|${bonds.sort().join(",")}|${extra}`;
 }
-export const isStale = (m: Mol, model: Model3d) => model.sources.some((s) => s === null || s >= m.atoms.length) || fingerprintOf(m, model.sources) !== model.fingerprint;
+export const isStale = (m: Mol, model: Model3d) => model.sources.some((s) => s === null || s >= m.atoms.length) || fingerprintOf(m, model.sources, !!model.crystal) !== model.fingerprint;
 
 // A 3D shape for a structure: what it was given (hydrogens added, in Å) or, without one, the atoms' own depth when the
 // structure has real depth (a 3D file, 3D Clean Up), or else Octet's 3D Clean Up of it. atoms: a whole structure.
@@ -572,25 +659,26 @@ export function readModel(d: unknown, atoms: number): Model3d | undefined {
   if (!(Array.isArray(offset) && offset.length === 2 && offset.every((v) => isNum(v) && Math.abs(v as number) < 1e5)) || !(isNum(size) && (size as number) > 0 && (size as number) <= 1e5)) return undefined;
   if (!["3d", "both", "2d"].includes(x.display as string) || typeof x.fingerprint !== "string" || x.fingerprint.length > 200000) return undefined;
   const one = <T extends string>(v: unknown, ok: readonly T[]) => (ok.includes(v as T) ? { v: v as T } : undefined);
-  const style = one(x.style, ["stick", "wireframe", "spaceFilling"] as const), hs = one(x.hydrogensShown, ["polar", "none"] as const), labels = one(x.labels, ["heteroatoms", "all"] as const);
+  const crystal = x.crystal === undefined ? undefined : readCrystal(x.crystal, sources.length), style = one(x.style, (crystal ? ["stick", "wireframe", "spaceFilling", "ellipsoids"] : ["stick", "wireframe", "spaceFilling"]) as Style3d[]), hs = one(x.hydrogensShown, ["polar", "none"] as const), labels = one(x.labels, ["heteroatoms", "all"] as const);
   const scheme = one(x.scheme, ["vesta", "jmol"] as const), field = one(x.field, ["MMFF94s", "MMFF94", "UFF"] as const);
   return {
     sources: sources as (number | null)[], elements: elements as string[], xyz: xyz as V3[], bonds: bonds as [number, number][], ...(hydrogens ? { hydrogens: (hydrogens as { parent: number; xyz: V3 }[]).map((h) => ({ parent: h.parent, xyz: h.xyz })) } : {}),
     fingerprint: x.fingerprint, rotation: (rotation as number[]).map((v) => v / Math.hypot(...(rotation as number[]))) as Quat, offset: offset as P, size: size as number, display: x.display as Display3d,
     ...(style ? { style: style.v } : {}), ...(x.look === "glossy" ? { look: "glossy" as const } : {}), ...(hs ? { hydrogensShown: hs.v } : {}), ...(labels ? { labels: labels.v } : {}),
-    ...(scheme ? { scheme: scheme.v } : {}), ...(field ? { field: field.v } : {}), ...(Number.isInteger(x.seed) && (x.seed as number) >= 0 && (x.seed as number) < 2 ** 31 ? { seed: x.seed as number } : {}),
+    ...(crystal ? { crystal } : {}), ...(scheme ? { scheme: scheme.v } : {}), ...(field ? { field: field.v } : {}), ...(Number.isInteger(x.seed) && (x.seed as number) >= 0 && (x.seed as number) < 2 ** 31 ? { seed: x.seed as number } : {}),
   };
 }
 // A model as written to Octet's file: coordinates to 0.0001 Å.
 export function writeModel(x: Model3d): Record<string, unknown> {
   const r = (v: number) => Math.round(v * 1e4) / 1e4;
-  return { ...x, xyz: x.xyz.map((p) => p.map(r)), ...(x.hydrogens ? { hydrogens: x.hydrogens.map((h) => ({ parent: h.parent, xyz: h.xyz.map(r) })) } : {}), rotation: x.rotation.map((v) => Math.round(v * 1e8) / 1e8), offset: x.offset.map(r), size: r(x.size) };
+  return { ...x, xyz: x.xyz.map((p) => p.map(r)), ...(x.hydrogens ? { hydrogens: x.hydrogens.map((h) => ({ parent: h.parent, xyz: h.xyz.map(r) })) } : {}), rotation: x.rotation.map((v) => Math.round(v * 1e8) / 1e8), offset: x.offset.map(r), size: r(x.size), ...(x.crystal ? { crystal: writeCrystal(x.crystal) } : {}) };
 }
 
 // The words a screen reader says for a model.
 export function describeModel(model: Model3d): string {
-  const style = { ballStick: "ball and stick", stick: "stick", wireframe: "wireframe", spaceFilling: "space-filling" }[model.style ?? "ballStick"];
-  return `3D model, ${style}${model.display === "both" ? ", beside its structure" : ""}`;
+  const style = { ballStick: "ball and stick", stick: "stick", wireframe: "wireframe", spaceFilling: "space-filling", ellipsoids: `${model.crystal?.probability ?? 50}% probability ellipsoids` }[model.style ?? "ballStick"];
+  const cell = model.crystal && !model.crystal.moleculeOnly ? ", in its unit cell" : "";
+  return `3D model, ${style}${cell}${model.display === "both" ? ", beside its structure" : ""}`;
 }
 // A 2D turn of a structure (anticlockwise, degrees) turns its model the same way in the page's plane, and its offset.
 export function rollModels(models: Model3d[], ids: Set<number>, degrees: number): Model3d[] {

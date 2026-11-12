@@ -121,6 +121,9 @@ export type Bond = {
   // At each end that is a label keeping its atoms (inner), the atom of that group the bond joins; -1 is none. A residue
   // label (Ala) bonds on both sides, to its N and to its C=O (ChemDraw's BeginExternalNum and EndExternalNum).
   ports?: [number, number];
+  // A bond Octet made from the distance between two atoms of a crystal file (crystal.ts), not drawn by a chemist: Check
+  // Structure leaves its structure out.
+  distance?: true;
 };
 // Bond types: 1 to 3 by order, 4 aromatic and 10 a hydrogen bond (KET's numbers), and 14 a quadruple bond (KET has
 // none; 14 keeps clear of KET's types). A hydrogen bond is drawn dotted and adds nothing to an atom's valence.

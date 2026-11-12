@@ -52,6 +52,8 @@ import { followLeaders, labelLines, lonePlot, placePlot, plotFigure, plotsIn, pl
 import type { Show } from "./Spectrum";
 import { analyse as analyseSpectrum, defineGroup, fromJcamp, groupText, keepIds, keyOf as spectrumKeyOf, measuredHead, msPeaks, nextGroupId, regroup, type Measured } from "./measured";
 import { BRUKER, SPC, isJcamp, isSpectrum, readBrukerText as brukerOf, readJcamp, readSpcText, type JcampSpectrum } from "./jcamp";
+import { crystalFormat, readCrystal } from "./crystal";
+import { openingView as crystalOpening } from "./crystalcell";
 import { rings } from "./rings";
 import { NumberField, Segmented, Switch } from "./Fields";
 import { fromCdxml, parseXml, toCdxml, type CdxmlOptions } from "./cdxml";
@@ -511,6 +513,7 @@ function svgElements(nodes: (SvgNode | string)[], key = ""): React.ReactNode[] {
 const MORPH_MS = 200; // a new model grows from the drawing into 3D (brand motion: --motion-slow)
 // A model's opening view, from its shape and where its atoms are drawn.
 function openingView(m: Mol, x: Model3d) {
+  if (x.crystal) return crystalOpening(x); // the crystallographer's view of its cell, or along its chosen direction
   const pts = pointsOf(x).filter((q) => q.symbol !== "H"), use = pts.length ? pts : pointsOf(x), n = use.length || 1;
   const c = use.reduce<V3>((s, q) => [s[0] + q.xyz[0] / n, s[1] + q.xyz[1] / n, s[2] + q.xyz[2] / n], [0, 0, 0]);
   return openingRotation(x.xyz.map((q): V3 => [q[0] - c[0], q[1] - c[1], q[2] - c[2]]), x.sources.map((i) => (i === null || i >= m.atoms.length ? undefined : [m.atoms[i].location[0], m.atoms[i].location[1]] as P)));
@@ -1605,8 +1608,24 @@ export default function Editor() {
     }
   }
   function openPicked(picked: [string, string]) {
-    if (isSpectrum(picked[1])) openSpectrumText(picked[1], picked[0].split(/[\\/]/).pop() ?? "this file");
+    const name = picked[0].split(/[\\/]/).pop() ?? "this file";
+    if (crystalFormat(name)) openCrystal(name, picked[1]);
+    else if (isSpectrum(picked[1])) openSpectrumText(picked[1], name);
     else load(picked[0], picked[1]);
+  }
+  // A crystal or structure file (CIF, PDB, POSCAR, XYZ: crystal.ts), known by its name: its atoms as a drawing with its
+  // 3D model (in its unit cell, when it has one), and what Octet noted while reading it. It throws when the file breaks
+  // a rule, with the reason.
+  function crystalOf(name: string, text: string): Mol {
+    const { mol, notes } = readCrystal(crystalFormat(name)!, text);
+    if (notes.length) setNotice(`${name}: ${notes.join(". ")}.`, "info");
+    return mol;
+  }
+  // Opened, it is a new drawing that is not saved yet (Octet never saves over the file it came from).
+  function openCrystal(name: string, text: string) {
+    let mol: Mol;
+    try { mol = crystalOf(name, text); } catch (e) { return setNotice(failure(`Octet cannot open ${name}.`, e)); }
+    load(undefined, mol, name.replace(/\.[^.]*$/, ""));
   }
   // Files the system asked Octet to open (Finder, Explorer, the Dock, a second launch) or that were dropped on the
   // window (src-tauri/src/open.rs; REL-14, CH-6). Dropped on a drawing, they go into it. Otherwise the first one opens,
@@ -1661,7 +1680,8 @@ export default function Editor() {
     if (first?.picture) {
       const m = await pictureDrawing(fromBase64(first.picture), newStyle.bond, MAX_PICTURE, `Octet cannot open ${first.name}.`);
       if (m) keepWork(() => load(undefined, { ...m, style: newStyle }, first.name.replace(/\.[^.]*$/, "")));
-    } else if (first) keepWork(() => load(first.path ?? undefined, first.text!, first.name.replace(/\.[^.]*$/, "")));
+    } else if (first && crystalFormat(first.name)) keepWork(() => openCrystal(first.name, first.text!));
+    else if (first) keepWork(() => load(first.path ?? undefined, first.text!, first.name.replace(/\.[^.]*$/, "")));
   }
   // A picture file's bytes as a drawing of the picture alone (picture.ts), at 1 pt per pixel for a bond of `bond` pt,
   // when it fits in `room` bytes; otherwise a notice that starts with `failed`.
@@ -1684,6 +1704,10 @@ export default function Editor() {
         const room = MAX_PICTURE - pictureBytes(now.current) - mols.reduce((n, x) => n + pictureBytes(x), 0);
         const m = await pictureDrawing(fromBase64(f.picture), style.bond, room, `Octet cannot insert ${f.name}.`);
         if (m) mols.push(m);
+        continue;
+      }
+      if (crystalFormat(f.name)) {
+        try { mols.push(crystalOf(f.name, f.text!)); } catch (e) { setNotice(failure(`Octet cannot insert ${f.name}.`, e)); }
         continue;
       }
       try {
@@ -1842,6 +1866,7 @@ export default function Editor() {
     try {
       const picked = await invoke<[string, string] | null>("import_structure");
       if (!picked) return;
+      if (crystalFormat(picked[0])) return place(crystalOf(picked[0], picked[1]));
       if (picked[1].startsWith(BASE64_MAGIC) || /<CDXML[\s>/]/.test(picked[1].slice(0, 65536))) {
         // A ChemDraw drawing (CDXML or CDX): all of it, arrows and text too, to the right of what is there, its text in
         // proportion to this drawing (fitSizes).
@@ -6733,7 +6758,7 @@ export default function Editor() {
         else if (display !== "2d") { const y = make(g, display); if (y) m = { ...m, models: [...(m.models ?? []), y] }; }
       } else if (!x) continue;
       else if (verb === "update" || verb === "regenerate") {
-        const y = make(g, x.display, { style: x.style, look: x.look, hydrogensShown: x.hydrogensShown, labels: x.labels, scheme: x.scheme, size: x.size, offset: x.offset });
+        const y = make(g, x.display, { style: x.style === "ellipsoids" ? undefined : x.style, look: x.look, hydrogensShown: x.hydrogensShown, labels: x.labels, scheme: x.scheme, size: x.size, offset: x.offset });
         if (y) m = { ...m, models: m.models!.map((z, j) => (j === k ? y : z)) };
       } else if (verb === "style") change({ style: arg === "ballStick" ? undefined : (arg as Model3d["style"]) });
       // Hydrogens, labels, look and colours: each press steps on to the next.

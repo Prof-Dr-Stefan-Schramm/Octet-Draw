@@ -48,7 +48,7 @@ export function serialize(mol: Mol): string {
     ...(a.query ? { query: a.query } : {}), ...(a.peaks?.length ? { peaks: a.peaks } : {}), ...(a.inner?.atoms.length ? { inner: innerOut(a.inner) } : {}), ...scaled(a) }));
   const bonds = mol.bonds.map((b) => ({ atoms: b.atoms, type: b.type, ...(b.stereo ? { stereo: b.stereo } : {}), ...(b.display ? { display: b.display } : {}), ...(b.position ? { position: b.position } : {}), ...(b.colour ? { colour: b.colour } : {}), ...(b.halo ? { halo: b.halo } : {}), ...(b.ignoreWarnings ? { ignoreWarnings: true } : {}),
     ...(b.query ? { query: b.query } : {}), ...(b.topology ? { topology: b.topology } : {}), ...(b.rxn ? { rxn: b.rxn } : {}),
-    ...(b.spacing !== undefined ? { spacing: b.spacing } : {}), ...(b.own ? { own: b.own } : {}), ...(b.peaks?.length ? { peaks: b.peaks } : {}), ...(b.ports ? { ports: b.ports } : {}) }));
+    ...(b.spacing !== undefined ? { spacing: b.spacing } : {}), ...(b.own ? { own: b.own } : {}), ...(b.peaks?.length ? { peaks: b.peaks } : {}), ...(b.ports ? { ports: b.ports } : {}), ...(b.distance ? { distance: true } : {}) }));
   // Captions are saved in id order and arrows in their drawing order; ids are not saved. Conditions name their arrow
   // by its place in the list.
   const arrowList = [...(mol.arrows ?? [])];
@@ -269,6 +269,7 @@ export function parse(text: string): Mol {
     if (b.position) bond.position = b.position as Bond["position"];
     if (b.colour) bond.colour = b.colour as string;
     if (b.ignoreWarnings === true) bond.ignoreWarnings = true;
+    if (b.distance === true) bond.distance = true;
     if (Array.isArray(b.peaks) && b.peaks.length <= 64 && b.peaks.every((k) => int(k, 1, 1e9))) bond.peaks = [...new Set(b.peaks as number[])];
     // The kept atom each end joins, at a label that keeps its atoms (-1: none).
     if (b.ports !== undefined) {

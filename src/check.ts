@@ -127,6 +127,15 @@ const balanced = (text: string) => {
   return !open.length;
 };
 
+// The atoms of every structure that has a bond made from distances (a crystal file's, crystal.ts).
+export function distanceAtoms(m: Mol): Set<number> {
+  const out = new Set<number>(), near = new Map<number, number[]>();
+  if (!m.bonds.some((b) => b.distance)) return out;
+  for (const b of m.bonds) for (const [p, q] of [b.atoms, [b.atoms[1], b.atoms[0]]]) { if (!near.has(p)) near.set(p, []); near.get(p)!.push(q); }
+  const pending = m.bonds.filter((b) => b.distance).flatMap((b) => b.atoms);
+  while (pending.length) { const i = pending.pop()!; if (out.has(i)) continue; out.add(i); pending.push(...(near.get(i) ?? [])); }
+  return out;
+}
 // Every problem in the drawing, in the order Check Structure goes through them. stereo: Indigo's facts, for the
 // stereochemistry warnings (left out without them). all: problems on objects with their warnings hidden too.
 export function problems(m: Mol, stereo?: StereoFacts, all = false): Problem[] {
@@ -135,8 +144,11 @@ export function problems(m: Mol, stereo?: StereoFacts, all = false): Problem[] {
   const count = new Int32Array(m.atoms.length), two = new Int32Array(2 * m.atoms.length);
   m.bonds.forEach((b, k) => { for (const i of b.atoms) { if (count[i] < 2) two[2 * i + count[i]] = k; count[i]++; } });
   const least = m.bonds.some((b) => b.type === 4) ? bondOrders(m, (type) => (type === 4 ? 1 : orderOf(type))) : orders;
-  const atomOf = (i: number, p: Omit<Problem, "atom">) => { if (all || !m.atoms[i].ignoreWarnings) out.push({ atom: i, ...p, ...(m.atoms[i].ignoreWarnings ? { hidden: true as const } : {}) }); };
-  const bondOf = (k: number, p: Omit<Problem, "bond">) => { if (all || !m.bonds[k].ignoreWarnings) out.push({ bond: k, ...p, ...(m.bonds[k].ignoreWarnings ? { hidden: true as const } : {}) }); };
+  // A structure read from a crystal file has bonds Octet made from distances (crystal.ts): it is not chemistry a chemist
+  // drew, so Check leaves it out (rock salt's six-bonded Cl⁻ is no valence error).
+  const fromFile = distanceAtoms(m);
+  const atomOf = (i: number, p: Omit<Problem, "atom">) => { if (fromFile.has(i)) return; if (all || !m.atoms[i].ignoreWarnings) out.push({ atom: i, ...p, ...(m.atoms[i].ignoreWarnings ? { hidden: true as const } : {}) }); };
+  const bondOf = (k: number, p: Omit<Problem, "bond">) => { if (fromFile.has(m.bonds[k].atoms[0])) return; if (all || !m.bonds[k].ignoreWarnings) out.push({ bond: k, ...p, ...(m.bonds[k].ignoreWarnings ? { hidden: true as const } : {}) }); };
   const name = (i: number) => `${m.atoms[i].text ?? m.atoms[i].label}${i + 1}`;
   // A plain carbon: not a label (a carbon shown as C is one), an attachment mark or bead, or a multi-centre or variable
   // attachment.

@@ -145,7 +145,7 @@ fn read(path: &Path, name: &str) -> Result<String, String> {
     match fs::metadata(path) {
         Err(_) => Err("This file is not where it was. It was moved or deleted.".into()),
         Ok(m) if m.len() > MAX_BYTES => Err("This file is larger than 64 MB. Octet cannot open it.".into()),
-        Ok(_) => crate::read_text_or_cdx(path).map_err(|_| format!("Octet cannot open {name}. It opens Octet and ChemDraw drawings (CDX and CDXML), ChemDraw template files, MOL, SDF, RXN, SMILES and InChI files, JCAMP-DX spectra, and pictures.")),
+        Ok(_) => crate::read_text_or_cdx(path).map_err(|_| format!("Octet cannot open {name}. It opens Octet and ChemDraw drawings (CDX and CDXML), ChemDraw template files, MOL, SDF, RXN, SMILES and InChI files, CIF, PDB, POSCAR and XYZ files, JCAMP-DX spectra, and pictures.")),
     }
 }
 
@@ -184,6 +184,18 @@ mod tests {
         let args = ["/Applications/Octet.app/Contents/MacOS/octet", "-psn_0_12345", "aspirin.oct", "/tmp/b.cdxml"].map(OsString::from);
         assert_eq!(from_args(args, cwd), [PathBuf::from("/Users/me/Desktop/aspirin.oct"), PathBuf::from("/tmp/b.cdxml")]);
         assert!(from_args([OsString::from("octet")], cwd).is_empty());
+    }
+
+    #[test]
+    fn crystal_files_are_known_by_name() {
+        for name in ["NaCl.CIF", "1abc.pdb", "x.ent", "rutile.vasp", "POSCAR", "CONTCAR_relaxed", "POSCAR.1", "water.xyz", "si.extxyz"] {
+            assert!(crate::is_crystal_file(Path::new(name)), "{name}");
+        }
+        for name in ["drawing.oct", "a.mol", "notes.txt", "POSCAR study.oct"] {
+            assert!(!crate::is_crystal_file(Path::new(name)), "{name}");
+        }
+        // A crystal file is never a drawing Octet saves over.
+        assert!(!DRAWINGS.contains(&"cif"));
     }
 
     #[test]
